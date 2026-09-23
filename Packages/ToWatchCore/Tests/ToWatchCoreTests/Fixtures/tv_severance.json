@@ -1,0 +1,287 @@
+{
+ "adult": false,
+ "backdrop_path": "/ixgFmf1X59PUZam2qbAfskx2gQr.jpg",
+ "created_by": [
+  {
+   "id": 3442409,
+   "credit_id": "6217f14d0e597b00412768f1",
+   "name": "Dan Erickson",
+   "original_name": "Dan Erickson",
+   "gender": 2,
+   "profile_path": "/qzQ30V43kbVoMjJXRw6ydkicXEP.jpg"
+  }
+ ],
+ "episode_run_time": [],
+ "first_air_date": "2022-02-17",
+ "genres": [
+  {
+   "id": 18,
+   "name": "Drama"
+  },
+  {
+   "id": 9648,
+   "name": "Mystery"
+  },
+  {
+   "id": 10765,
+   "name": "Sci-Fi & Fantasy"
+  }
+ ],
+ "homepage": "https://tv.apple.com/show/umc.cmc.1srk2goyh2q2zdxcx605w8vtx",
+ "id": 95396,
+ "in_production": true,
+ "languages": [
+  "en"
+ ],
+ "last_air_date": "2025-03-20",
+ "last_episode_to_air": {
+  "id": 5469142,
+  "name": "Cold Harbor",
+  "overview": "Mark forms a shaky alliance in an all-or-nothing play, while the team makes a dangerous last stand.",
+  "vote_average": 8.669,
+  "vote_count": 121,
+  "air_date": "2025-03-20",
+  "episode_number": 10,
+  "episode_type": "finale",
+  "production_code": "210",
+  "runtime": 80,
+  "season_number": 2,
+  "show_id": 95396,
+  "still_path": "/gXUvGwpZxrpqMRouxM7yI28lgNa.jpg"
+ },
+ "name": "Severance",
+ "next_episode_to_air": null,
+ "networks": [
+  {
+   "id": 2552,
+   "logo_path": "/bngHRFi794mnMq34gfVcm9nDxN1.png",
+   "name": "Apple TV",
+   "origin_country": ""
+  }
+ ],
+ "number_of_episodes": 19,
+ "number_of_seasons": 3,
+ "origin_country": [
+  "US"
+ ],
+ "original_language": "en",
+ "original_name": "Severance",
+ "overview": "Mark leads a team of office workers whose memories have been surgically divided between their work and personal lives. When a mysterious colleague appears outside of work, it begins a journey to discover the truth about their jobs.",
+ "popularity": 53.9797,
+ "poster_path": "/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg",
+ "production_companies": [
+  {
+   "id": 100640,
+   "logo_path": "/5BR67T28TVm2UMH8GCRDftafsaJ.png",
+   "name": "Endeavor Content",
+   "origin_country": "US"
+  },
+  {
+   "id": 2932,
+   "logo_path": "/4uLKLjGivVg2YnAIhAn8k7ZuVFj.png",
+   "name": "Red Hour",
+   "origin_country": "US"
+  },
+  {
+   "id": 181874,
+   "logo_path": "/crrgXvLhDO9c57HYrbO4H58Vxmb.png",
+   "name": "Fifth Season",
+   "origin_country": "US"
+  },
+  {
+   "id": 254490,
+   "logo_path": null,
+   "name": "Animals & People",
+   "origin_country": "US"
+  },
+  {
+   "id": 166623,
+   "logo_path": "/rvmwTPf8K4tMFCSqzS4rKs9K0Eo.png",
+   "name": "Westward",
+   "origin_country": "US"
+  }
+ ],
+ "production_countries": [
+  {
+   "iso_3166_1": "US",
+   "name": "United States of America"
+  }
+ ],
+ "seasons": [
+  {
+   "air_date": "2021-12-15",
+   "episode_count": 1,
+   "id": 443382,
+   "name": "Specials",
+   "overview": "",
+   "poster_path": "/f3E2o8DbW9QSzu31yY3Q1av5JO7.jpg",
+   "season_number": 0,
+   "vote_average": 0.0
+  },
+  {
+   "air_date": "2022-02-17",
+   "episode_count": 9,
+   "id": 135726,
+   "name": "Season 1",
+   "overview": "At Lumon Industries, employees undergo \"severance,\" a procedure dividing their work and personal memories. Mark, a grieving team leader, begins to uncover the dark secrets of the company, forcing him and his coworkers to confront questions of identity, free will, and corporate control.",
+   "poster_path": "/lFf6LLrQjYldcZItzOkGmMMigP7.jpg",
+   "season_number": 1,
+   "vote_average": 8.4
+  },
+  {
+   "air_date": "2025-01-16",
+   "episode_count": 10,
+   "id": 401674,
+   "name": "Season 2",
+   "overview": "Mark and his friends learn the dire consequences of trifling with the severance barrier, leading them further down a path of woe.",
+   "poster_path": "/Rb7sga832Cyqvafd7CqOzbwdK4.jpg",
+   "season_number": 2,
+   "vote_average": 8.0
+  },
+  {
+   "air_date": null,
+   "episode_count": 0,
+   "id": 447475,
+   "name": "Season 3",
+   "overview": "",
+   "poster_path": null,
+   "season_number": 3,
+   "vote_average": 0.0
+  }
+ ],
+ "softcore": false,
+ "spoken_languages": [
+  {
+   "english_name": "English",
+   "iso_639_1": "en",
+   "name": "English"
+  }
+ ],
+ "status": "Returning Series",
+ "tagline": "There's more to work than life.",
+ "type": "Scripted",
+ "vote_average": 8.392,
+ "vote_count": 2972,
+ "credits": {
+  "cast": [
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 36801,
+    "known_for_department": "Acting",
+    "name": "Adam Scott",
+    "original_name": "Adam Scott",
+    "popularity": 3.1179,
+    "profile_path": "/b82C29R6fGiPoqIglQ4lzS6q2YX.jpg",
+    "character": "Mark Scout",
+    "credit_id": "5dcc356879a1c3001344f9ea",
+    "order": 0
+   },
+   {
+    "adult": false,
+    "gender": 1,
+    "id": 973497,
+    "known_for_department": "Acting",
+    "name": "Britt Lower",
+    "original_name": "Britt Lower",
+    "popularity": 2.4478,
+    "profile_path": "/5XIcTMDSyj7hRICQAcnY9U83ujF.jpg",
+    "character": "Helly Riggs",
+    "credit_id": "5e2784b7ed2ac200153a7948",
+    "order": 1
+   },
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 2028037,
+    "known_for_department": "Acting",
+    "name": "Tramell Tillman",
+    "original_name": "Tramell Tillman",
+    "popularity": 1.9531,
+    "profile_path": "/bEA15zMnkcXlRroYjKrFUWiiK7y.jpg",
+    "character": "Seth Milchick",
+    "credit_id": "5f9c52d69ee0ef00397decc0",
+    "order": 2
+   },
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 1838225,
+    "known_for_department": "Acting",
+    "name": "Zach Cherry",
+    "original_name": "Zach Cherry",
+    "popularity": 5.3959,
+    "profile_path": "/fT3Wv8ef0Vn0daHWAObCp2Bd4Y.jpg",
+    "character": "Dylan George",
+    "credit_id": "5f9c515efdfc9f003738bfb7",
+    "order": 3
+   },
+   {
+    "adult": false,
+    "gender": 1,
+    "id": 1569165,
+    "known_for_department": "Acting",
+    "name": "Jen Tullock",
+    "original_name": "Jen Tullock",
+    "popularity": 1.1042,
+    "profile_path": "/91vck8hZ1VZGV6PTcwFWEEdzGE0.jpg",
+    "character": "Devon Scout-Hale",
+    "credit_id": "5f9c513ffdfc9f0035387b69",
+    "order": 4
+   }
+  ],
+  "crew": []
+ },
+ "videos": {
+  "results": [
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "Mark and Helly: A Love Story",
+    "key": "ufaAnhgiERE",
+    "site": "YouTube",
+    "size": 1080,
+    "type": "Featurette",
+    "official": true,
+    "id": "68ae20c66776f2e6733d872a",
+    "published_at": "2025-08-23T14:59:55.000Z"
+   },
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "Britt Lower's Casting Tape",
+    "key": "h61VI_62KYA",
+    "site": "YouTube",
+    "size": 1080,
+    "type": "Behind the Scenes",
+    "official": true,
+    "id": "68a4f4d89ecdba47d7bcb18b",
+    "published_at": "2025-08-19T21:59:53.000Z"
+   },
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "Dichen's Casting Tape",
+    "key": "fgtlNQDP-XA",
+    "site": "YouTube",
+    "size": 1080,
+    "type": "Behind the Scenes",
+    "official": true,
+    "id": "68ae4e66404463089e0f88ac",
+    "published_at": "2025-06-20T16:03:05.000Z"
+   },
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "Official Intro Title Sequence",
+    "key": "NmS3m0OG-Ug",
+    "site": "YouTube",
+    "size": 2160,
+    "type": "Opening Credits",
+    "official": false,
+    "id": "6639c3ca66565a012616eda1",
+    "published_at": "2022-02-23T13:00:21.000Z"
+   }
+  ]
+ }
+}

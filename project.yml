@@ -1,0 +1,57 @@
+name: ToWatchDB
+options:
+  bundleIdPrefix: com.mehdi
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "15.0"
+    iOS: "18.0"
+configFiles:
+  Debug: Config/App.xcconfig
+  Release: Config/App.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  ToWatchCore:
+    path: Packages/ToWatchCore
+targets:
+  ToWatchDB:
+    type: application
+    supportedDestinations: [macOS]
+    sources:
+      - path: ToWatchDB
+    dependencies:
+      - package: ToWatchCore
+    info:
+      path: ToWatchDB/Info.plist
+      properties:
+        CFBundleDisplayName: ToWatchDB
+        LSApplicationCategoryType: public.app-category.entertainment
+        TMDBReadToken: $(TMDB_READ_TOKEN)
+    entitlements:
+      path: ToWatchDB/ToWatchDB.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mehdi.towatchdb
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_STRICT_CONCURRENCY: complete
+schemes:
+  ToWatchDB:
+    build:
+      targets:
+        ToWatchDB: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: ToWatchCore/ToWatchCoreTests

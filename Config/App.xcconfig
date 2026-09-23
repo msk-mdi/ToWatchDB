@@ -1,0 +1,4 @@
+// Shared build settings. Secrets are optional so the project builds without them;
+// a token can also be set at runtime in Settings.
+TMDB_READ_TOKEN =
+#include? "Secrets.xcconfig"

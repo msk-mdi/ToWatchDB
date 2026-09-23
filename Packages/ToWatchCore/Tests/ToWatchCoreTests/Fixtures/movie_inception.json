@@ -1,0 +1,223 @@
+{
+ "adult": false,
+ "backdrop_path": "/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg",
+ "belongs_to_collection": null,
+ "budget": 160000000,
+ "genres": [
+  {
+   "id": 28,
+   "name": "Action"
+  },
+  {
+   "id": 878,
+   "name": "Science Fiction"
+  },
+  {
+   "id": 12,
+   "name": "Adventure"
+  }
+ ],
+ "homepage": "https://www.warnerbros.com/movies/inception",
+ "id": 27205,
+ "imdb_id": "tt1375666",
+ "origin_country": [
+  "US",
+  "GB"
+ ],
+ "original_language": "en",
+ "original_title": "Inception",
+ "overview": "Cobb, a skilled thief who commits corporate espionage by infiltrating the subconscious of his targets is offered a chance to regain his old life as payment for a task considered to be impossible: \"inception\", the implantation of another person's idea into a target's subconscious.",
+ "popularity": 59.0515,
+ "poster_path": "/xlaY2zyzMfkhk0HSC5VUwzoZPU1.jpg",
+ "production_companies": [
+  {
+   "id": 174,
+   "logo_path": "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png",
+   "name": "Warner Bros. Pictures",
+   "origin_country": "US"
+  }
+ ],
+ "production_countries": [
+  {
+   "iso_3166_1": "GB",
+   "name": "United Kingdom"
+  },
+  {
+   "iso_3166_1": "US",
+   "name": "United States of America"
+  }
+ ],
+ "release_date": "2010-07-15",
+ "revenue": 839030630,
+ "runtime": 148,
+ "softcore": false,
+ "spoken_languages": [
+  {
+   "english_name": "English",
+   "iso_639_1": "en",
+   "name": "English"
+  },
+  {
+   "english_name": "French",
+   "iso_639_1": "fr",
+   "name": "Fran\u00e7ais"
+  },
+  {
+   "english_name": "Japanese",
+   "iso_639_1": "ja",
+   "name": "\u65e5\u672c\u8a9e"
+  },
+  {
+   "english_name": "Swahili",
+   "iso_639_1": "sw",
+   "name": "Kiswahili"
+  }
+ ],
+ "status": "Released",
+ "tagline": "Your mind is the scene of the crime.",
+ "title": "Inception",
+ "video": false,
+ "vote_average": 8.373,
+ "vote_count": 40242,
+ "credits": {
+  "cast": [
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 6193,
+    "known_for_department": "Acting",
+    "name": "Leonardo DiCaprio",
+    "original_name": "Leonardo DiCaprio",
+    "popularity": 8.7227,
+    "profile_path": "/wo2hJpn04vbtmh0B9utCFdsQhxM.jpg",
+    "cast_id": 1,
+    "character": "Dom Cobb",
+    "credit_id": "52fe4534c3a368484e04de03",
+    "order": 0
+   },
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 24045,
+    "known_for_department": "Acting",
+    "name": "Joseph Gordon-Levitt",
+    "original_name": "Joseph Gordon-Levitt",
+    "popularity": 6.6788,
+    "profile_path": "/z2FA8js799xqtfiFjBTicFYdfk.jpg",
+    "cast_id": 3,
+    "character": "Arthur",
+    "credit_id": "52fe4534c3a368484e04de0b",
+    "order": 1
+   },
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 3899,
+    "known_for_department": "Acting",
+    "name": "Ken Watanabe",
+    "original_name": "\u6e21\u8fba\u8b19",
+    "popularity": 3.3737,
+    "profile_path": "/psAXOYp9SBOXvg6AXzARDedNQ9P.jpg",
+    "cast_id": 2,
+    "character": "Saito",
+    "credit_id": "52fe4534c3a368484e04de07",
+    "order": 2
+   },
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 2524,
+    "known_for_department": "Acting",
+    "name": "Tom Hardy",
+    "original_name": "Tom Hardy",
+    "popularity": 10.2333,
+    "profile_path": "/d81K0RH8UX7tZj49tZaQhZ9ewH.jpg",
+    "cast_id": 7,
+    "character": "Eames",
+    "credit_id": "52fe4534c3a368484e04de1b",
+    "order": 3
+   },
+   {
+    "adult": false,
+    "gender": 3,
+    "id": 27578,
+    "known_for_department": "Acting",
+    "name": "Elliot Page",
+    "original_name": "Elliot Page",
+    "popularity": 5.31,
+    "profile_path": "/wSdlM4Qyoi5AGj5eIIp8Bm0Sfkz.jpg",
+    "cast_id": 5,
+    "character": "Ariadne",
+    "credit_id": "52fe4534c3a368484e04de13",
+    "order": 4
+   }
+  ],
+  "crew": [
+   {
+    "adult": false,
+    "gender": 2,
+    "id": 525,
+    "known_for_department": "Directing",
+    "name": "Christopher Nolan",
+    "original_name": "Christopher Nolan",
+    "popularity": 9.3597,
+    "profile_path": "/xuAIuYSmsUzKlUMBFGVZaWsY3DZ.jpg",
+    "credit_id": "5e83ac2ee33f830018359a00",
+    "department": "Directing",
+    "job": "Director"
+   }
+  ]
+ },
+ "videos": {
+  "results": [
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "The Dream Sequence",
+    "key": "mpj9dL7swwk",
+    "site": "YouTube",
+    "size": 720,
+    "type": "Clip",
+    "official": true,
+    "id": "622d5cc322931a00454e588c",
+    "published_at": "2022-03-09T01:00:20.000Z"
+   },
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "35mm Theatrical Trailer #3",
+    "key": "cdx31ak4KbQ",
+    "site": "YouTube",
+    "size": 2160,
+    "type": "Trailer",
+    "official": false,
+    "id": "653c6111c8a5ac00e3a09f82",
+    "published_at": "2022-03-07T06:00:19.000Z"
+   },
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "The Final Scene",
+    "key": "k5DTbekB86s",
+    "site": "YouTube",
+    "size": 720,
+    "type": "Clip",
+    "official": true,
+    "id": "622c37f7a579f90046e2824e",
+    "published_at": "2022-03-06T16:00:31.000Z"
+   },
+   {
+    "iso_639_1": "en",
+    "iso_3166_1": "US",
+    "name": "Christopher Nolan & Leonardo DiCaprio on Inception | Film4 Interview Special Archives",
+    "key": "SBmxYERafeU",
+    "site": "YouTube",
+    "size": 1080,
+    "type": "Featurette",
+    "official": true,
+    "id": "623305b4109cd0001bc00bf7",
+    "published_at": "2020-02-07T10:45:20.000Z"
+   }
+  ]
+ }
+}

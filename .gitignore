@@ -1,0 +1,10 @@
+.DS_Store
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+build/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+# Secrets: never commit
+Config/Secrets.xcconfig
+ToWatchDB.xcodeproj/

@@ -297,3 +297,65 @@ private let now = date("2026-09-23")
     library.update(list, name: "Favorite Shows", symbolName: "heart", colorName: "pink", rules: rules)
     #expect(list.rules.favoritesOnly && list.name == "Favorite Shows")
 }
+
+// MARK: - Stats
+
+private var utcCalendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .gmt
+    return calendar
+}
+
+@MainActor @Test func statsByPeriod() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+    let season1 = try #require(show.sortedSeasons.first { $0.seasonNumber == 1 })
+
+    library.setWatched(movie, true, on: date("2024-12-31"))
+    library.setWatched(season1, true, on: date("2025-03-10"), now: now)
+    let undated = Movie(tmdbID: 2, title: "Undated")
+    undated.runtime = 100
+    library.context.insert(undated)
+    library.setWatched(undated, true, on: nil)
+
+    let calendar = utcCalendar
+    let y2025 = StatsService.stats(movies: [movie, undated], shows: [show], period: .year(2025), now: now, calendar: calendar)
+    let s1Minutes = season1.sortedEpisodes.compactMap(\.runtime).reduce(0, +)
+    #expect(y2025.moviesWatched == 0)
+    #expect(y2025.episodesWatched == 9)
+    #expect(y2025.showsWatched == 1)
+    #expect(y2025.episodeMinutes == s1Minutes && s1Minutes > 0)
+    #expect(y2025.mostWatchedShow?.name == "Severance")
+    #expect(y2025.activity.count == 12, "one bucket per month")
+    #expect(y2025.granularity == .month)
+    #expect(y2025.activity[2].episodes == 9, "all in March")
+    #expect(y2025.topGenres.map(\.name).contains("Drama"))
+    #expect(y2025.undatedWatches == 1)
+
+    let y2024 = StatsService.stats(movies: [movie, undated], shows: [show], period: .year(2024), now: now, calendar: calendar)
+    #expect(y2024.moviesWatched == 1 && y2024.movieMinutes == 148)
+    #expect(y2024.longestMovie?.name == "Inception")
+    #expect(y2024.topActors.contains { $0.name == "Leonardo DiCaprio" })
+    #expect(y2024.activity[11].movies == 1, "December")
+
+    let all = StatsService.stats(movies: [movie, undated], shows: [show], period: .allTime, now: now, calendar: calendar)
+    #expect(all.moviesWatched == 2, "undated watches count toward all time")
+    #expect(all.totalMinutes == 148 + 100 + s1Minutes)
+    #expect(all.posterPaths.first == show.posterPath, "most recent first")
+
+    #expect(StatsService.watchYears(movies: [movie, undated], shows: [show], calendar: calendar) == [2025, 2024])
+}
+
+@Test func statsPeriodsAndRanking() {
+    let calendar = utcCalendar
+    let week = StatsPeriod.lastDays(7).interval(now: date("2026-09-23"), calendar: calendar)
+    #expect(week?.start == date("2026-09-17") && week?.end == date("2026-09-24"))
+    #expect(StatsService.granularity(for: week!) == .day)
+    #expect(StatsService.granularity(for: StatsPeriod.year(2025).interval(calendar: calendar)!) == .month)
+    #expect(StatsPeriod.allTime.interval() == nil)
+
+    let ranked = StatsService.rank([("a", "Drama", nil), ("b", "Action", nil), ("a", "Drama", nil), ("c", "Comedy", nil)], limit: 2)
+    #expect(ranked.map(\.name) == ["Drama", "Action"], "count first, then alphabetical")
+    #expect(ranked.first?.count == 2)
+}

@@ -132,6 +132,9 @@ struct CollectionShortcuts: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
+                NavigationLink(value: StatsRoute()) {
+                    CollectionChip(name: "Stats", symbol: "chart.bar.xaxis", color: .accentColor)
+                }
                 ForEach(spaces) { space in
                     NavigationLink(value: LibraryScope.space(space.uuid)) {
                         CollectionChip(name: space.name, symbol: space.symbolName, color: space.color)
@@ -160,6 +163,9 @@ struct CollectionShortcuts: View {
 
 /// Navigation value for the Organize screen.
 struct OrganizeRoute: Hashable {}
+
+/// Navigation value for Stats, pushed from the iPhone Library tab.
+struct StatsRoute: Hashable {}
 
 /// Create, edit, and delete spaces, smart lists, and tags.
 struct OrganizeView: View {

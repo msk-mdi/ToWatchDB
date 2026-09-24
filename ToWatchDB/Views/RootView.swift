@@ -79,6 +79,9 @@ struct RootView: View {
                 Tab("Watched", systemImage: "checkmark.circle", value: AppTab.watched) {
                     NavigationStack { LibraryView(scope: .watched).appDestinations() }
                 }
+                Tab("Stats", systemImage: "chart.bar.xaxis", value: AppTab.stats) {
+                    NavigationStack { StatsView().appDestinations() }
+                }
             }
 
             TabSection("Library") {
@@ -127,7 +130,8 @@ struct RootView: View {
         .tabViewStyle(.sidebarAdaptable)
     }
 
-    /// iPhone: five tabs; the library scopes collapse into one tab with a scope picker.
+    /// iPhone: four tabs plus Search (a fifth would push Search into "More"). The library scopes
+    /// collapse into one tab with a scope picker; Stats and collections are chips under it.
     private var compactTabs: some View {
         @Bindable var appState = appState
         return TabView(selection: $appState.selectedTab) {
@@ -158,6 +162,7 @@ extension View {
             .navigationDestination(for: MediaSummary.self) { RemoteDetailView(summary: $0) }
             .navigationDestination(for: LibraryScope.self) { LibraryView(scope: $0, showsSettingsButton: false) }
             .navigationDestination(for: OrganizeRoute.self) { _ in OrganizeView() }
+            .navigationDestination(for: StatsRoute.self) { _ in StatsView() }
     }
 
     /// iOS toolbar button that opens Settings; macOS has a Settings menu item instead.
@@ -191,7 +196,7 @@ extension AppTab {
     /// Tabs that exist only in the sidebar layout; iPhone reaches them from the Library tab.
     var isSidebarOnly: Bool {
         switch self {
-        case .backlog, .watched, .movies, .shows, .organize, .space, .tag, .smartList: true
+        case .backlog, .watched, .movies, .shows, .organize, .stats, .space, .tag, .smartList: true
         default: false
         }
     }

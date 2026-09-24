@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.entertainment</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save your Year in Review card to your photo library.</string>
 	<key>TMDBReadToken</key>
 	<string>$(TMDB_READ_TOKEN)</string>
 	<key>UIApplicationSceneManifest</key>

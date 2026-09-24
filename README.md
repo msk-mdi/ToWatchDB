@@ -7,6 +7,10 @@ Organize with **spaces** (curated collections with an icon and color), **tags**,
 (saved filters by type, status, genre, rating, year, tags, spaces, backlog, favorites). Create them from
 File ▸ New…, the Organize screen, or a title's "Spaces & Tags" menu; drop posters on a space or tag to file them.
 
+**Stats** show watch time, movies, episodes, and shows for a week, month, 30/90 days, a year, or all time,
+with monthly activity, top genres and actors, highlights, a comparison with another year, and a shareable
+**Year in Review** card. (Mac/iPad: sidebar; iPhone: the Stats chip in the Library tab.)
+
 On iPad and Mac, any title can open in its own window, posters drag into the library or backlog
 (or out to other apps as a TMDB link), and the Title menu acts on the title on screen:
 ⇧⌘E mark watched / next episode, ⇧⌘B backlog, ⇧⌘L favorite, ⇧⌘R refresh.

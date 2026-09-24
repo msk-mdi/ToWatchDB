@@ -89,6 +89,8 @@ struct AppCommands: Commands {
                 .keyboardShortcut("3")
             Button("All Titles") { appState.selectedTab = .all }
                 .keyboardShortcut("4")
+            Button("Stats") { appState.selectedTab = .stats }
+                .keyboardShortcut("5")
         }
         CommandMenu("Title") { titleCommands }
     }

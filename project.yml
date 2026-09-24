@@ -31,6 +31,7 @@ targets:
         LSApplicationCategoryType: public.app-category.entertainment
         TMDBReadToken: $(TMDB_READ_TOKEN)
         UILaunchScreen: {}
+        NSPhotoLibraryAddUsageDescription: Save your Year in Review card to your photo library.
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.mehdi.towatchdb.title
             UTTypeDescription: ToWatchDB Title

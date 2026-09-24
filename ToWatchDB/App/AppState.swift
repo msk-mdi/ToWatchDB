@@ -4,7 +4,7 @@ import SwiftData
 import ToWatchCore
 
 enum AppTab: Hashable {
-    case discover, search, all, movies, shows, nextToWatch, upcoming, backlog, watched, organize
+    case discover, search, all, movies, shows, nextToWatch, upcoming, backlog, watched, organize, stats
     case space(UUID), tag(UUID), smartList(UUID)
 }
 

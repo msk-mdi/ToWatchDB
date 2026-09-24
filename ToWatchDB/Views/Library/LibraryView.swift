@@ -8,19 +8,29 @@ struct LibraryView: View {
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
-    let scope: LibraryScope
+    @State private var scope: LibraryScope
+    /// iPhone shows one Library tab with a scope picker instead of separate sidebar entries.
+    let allowsScopeChange: Bool
     @State private var statusFilter: WatchStatus?
     @State private var sort: LibrarySort
     @State private var searchText = ""
 
-    init(scope: LibraryScope) {
-        self.scope = scope
-        _sort = State(initialValue: scope == .watched ? .lastWatched : .added)
+    init(scope: LibraryScope, allowsScopeChange: Bool = false) {
+        _scope = State(initialValue: scope)
+        self.allowsScopeChange = allowsScopeChange
+        _sort = State(initialValue: scope.defaultSort)
     }
 
     var body: some View {
         let items = filteredItems
         ScrollView {
+            if allowsScopeChange {
+                Picker("Show", selection: $scope) {
+                    ForEach(LibraryScope.allCases, id: \.self) { Text($0.shortTitle).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+            }
             if items.isEmpty {
                 emptyState
             } else {
@@ -32,28 +42,47 @@ struct LibraryView: View {
                 .padding()
             }
         }
-        .navigationTitle(scope.title)
+        .navigationTitle(allowsScopeChange ? "Library" : scope.title)
         .navigationSubtitleIfAvailable("\(items.count) title\(items.count == 1 ? "" : "s")")
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Filter \(scope.title.lowercased())")
+        .searchable(text: $searchText, placement: .adaptiveToolbar, prompt: "Filter \(scope.title.lowercased())")
         .toolbar {
-            ToolbarItemGroup {
-                if scope != .watched {
-                    Picker("Status", selection: $statusFilter) {
-                        Text("Any Status").tag(WatchStatus?.none)
-                        Divider()
-                        ForEach(availableStatuses) { status in
-                            Label(status.label, systemImage: status.symbol).tag(Optional(status))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .fixedSize()
+            #if os(iOS)
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu("Filter and Sort", systemImage: statusFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") {
+                    statusPicker
+                    sortPicker
                 }
-                Picker("Sort", selection: $sort) {
-                    ForEach(LibrarySort.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()
             }
+            #else
+            ToolbarItemGroup {
+                statusPicker.pickerStyle(.menu).fixedSize()
+                sortPicker.pickerStyle(.menu).fixedSize()
+            }
+            #endif
+        }
+        .onChange(of: scope) { _, newScope in
+            statusFilter = nil
+            sort = newScope.defaultSort
+        }
+        .settingsToolbarButton(appState)
+    }
+
+    @ViewBuilder
+    private var statusPicker: some View {
+        if scope != .watched {
+            Picker("Status", selection: $statusFilter) {
+                Text("Any Status").tag(WatchStatus?.none)
+                Divider()
+                ForEach(availableStatuses) { status in
+                    Label(status.label, systemImage: status.symbol).tag(Optional(status))
+                }
+            }
+        }
+    }
+
+    private var sortPicker: some View {
+        Picker("Sort", selection: $sort) {
+            ForEach(LibrarySort.allCases) { Text($0.label).tag($0) }
         }
     }
 

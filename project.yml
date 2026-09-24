@@ -19,7 +19,7 @@ packages:
 targets:
   ToWatchDB:
     type: application
-    supportedDestinations: [macOS]
+    supportedDestinations: [macOS, iOS]
     sources:
       - path: ToWatchDB
     dependencies:
@@ -30,6 +30,11 @@ targets:
         CFBundleDisplayName: ToWatchDB
         LSApplicationCategoryType: public.app-category.entertainment
         TMDBReadToken: $(TMDB_READ_TOKEN)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     entitlements:
       path: ToWatchDB/ToWatchDB.entitlements
       properties:
@@ -44,6 +49,10 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: YES
         SWIFT_STRICT_CONCURRENCY: complete
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        # The sandbox entitlements are macOS-only.
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphone*]": ""
 schemes:
   ToWatchDB:
     build:

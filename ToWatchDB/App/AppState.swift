@@ -13,6 +13,8 @@ final class AppState {
     let container: ModelContainer
 
     var selectedTab: AppTab = .discover
+    /// iOS presents Settings as a sheet (macOS uses the Settings scene).
+    var isShowingSettings = false
     private(set) var isRefreshing = false
     var errorMessage: String?
 

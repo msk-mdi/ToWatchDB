@@ -72,8 +72,13 @@ enum LibraryItem: Identifiable, Hashable {
     }
 }
 
-enum LibraryScope: Hashable {
+enum LibraryScope: Hashable, CaseIterable {
     case all, movies, shows, backlog, watched
+
+    var defaultSort: LibrarySort { self == .watched ? .lastWatched : .added }
+
+    /// Short label for the iPhone segmented control.
+    var shortTitle: String { self == .shows ? "TV" : title }
 
     var title: String {
         switch self {

@@ -37,6 +37,7 @@ struct PosterImage: View {
 /// Wide backdrop image that fades into the window background.
 struct BackdropImage: View {
     let path: String?
+    var height: CGFloat = 320
 
     var body: some View {
         AsyncImage(url: TMDBImage.url(path, size: .backdrop)) { image in
@@ -44,7 +45,7 @@ struct BackdropImage: View {
         } placeholder: {
             LinearGradient(colors: [.accentColor.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
         }
-        .frame(height: 320)
+        .frame(height: height)
         .frame(maxWidth: .infinity)
         .clipped()
         .overlay {

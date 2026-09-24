@@ -17,6 +17,9 @@ struct SearchView: View {
     var body: some View {
         let ids = LibraryIDs(movies: movies, shows: shows)
         ScrollView {
+            #if os(iOS)
+            kindPicker.padding(.horizontal)
+            #endif
             if appState.client == nil {
                 MissingTokenView()
             } else if let searchError {
@@ -36,20 +39,23 @@ struct SearchView: View {
             }
         }
         .navigationTitle("Search")
-        .searchable(text: $query, placement: .toolbar, prompt: kind == .movie ? "Search movies" : "Search TV shows")
+        .searchable(text: $query, placement: .adaptiveToolbar, prompt: kind == .movie ? "Search movies" : "Search TV shows")
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Type", selection: $kind) {
-                    ForEach(MediaSummary.Kind.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-            }
+            #if os(macOS)
+            ToolbarItem(placement: .principal) { kindPicker.fixedSize() }
+            #endif
             if isSearching {
                 ToolbarItem { ProgressView().controlSize(.small) }
             }
         }
         .task(id: "\(kind.rawValue):\(trimmedQuery)") { await search() }
+    }
+
+    private var kindPicker: some View {
+        Picker("Type", selection: $kind) {
+            ForEach(MediaSummary.Kind.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
     }
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -78,11 +78,23 @@ struct RemotePosterCard: View {
 
 /// Adaptive poster grid used by search, discover, and library views.
 struct PosterGrid<Content: View>: View {
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     @ViewBuilder let content: Content
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 16, alignment: .top)], spacing: 20) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: minimumWidth, maximum: 200), spacing: 12, alignment: .top)], spacing: 20) {
             content
         }
+    }
+
+    /// Three columns on iPhone, larger posters with more room elsewhere.
+    private var minimumWidth: CGFloat {
+        #if os(iOS)
+        sizeClass == .compact ? 100 : 140
+        #else
+        140
+        #endif
     }
 }

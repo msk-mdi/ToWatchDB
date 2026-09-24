@@ -3,6 +3,13 @@ import ToWatchCore
 
 /// Common detail page: backdrop, poster + title header, actions, overview, facts, extra content, and cast.
 struct DetailLayout<Actions: View, Extra: View>: View {
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var isCompact: Bool { sizeClass == .compact }
+    #else
+    private let isCompact = false
+    #endif
+
     let title: String
     let subtitle: String
     let posterPath: String?
@@ -18,26 +25,29 @@ struct DetailLayout<Actions: View, Extra: View>: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                BackdropImage(path: backdropPath)
+                BackdropImage(path: backdropPath, height: isCompact ? 220 : 320)
 
-                HStack(alignment: .bottom, spacing: 20) {
+                HStack(alignment: .bottom, spacing: isCompact ? 14 : 20) {
                     PosterImage(path: posterPath, size: .posterLarge, cornerRadius: 10)
-                        .frame(width: 170)
+                        .frame(width: isCompact ? 110 : 170)
                         .shadow(radius: 12, y: 6)
                     VStack(alignment: .leading, spacing: 8) {
                         Text(title)
-                            .font(.largeTitle.bold())
+                            .font(isCompact ? .title2.bold() : .largeTitle.bold())
                             .textSelection(.enabled)
                         Text(subtitle)
                             .foregroundStyle(.secondary)
                         if !genres.isEmpty {
-                            HStack { ForEach(genres, id: \.self) { Chip(text: $0) } }
+                            ViewThatFits(in: .horizontal) {
+                                HStack { ForEach(genres, id: \.self) { Chip(text: $0) } }
+                                HStack { ForEach(genres.prefix(2), id: \.self) { Chip(text: $0) } }
+                            }
                         }
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, -150)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, isCompact ? -90 : -150)
 
                 VStack(alignment: .leading, spacing: 24) {
                     actions
@@ -73,11 +83,40 @@ struct DetailLayout<Actions: View, Extra: View>: View {
                         CastRow(cast: cast)
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, horizontalPadding)
                 .padding(.bottom, 32)
             }
         }
         .ignoresSafeArea(edges: .top)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    private var horizontalPadding: CGFloat { isCompact ? 16 : 24 }
+}
+
+/// A row of detail actions: scrolls sideways on iPhone instead of overflowing.
+struct ActionBar<Content: View>: View {
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        #if os(iOS)
+        if sizeClass == .compact {
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) { content }.padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+            .buttonStyle(.bordered)
+        } else {
+            HStack(spacing: 12) { content }.buttonStyle(.bordered)
+        }
+        #else
+        HStack(spacing: 12) { content }
+        #endif
     }
 }
 
@@ -131,7 +170,16 @@ struct ExternalLinks: View {
     var homepage: String?
 
     var body: some View {
-        HStack(spacing: 16) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) { links }
+            VStack(alignment: .leading, spacing: 8) { links }
+        }
+        .font(.callout)
+    }
+
+    @ViewBuilder
+    private var links: some View {
+        Group {
             if let trailerKey, let url = URL(string: "https://www.youtube.com/watch?v=\(trailerKey)") {
                 Link(destination: url) { Label("Trailer", systemImage: "play.rectangle") }
             }
@@ -145,6 +193,5 @@ struct ExternalLinks: View {
                 Link(destination: url) { Label("Website", systemImage: "globe") }
             }
         }
-        .font(.callout)
     }
 }

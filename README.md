@@ -1,6 +1,7 @@
 # ToWatchDB
 
-A movie and TV tracker for macOS (iOS and iPadOS next), built with SwiftUI + SwiftData on top of TMDB.
+A movie and TV tracker for macOS and iOS (iPadOS polish next), built with SwiftUI + SwiftData on top of TMDB.
+One multiplatform target: a sidebar on Mac and iPad, five compact tabs on iPhone.
 
 ## Setup
 
@@ -21,7 +22,10 @@ The Xcode project is generated from `project.yml` — edit that, not the `.xcode
 ```bash
 cd Packages/ToWatchCore && swift test
 xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'platform=macOS' test
-# Debug visual pass: seeds sample titles into an in-memory store and writes a PNG per screen
+xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'platform=iOS Simulator,name=iPhone 17' build
+# Debug builds: seed sample titles into a throwaway in-memory store (any platform)
+xcrun simctl launch booted com.mehdi.towatchdb -UISeedSampleData YES
+# macOS: also visit each screen, write a PNG per screen, and quit
 ToWatchDB.app/Contents/MacOS/ToWatchDB -UISnapshotDir ~/Library/Containers/com.mehdi.towatchdb/Data/tmp/snap
 ```
 

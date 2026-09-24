@@ -25,7 +25,7 @@ struct TVShowDetailView: View {
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 progressSummary
-                HStack(spacing: 12) {
+                ActionBar {
                     Menu {
                         Button("Mark All Aired Episodes Watched") { appState.library.setWatched(show, true) }
                         Button("Mark All as Not Watched", role: .destructive) { appState.library.setWatched(show, false) }
@@ -114,20 +114,15 @@ struct TVShowDetailView: View {
         let seasons = show.sortedSeasons
         if !seasons.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Episodes").font(.title3.bold())
-                    Spacer()
-                    Picker("Season", selection: $selectedSeason) {
-                        ForEach(seasons) { season in
-                            Text(season.displayName).tag(Optional(season.seasonNumber))
-                        }
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        Text("Episodes").font(.title3.bold())
+                        Spacer()
+                        seasonControls(seasons)
                     }
-                    .fixedSize()
-                    if let season = currentSeason {
-                        Button(season.isFullyWatched ? "Mark Season Unwatched" : "Mark Season Watched") {
-                            appState.library.setWatched(season, !season.isFullyWatched)
-                        }
-                        .disabled(season.airedEpisodes().isEmpty && !season.isFullyWatched)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Episodes").font(.title3.bold())
+                        HStack { seasonControls(seasons) }
                     }
                 }
 
@@ -141,6 +136,22 @@ struct TVShowDetailView: View {
                     .frame(maxWidth: 900)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func seasonControls(_ seasons: [Season]) -> some View {
+        Picker("Season", selection: $selectedSeason) {
+            ForEach(seasons) { season in
+                Text(season.displayName).tag(Optional(season.seasonNumber))
+            }
+        }
+        .fixedSize()
+        if let season = currentSeason {
+            Button(season.isFullyWatched ? "Mark Season Unwatched" : "Mark Season Watched") {
+                appState.library.setWatched(season, !season.isFullyWatched)
+            }
+            .disabled(season.airedEpisodes().isEmpty && !season.isFullyWatched)
         }
     }
 
@@ -267,6 +278,10 @@ private struct EpisodeNotesSheet: View {
             }
         }
         .padding()
+        #if os(macOS)
         .frame(minWidth: 460, minHeight: 360)
+        #else
+        .presentationDetents([.medium, .large])
+        #endif
     }
 }

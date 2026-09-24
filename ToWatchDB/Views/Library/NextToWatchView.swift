@@ -73,12 +73,26 @@ private struct NextEpisodeRow: View {
             }
             Spacer()
             Button {
-                withAnimation { appState.library.setWatched(episode, true) }
+                markWatched()
             } label: {
+                #if os(iOS)
+                Image(systemName: "checkmark.circle").font(.title2)
+                #else
                 Label("Watched", systemImage: "checkmark.circle")
+                #endif
             }
+            // Borderless keeps the button tappable on its own inside an iOS list row.
+            .buttonStyle(.borderless)
             .help("Mark \(episode.code) as watched")
+            .accessibilityLabel("Mark \(episode.code) as watched")
         }
         .padding(.vertical, 4)
+        .swipeActions(edge: .leading) {
+            Button("Watched", systemImage: "checkmark", action: markWatched).tint(.green)
+        }
+    }
+
+    private func markWatched() {
+        withAnimation { appState.library.setWatched(episode, true) }
     }
 }

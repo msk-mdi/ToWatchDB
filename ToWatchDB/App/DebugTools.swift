@@ -1,28 +1,45 @@
-#if DEBUG && os(macOS)
-import AppKit
+#if DEBUG
 import SwiftUI
 import ToWatchCore
+#if os(macOS)
+import AppKit
+#endif
 
-/// Debug-only visual check: launch with `-UISnapshotDir <dir>` to seed sample titles, visit each tab,
-/// and write a PNG of the window per tab (the app captures itself, so no screen-recording permission is needed).
+/// Debug-only helpers for checking the UI with real TMDB data in a throwaway in-memory library.
+///
+/// - `-UISeedSampleData YES` seeds sample titles (any platform; used with the iOS Simulator).
+/// - `-UISnapshotDir <dir>` (macOS) also seeds, visits each tab, writes a PNG per screen, and quits.
+///   The app captures its own windows, so no screen-recording permission is needed.
 @MainActor
-enum DebugSnapshot {
-    static func runIfRequested(_ appState: AppState) async {
-        guard let dir = UserDefaults.standard.string(forKey: "UISnapshotDir") else { return }
-        let output = URL(fileURLWithPath: dir, isDirectory: true)
-        try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+enum DebugTools {
+    static var snapshotDir: String? { UserDefaults.standard.string(forKey: "UISnapshotDir") }
+    static var usesSampleData: Bool { UserDefaults.standard.bool(forKey: "UISeedSampleData") || snapshotDir != nil }
 
+    static func runIfRequested(_ appState: AppState) async {
+        guard usesSampleData else { return }
+        await seed(appState)
+        #if os(macOS)
+        if let snapshotDir { await snapshot(appState, to: URL(fileURLWithPath: snapshotDir, isDirectory: true)) }
+        #endif
+    }
+
+    private static func seed(_ appState: AppState) async {
         await appState.perform { library in
             let severance = try await library.addShow(tmdbID: 95396)
             if let s1 = severance.sortedSeasons.first(where: { $0.seasonNumber == 1 }) { library.setWatched(s1, true) }
             let inception = try await library.addMovie(tmdbID: 27205)
             library.setWatched(inception, true)
             library.setRating(inception, 8)
+            library.addNote("Rewatch in IMAX.", to: inception)
             try await library.addShow(tmdbID: 1399) // Game of Thrones
             let upcoming = try await library.addMovie(tmdbID: 1_153_576) // Street Fighter, unreleased as of Sept 2026
             library.setBacklog(upcoming, true)
         }
+    }
 
+    #if os(macOS)
+    private static func snapshot(_ appState: AppState, to output: URL) async {
+        try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let tabs: [(AppTab, String)] = [(.discover, "discover"), (.nextToWatch, "next"), (.upcoming, "upcoming"),
                                         (.all, "library"), (.backlog, "backlog"), (.search, "search")]
         for (tab, name) in tabs {
@@ -36,7 +53,6 @@ enum DebugSnapshot {
             await captureDetail(NavigationStack { TVShowDetailView(show: show) }, appState, output.appending(path: "show.png"))
         }
         if let movie = library.movie(tmdbID: 27205) {
-            library.addNote("Rewatch in IMAX.", to: movie)
             await captureDetail(NavigationStack { MovieDetailView(movie: movie) }, appState, output.appending(path: "movie.png"))
         }
         NSApp.terminate(nil)
@@ -59,5 +75,6 @@ enum DebugSnapshot {
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
+    #endif
 }
 #endif

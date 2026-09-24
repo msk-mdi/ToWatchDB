@@ -40,6 +40,7 @@ struct SettingsView: View {
                     Button("Test Connection") { test() }
                         .disabled(appState.client == nil || isTesting)
                 }
+                .rowButtonStyle()
                 if let testResult {
                     Text(testResult).font(.callout).foregroundStyle(.secondary)
                 }
@@ -59,6 +60,7 @@ struct SettingsView: View {
                         .disabled(appState.isRefreshing || appState.client == nil)
                     if appState.isRefreshing { ProgressView().controlSize(.small) }
                 }
+                .rowButtonStyle()
                 Text("Ongoing shows and unreleased movies refresh automatically every 12 hours at launch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -78,8 +80,17 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        #if os(macOS)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+        #else
+        .navigationTitle("Settings")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { appState.isShowingSettings = false }
+            }
+        }
+        #endif
     }
 
     private var tokenStatus: String {
@@ -101,5 +112,16 @@ struct SettingsView: View {
             }
             isTesting = false
         }
+    }
+}
+
+private extension View {
+    /// In an iOS Form, a row with several buttons fires all of them on tap unless they're borderless.
+    func rowButtonStyle() -> some View {
+        #if os(iOS)
+        buttonStyle(.borderless)
+        #else
+        self
+        #endif
     }
 }

@@ -5,6 +5,9 @@ import ToWatchCore
 /// Trending movies and shows this week.
 struct DiscoverView: View {
     @Environment(AppState.self) private var appState
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
@@ -34,6 +37,7 @@ struct DiscoverView: View {
             .padding()
         }
         .navigationTitle("Discover")
+        .settingsToolbarButton(appState)
         .task(id: appState.token) { await load() }
     }
 
@@ -47,7 +51,7 @@ struct DiscoverView: View {
                     LazyHStack(alignment: .top, spacing: 16) {
                         ForEach(items) { item in
                             RemotePosterCard(summary: item, isInLibrary: ids.contains(item))
-                                .frame(width: 150)
+                                .frame(width: shelfCardWidth)
                         }
                     }
                     .padding(.bottom, 8)
@@ -55,6 +59,14 @@ struct DiscoverView: View {
                 .scrollIndicators(.hidden)
             }
         }
+    }
+
+    private var shelfCardWidth: CGFloat {
+        #if os(iOS)
+        sizeClass == .compact ? 120 : 150
+        #else
+        150
+        #endif
     }
 
     private func load() async {
@@ -73,6 +85,8 @@ struct DiscoverView: View {
 }
 
 struct MissingTokenView: View {
+    @Environment(AppState.self) private var appState
+
     var body: some View {
         ContentUnavailableView {
             Label("TMDB Token Needed", systemImage: "key")
@@ -81,6 +95,8 @@ struct MissingTokenView: View {
         } actions: {
             #if os(macOS)
             SettingsLink { Text("Open Settings") }
+            #else
+            Button("Open Settings") { appState.isShowingSettings = true }
             #endif
         }
     }

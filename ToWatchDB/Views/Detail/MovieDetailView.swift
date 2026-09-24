@@ -23,7 +23,7 @@ struct MovieDetailView: View {
             cast: movie.cast
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 12) {
+                ActionBar {
                     watchedButton
                     Toggle(isOn: Binding(get: { movie.isInBacklog }, set: { appState.library.setBacklog(movie, $0) })) {
                         Label("Backlog", systemImage: "tray.full")

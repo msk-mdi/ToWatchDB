@@ -4,8 +4,8 @@ import SwiftUI
 @main
 struct ToWatchDBApp: App {
     #if DEBUG
-    // Debug snapshot runs use a throwaway in-memory library.
-    @State private var appState = AppState(inMemory: UserDefaults.standard.string(forKey: "UISnapshotDir") != nil)
+    // Sample-data and snapshot runs use a throwaway in-memory library.
+    @State private var appState = AppState(inMemory: DebugTools.usesSampleData)
     #else
     @State private var appState = AppState()
     #endif
@@ -20,8 +20,8 @@ struct ToWatchDBApp: App {
             RootView()
                 .environment(appState)
                 .task {
-                    #if DEBUG && os(macOS)
-                    await DebugSnapshot.runIfRequested(appState)
+                    #if DEBUG
+                    await DebugTools.runIfRequested(appState)
                     #endif
                     await appState.refreshLibrary()
                 }

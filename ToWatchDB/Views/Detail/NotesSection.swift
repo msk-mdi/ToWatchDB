@@ -99,5 +99,8 @@ struct WatchDateSheet: View {
         }
         .padding()
         .frame(minWidth: 320)
+        #if os(iOS)
+        .presentationDetents([.large])
+        #endif
     }
 }

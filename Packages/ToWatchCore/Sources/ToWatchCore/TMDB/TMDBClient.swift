@@ -114,6 +114,7 @@ public enum TMDBImageSize: String, Sendable {
     case posterLarge = "w500"
     case backdrop = "w1280"
     case still = "w300"
+    case logo = "w92"
 }
 
 public enum TMDBImage {

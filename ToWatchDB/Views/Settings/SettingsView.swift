@@ -50,6 +50,11 @@ struct SettingsView: View {
                 Text("Titles, overviews, and episode names are fetched in this language when TMDB has a translation. Refresh the library to update existing titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Picker("Where to Watch Country", selection: $appState.watchRegion) {
+                    ForEach(Self.regions, id: \.self) { code in
+                        Text(Locale.current.localizedString(forRegionCode: code) ?? code).tag(code)
+                    }
+                }
             }
 
             Section("Library") {
@@ -92,6 +97,15 @@ struct SettingsView: View {
         }
         #endif
     }
+
+    /// Every ISO country, sorted by localized name, for the Where to Watch default.
+    private static let regions: [String] = Locale.Region.isoRegions
+        .filter { $0.subRegions.isEmpty && $0.identifier.count == 2 && $0.identifier.allSatisfy(\.isLetter) }
+        .map(\.identifier)
+        .sorted {
+            (Locale.current.localizedString(forRegionCode: $0) ?? $0)
+                .localizedStandardCompare(Locale.current.localizedString(forRegionCode: $1) ?? $1) == .orderedAscending
+        }
 
     private var tokenStatus: String {
         if appState.tokenOverride != nil { return "Custom token (Keychain)" }

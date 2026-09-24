@@ -28,6 +28,12 @@ final class AppState {
         didSet { UserDefaults.standard.set(language, forKey: "tmdbLanguage") }
     }
 
+    /// Country for Where to Watch (ISO 3166-1 code). Defaults to the device's region.
+    var watchRegion: String = UserDefaults.standard.string(forKey: "watchRegion")
+        ?? Locale.current.region?.identifier ?? "US" {
+        didSet { UserDefaults.standard.set(watchRegion, forKey: "watchRegion") }
+    }
+
     init(inMemory: Bool = false) {
         do {
             let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)

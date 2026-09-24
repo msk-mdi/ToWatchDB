@@ -41,6 +41,7 @@ struct MovieDetailView: View {
                               imdbID: movie.imdbID, homepage: movie.homepage)
             }
         } extra: {
+            WhereToWatchSection(kind: .movie, tmdbID: movie.tmdbID)
             CollectionsSection(title: .movie(movie))
             NotesSection(notes: movie.notes ?? []) { appState.library.addNote($0, to: movie) }
         }

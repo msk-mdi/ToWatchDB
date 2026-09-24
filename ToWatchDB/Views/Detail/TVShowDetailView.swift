@@ -52,6 +52,7 @@ struct TVShowDetailView: View {
                 ExternalLinks(kind: .tv, tmdbID: show.tmdbID, trailerKey: show.trailerKey, homepage: show.homepage)
             }
         } extra: {
+            WhereToWatchSection(kind: .tv, tmdbID: show.tmdbID)
             seasonsSection
             CollectionsSection(title: .show(show))
             NotesSection(notes: show.notes ?? []) { appState.library.addNote($0, to: show) }

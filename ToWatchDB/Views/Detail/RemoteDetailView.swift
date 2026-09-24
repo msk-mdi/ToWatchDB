@@ -60,7 +60,7 @@ private struct RemotePreview: View {
             }
             .disabled(isAdding)
         } extra: {
-            EmptyView()
+            WhereToWatchSection(kind: summary.kind, tmdbID: summary.tmdbID)
         }
         .navigationTitle(summary.title)
         .task { await load() }

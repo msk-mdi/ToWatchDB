@@ -359,3 +359,24 @@ private var utcCalendar: Calendar {
     #expect(ranked.map(\.name) == ["Drama", "Action"], "count first, then alphabetical")
     #expect(ranked.first?.count == 2)
 }
+
+// MARK: - Where to watch
+
+@Test func decodesWatchProviders() throws {
+    let providers: TMDBWatchProviders = try fixture("providers_inception")
+    #expect(providers.id == 27205)
+    #expect(Set(providers.results.keys) == ["US", "FR", "DE"], "country codes survive snake_case key conversion")
+
+    let france = try #require(providers.results["FR"])
+    #expect(france.link?.contains("locale=FR") == true)
+    let kinds = france.sections.map(\.kind)
+    #expect(kinds.contains(.rent))
+    #expect(kinds == TMDBCountryProviders.Kind.allCases.filter(kinds.contains), "sections keep a fixed order")
+    for section in france.sections {
+        let priorities = section.providers.map { $0.displayPriority ?? .max }
+        #expect(priorities == priorities.sorted())
+    }
+
+    let english = providers.countries(locale: Locale(identifier: "en_US"))
+    #expect(english == ["FR", "DE", "US"], "France, Germany, United States")
+}

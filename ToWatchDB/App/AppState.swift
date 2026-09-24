@@ -16,6 +16,8 @@ final class AppState {
     var selectedTab: AppTab = .discover
     /// iOS presents Settings as a sheet (macOS uses the Settings scene).
     var isShowingSettings = false
+    /// A backup, CSV export, or import requested from the File menu.
+    var fileRequest: LibraryFileRequest?
     /// The space, tag, or smart list being created or edited, if any.
     var collectionEditor: CollectionEditorTarget?
     private(set) var isRefreshing = false

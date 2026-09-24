@@ -14,6 +14,9 @@ with monthly activity, top genres and actors, highlights, a comparison with anot
 **Where to Watch** on every title lists streaming, free, ad-supported, rent, and buy options for a country
 (default: your device's region; change it per title or in Settings). Availability powered by JustWatch via TMDB.
 
+**Backup** (Settings, or File ▸ Import/Export on Mac): export the whole library as JSON and import it on any
+device. Importing merges, so nothing is lost or duplicated. **Export as CSV** gives one row per title for spreadsheets.
+
 On iPad and Mac, any title can open in its own window, posters drag into the library or backlog
 (or out to other apps as a TMDB link), and the Title menu acts on the title on screen:
 ⇧⌘E mark watched / next episode, ⇧⌘B backlog, ⇧⌘L favorite, ⇧⌘R refresh.

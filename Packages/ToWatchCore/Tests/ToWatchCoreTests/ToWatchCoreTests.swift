@@ -380,3 +380,92 @@ private var utcCalendar: Calendar {
     let english = providers.countries(locale: Locale(identifier: "en_US"))
     #expect(english == ["FR", "DE", "US"], "France, Germany, United States")
 }
+
+// MARK: - Backup
+
+@MainActor @Test func backupRoundTripsIntoEmptyLibrary() throws {
+    let source = try makeLibrary()
+    let movie = source.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: source)
+    source.setWatched(movie, true, on: date("2024-12-31"))
+    source.setRating(movie, 8)
+    source.addNote("Rewatch in IMAX", to: movie)
+    let s1e1 = try #require(show.regularEpisodes.first)
+    source.setWatched(s1e1, true, on: date("2025-01-02"))
+    source.addNote("Great pilot", to: s1e1)
+    source.setAbandoned(show, true)
+    let space = try #require(source.createSpace(name: "Mind Benders", symbolName: "brain", colorName: "purple"))
+    source.toggle(.movie(movie), in: space)
+    let tag = try #require(source.createTag(name: "Rewatch", colorName: "red"))
+    source.toggle(tag, on: .show(show))
+    var rules = SmartListRules()
+    rules.tagIDs = [tag.uuid]
+    source.createSmartList(name: "Rewatches", rules: rules)
+
+    let data = try source.exportBackupData()
+    let target = try makeLibrary()
+    let summary = try target.importBackup(data: data)
+    #expect(summary.moviesAdded == 1 && summary.showsAdded == 1 && summary.collectionsAdded == 3)
+
+    let restoredMovie = try #require(target.movie(tmdbID: movie.tmdbID))
+    #expect(restoredMovie.title == "Inception" && restoredMovie.runtime == 148)
+    #expect(restoredMovie.isWatched && restoredMovie.watchedDate == date("2024-12-31") && restoredMovie.userRating == 8)
+    #expect(restoredMovie.notes?.map(\.text) == ["Rewatch in IMAX"])
+    #expect(restoredMovie.directors.map(\.name) == ["Christopher Nolan"], "metadata restored offline")
+    #expect(restoredMovie.spaces?.map(\.name) == ["Mind Benders"])
+
+    let restoredShow = try #require(target.show(tmdbID: show.tmdbID))
+    #expect(restoredShow.isAbandoned)
+    #expect(restoredShow.regularEpisodes.count == 12)
+    #expect(restoredShow.regularEpisodes.first?.isWatched == true)
+    #expect(restoredShow.regularEpisodes.first?.notes?.first?.text == "Great pilot")
+    #expect(restoredShow.tags?.map(\.name) == ["Rewatch"])
+
+    let restoredList = try #require(try target.context.fetch(FetchDescriptor<SmartList>()).first)
+    #expect(restoredList.rules.matches(restoredShow, now: now), "rules still point at the restored tag")
+}
+
+@MainActor @Test func backupImportMergesWithoutDuplicates() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+    library.addNote("Rewatch in IMAX", to: movie)
+    library.setWatched(try #require(show.regularEpisodes.first), true, on: date("2025-01-02"))
+    let backup = try library.exportBackupData()
+
+    // Local changes after the backup: they must survive the import.
+    library.setRating(movie, 6)
+    library.setWatched(try #require(show.regularEpisodes.dropFirst().first), true, on: date("2025-01-03"))
+
+    // Importing twice changes nothing the second time and never duplicates.
+    for _ in 0..<2 {
+        let summary = try library.importBackup(data: backup)
+        #expect(summary.moviesAdded == 0 && summary.moviesMerged == 1 && summary.showsMerged == 1)
+    }
+    #expect(try library.context.fetchCount(FetchDescriptor<Movie>()) == 1)
+    #expect(try library.context.fetchCount(FetchDescriptor<Episode>()) == 13)
+    #expect(try library.context.fetchCount(FetchDescriptor<Note>()) == 1)
+    #expect(movie.userRating == 6, "local rating wins")
+    #expect(show.watchedEpisodeCount() == 2, "watched on either side stays watched")
+}
+
+@Test func backupRejectsNewerFormatsAndJunk() {
+    #expect(throws: BackupError.self) { try BackupCoding.decode(Data(#"{"version": 99}"#.utf8)) }
+    #expect(throws: BackupError.self) { try BackupCoding.decode(Data("not json".utf8)) }
+}
+
+@MainActor @Test func csvExport() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    movie.title = #"Inception, "Director's Cut""#
+    library.setWatched(movie, true, on: date("2024-12-31"))
+    _ = try insertSeverance(into: library)
+
+    let csv = try library.exportCSV(now: now)
+    let lines = csv.split(separator: "\r\n")
+    #expect(lines.count == 3)
+    #expect(lines[0].hasPrefix("Type,TMDB ID,Title"))
+    #expect(lines[1].contains(#""Inception, ""Director's Cut""""#), "quotes and commas are escaped")
+    #expect(lines[1].contains("2024-12-31"))
+    #expect(lines[2].hasPrefix("TV Show,95396,Severance,2022,Not Watched"))
+}

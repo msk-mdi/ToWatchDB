@@ -30,6 +30,7 @@ struct RootView: View {
             Text(appState.errorMessage ?? "")
         }
         .collectionEditorSheet(appState)
+        .libraryFileTransfers($appState.fileRequest)
         .onChange(of: collectionIDs) { _, ids in
             // Leave a space, tag, or smart list's tab if it was deleted.
             switch appState.selectedTab {

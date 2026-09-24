@@ -8,6 +8,8 @@ struct SettingsView: View {
     @Query private var shows: [TVShow]
 
     @State private var tokenDraft = ""
+    /// Settings runs its own panels: on macOS it's a separate window from the one handling File menu requests.
+    @State private var fileRequest: LibraryFileRequest?
     @State private var testResult: String?
     @State private var isTesting = false
 
@@ -71,6 +73,25 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                #if os(iOS)
+                Button("Export Backup…", systemImage: "square.and.arrow.up") { fileRequest = .exportBackup }
+                Button("Export as CSV…", systemImage: "tablecells") { fileRequest = .exportCSV }
+                Button("Import Backup…", systemImage: "square.and.arrow.down") { fileRequest = .importBackup }
+                #else
+                HStack {
+                    Button("Export Backup…") { fileRequest = .exportBackup }
+                    Button("Export as CSV…") { fileRequest = .exportCSV }
+                    Spacer()
+                    Button("Import Backup…") { fileRequest = .importBackup }
+                }
+                #endif
+            } header: {
+                Text("Backup")
+            } footer: {
+                Text("A backup holds your whole library: titles, watch history, ratings, notes, spaces, tags, and smart lists. Importing merges into what's here, so nothing is lost or duplicated. CSV is for spreadsheets and can't be imported.")
+            }
+
             Section("About") {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "film.stack").font(.largeTitle).foregroundStyle(.tint)
@@ -85,6 +106,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .libraryFileTransfers($fileRequest)
         #if os(macOS)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)

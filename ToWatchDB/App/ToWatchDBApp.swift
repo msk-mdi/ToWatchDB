@@ -76,6 +76,13 @@ struct AppCommands: Commands {
             Button("New Smart List…") { appState.collectionEditor = .newSmartList }
             Button("New Tag…") { appState.collectionEditor = .newTag() }
         }
+        CommandGroup(after: .importExport) {
+            Button("Import Backup…") { appState.fileRequest = .importBackup }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Export Backup…") { appState.fileRequest = .exportBackup }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+            Button("Export as CSV…") { appState.fileRequest = .exportCSV }
+        }
         CommandMenu("Library") {
             Button("Refresh Library") { Task { await appState.refreshLibrary(force: true) } }
                 .keyboardShortcut("r")

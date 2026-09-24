@@ -65,6 +65,10 @@ public final class Movie {
     @Relationship(deleteRule: .cascade, inverse: \Note.movie)
     public var notes: [Note]? = []
 
+    // Inverses are declared on Space and MediaTag.
+    public var spaces: [Space]? = []
+    public var tags: [MediaTag]? = []
+
     public init(tmdbID: Int, title: String) {
         self.tmdbID = tmdbID
         self.title = title
@@ -116,6 +120,9 @@ public final class TVShow {
 
     @Relationship(deleteRule: .cascade, inverse: \Note.show)
     public var notes: [Note]? = []
+
+    public var spaces: [Space]? = []
+    public var tags: [MediaTag]? = []
 
     public init(tmdbID: Int, name: String) {
         self.tmdbID = tmdbID
@@ -225,7 +232,10 @@ public final class Note {
 }
 
 public enum ToWatchSchema {
-    public static let models: [any PersistentModel.Type] = [Movie.self, TVShow.self, Season.self, Episode.self, Note.self]
+    public static let models: [any PersistentModel.Type] = [
+        Movie.self, TVShow.self, Season.self, Episode.self, Note.self,
+        Space.self, MediaTag.self, SmartList.self,
+    ]
 }
 
 extension PersonCredit {

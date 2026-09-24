@@ -41,6 +41,7 @@ struct MovieDetailView: View {
                               imdbID: movie.imdbID, homepage: movie.homepage)
             }
         } extra: {
+            CollectionsSection(title: .movie(movie))
             NotesSection(notes: movie.notes ?? []) { appState.library.addNote($0, to: movie) }
         }
         .navigationTitle(movie.title)

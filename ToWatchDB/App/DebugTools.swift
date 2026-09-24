@@ -1,4 +1,5 @@
 #if DEBUG
+import SwiftData
 import SwiftUI
 import ToWatchCore
 #if os(macOS)
@@ -34,21 +35,33 @@ enum DebugTools {
             try await library.addShow(tmdbID: 1399) // Game of Thrones
             let upcoming = try await library.addMovie(tmdbID: 1_153_576) // Street Fighter, unreleased as of Sept 2026
             library.setBacklog(upcoming, true)
+
+            if let space = library.createSpace(name: "Mind Benders", symbolName: "brain", colorName: "purple") {
+                library.toggle(.movie(inception), in: space)
+                library.toggle(.show(severance), in: space)
+            }
+            if let tag = library.createTag(name: "Rewatch", colorName: "red") { library.toggle(tag, on: .movie(inception)) }
+            var rules = SmartListRules()
+            rules.media = .shows
+            rules.statuses = [.notWatched, .watching]
+            library.createSmartList(name: "Shows in Progress", symbolName: "play.tv", colorName: "orange", rules: rules)
         }
     }
 
     #if os(macOS)
     private static func snapshot(_ appState: AppState, to output: URL) async {
         try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let tabs: [(AppTab, String)] = [(.discover, "discover"), (.nextToWatch, "next"), (.upcoming, "upcoming"),
-                                        (.all, "library"), (.backlog, "backlog"), (.search, "search")]
+        var tabs: [(AppTab, String)] = [(.discover, "discover"), (.nextToWatch, "next"), (.upcoming, "upcoming"),
+                                        (.all, "library"), (.backlog, "backlog"), (.search, "search"), (.organize, "organize")]
+        let library = appState.library
+        if let space = try? library.context.fetch(FetchDescriptor<Space>()).first { tabs.append((.space(space.uuid), "space")) }
+        if let list = try? library.context.fetch(FetchDescriptor<SmartList>()).first { tabs.append((.smartList(list.uuid), "smartlist")) }
         for (tab, name) in tabs {
             appState.selectedTab = tab
             try? await Task.sleep(for: .seconds(4))
             if let window = NSApp.windows.first(where: \.isVisible) { capture(window, to: output.appending(path: "\(name).png")) }
         }
         // Detail screens, hosted in their own windows since tab stacks have no programmatic path.
-        let library = appState.library
         if let show = library.show(tmdbID: 95396) {
             await captureDetail(NavigationStack { TVShowDetailView(show: show) }, appState, output.appending(path: "show.png"))
         }

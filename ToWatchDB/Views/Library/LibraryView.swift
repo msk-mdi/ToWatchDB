@@ -7,18 +7,24 @@ struct LibraryView: View {
     @Environment(AppState.self) private var appState
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
+    @Query private var spaces: [Space]
+    @Query private var tags: [MediaTag]
+    @Query private var smartLists: [SmartList]
 
     @State private var scope: LibraryScope
     /// iPhone shows one Library tab with a scope picker instead of separate sidebar entries.
     let allowsScopeChange: Bool
+    /// Pushed collection lists leave Settings to the root screen.
+    let showsSettingsButton: Bool
     @State private var statusFilter: WatchStatus?
     @State private var sort: LibrarySort
     @State private var searchText = ""
     @State private var isDropTargeted = false
 
-    init(scope: LibraryScope, allowsScopeChange: Bool = false) {
+    init(scope: LibraryScope, allowsScopeChange: Bool = false, showsSettingsButton: Bool = true) {
         _scope = State(initialValue: scope)
         self.allowsScopeChange = allowsScopeChange
+        self.showsSettingsButton = showsSettingsButton
         _sort = State(initialValue: scope.defaultSort)
     }
 
@@ -27,10 +33,11 @@ struct LibraryView: View {
         ScrollView {
             if allowsScopeChange {
                 Picker("Show", selection: $scope) {
-                    ForEach(LibraryScope.allCases, id: \.self) { Text($0.shortTitle).tag($0) }
+                    ForEach(LibraryScope.fixed, id: \.self) { Text($0.shortTitle).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
+                CollectionShortcuts()
             }
             if items.isEmpty {
                 emptyState
@@ -43,10 +50,15 @@ struct LibraryView: View {
                 .padding()
             }
         }
-        .navigationTitle(allowsScopeChange ? "Library" : scope.title)
+        .navigationTitle(allowsScopeChange ? "Library" : title)
         .navigationSubtitleIfAvailable("\(items.count) title\(items.count == 1 ? "" : "s")")
         .searchable(text: $searchText, placement: .adaptiveToolbar, prompt: "Filter \(scope.title.lowercased())")
         .toolbar {
+            if let editTarget {
+                ToolbarItem {
+                    Button("Edit", systemImage: "pencil") { appState.collectionEditor = editTarget }
+                }
+            }
             #if os(iOS)
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Filter and Sort", systemImage: statusFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") {
@@ -63,7 +75,12 @@ struct LibraryView: View {
         }
         .dropDestination(for: TitleReference.self) { references, _ in
             guard scope.acceptsDrops else { return false }
-            Task { await appState.perform { try await $0.add(references, backlog: scope == .backlog) } }
+            Task {
+                await appState.perform { library in
+                    try await library.add(references, backlog: scope == .backlog)
+                    try await addDropped(references, to: library)
+                }
+            }
             return true
         } isTargeted: { isDropTargeted = $0 && scope.acceptsDrops }
         .overlay {
@@ -78,7 +95,7 @@ struct LibraryView: View {
             statusFilter = nil
             sort = newScope.defaultSort
         }
-        .settingsToolbarButton(appState)
+        .settingsToolbarButton(appState, isVisible: showsSettingsButton)
     }
 
     @ViewBuilder
@@ -100,6 +117,40 @@ struct LibraryView: View {
         }
     }
 
+    private var title: String {
+        switch scope {
+        case let .space(id): spaces.first { $0.uuid == id }?.name ?? "Space"
+        case let .tag(id): tags.first { $0.uuid == id }?.name ?? "Tag"
+        case let .smartList(id): smartLists.first { $0.uuid == id }?.name ?? "Smart List"
+        default: scope.title
+        }
+    }
+
+    private var editTarget: CollectionEditorTarget? {
+        switch scope {
+        case let .space(id): spaces.first { $0.uuid == id }.map(CollectionEditorTarget.editSpace)
+        case let .tag(id): tags.first { $0.uuid == id }.map(CollectionEditorTarget.editTag)
+        case let .smartList(id): smartLists.first { $0.uuid == id }.map(CollectionEditorTarget.editSmartList)
+        default: nil
+        }
+    }
+
+    /// Dropping onto a space or tag also files the title there.
+    private func addDropped(_ references: [TitleReference], to library: LibraryService) async throws {
+        let space: Space? = if case let .space(id) = scope { library.space(uuid: id) } else { nil }
+        let tag: MediaTag? = if case let .tag(id) = scope { library.tag(uuid: id) } else { nil }
+        guard space != nil || tag != nil else { return }
+        for reference in references {
+            let title: LibraryTitle? = switch reference.kind {
+            case .movie: library.movie(tmdbID: reference.tmdbID).map(LibraryTitle.movie)
+            case .tv: library.show(tmdbID: reference.tmdbID).map(LibraryTitle.show)
+            }
+            guard let title else { continue }
+            if let space, !library.isIn(title, space) { library.toggle(title, in: space) }
+            if let tag, !library.isTagged(title, tag) { library.toggle(tag, on: title) }
+        }
+    }
+
     private var availableStatuses: [WatchStatus] {
         scope == .movies ? [.notWatched, .watched] : WatchStatus.allCases
     }
@@ -114,6 +165,16 @@ struct LibraryView: View {
         switch scope {
         case .backlog: items = items.filter(\.isInBacklog)
         case .watched: items = items.filter { $0.watchStatus(asOf: now) == .watched }
+        case let .space(id): items = items.filter { $0.spaces.contains { $0.uuid == id } }
+        case let .tag(id): items = items.filter { $0.tags.contains { $0.uuid == id } }
+        case let .smartList(id):
+            let rules = smartLists.first { $0.uuid == id }?.rules ?? SmartListRules()
+            items = items.filter { item in
+                switch item {
+                case let .movie(movie): rules.matches(movie)
+                case let .show(show): rules.matches(show, now: now)
+                }
+            }
         default: break
         }
         if let statusFilter {
@@ -139,6 +200,12 @@ struct LibraryView: View {
             case .watched:
                 ContentUnavailableView("Nothing Watched Yet", systemImage: "checkmark.circle",
                                        description: Text("Titles you finish appear here."))
+            case .space, .tag:
+                ContentUnavailableView("Nothing Here Yet", systemImage: "square.stack",
+                                       description: Text("Add titles from their page or context menu, or drag posters here."))
+            case .smartList:
+                ContentUnavailableView("No Matches", systemImage: "wand.and.stars",
+                                       description: Text("No titles in your library match this smart list's rules."))
             default:
                 ContentUnavailableView {
                     Label("Your Library Is Empty", systemImage: "film.stack")
@@ -236,6 +303,7 @@ struct LibraryPosterCard: View {
             }
         }
         Divider()
+        CollectionMenus(title: item.libraryTitle)
         OpenInNewWindowButton(reference: item.reference)
         Button("Remove from Library…", systemImage: "trash", role: .destructive) { confirmDelete = true }
     }

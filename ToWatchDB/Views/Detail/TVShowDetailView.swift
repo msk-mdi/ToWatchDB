@@ -53,6 +53,7 @@ struct TVShowDetailView: View {
             }
         } extra: {
             seasonsSection
+            CollectionsSection(title: .show(show))
             NotesSection(notes: show.notes ?? []) { appState.library.addNote($0, to: show) }
         }
         .navigationTitle(show.name)

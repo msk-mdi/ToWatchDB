@@ -4,6 +4,9 @@ import ToWatchCore
 
 struct RootView: View {
     @Environment(AppState.self) private var appState
+    @Query(sort: \Space.name) private var spaces: [Space]
+    @Query(sort: \SmartList.name) private var smartLists: [SmartList]
+    @Query(sort: \MediaTag.name) private var tags: [MediaTag]
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -26,17 +29,30 @@ struct RootView: View {
         } message: {
             Text(appState.errorMessage ?? "")
         }
+        .collectionEditorSheet(appState)
+        .onChange(of: collectionIDs) { _, ids in
+            // Leave a space, tag, or smart list's tab if it was deleted.
+            switch appState.selectedTab {
+            case let .space(id), let .tag(id), let .smartList(id):
+                if !ids.contains(id) { appState.selectedTab = .all }
+            default: break
+            }
+        }
         #if os(iOS)
         .sheet(isPresented: $appState.isShowingSettings) {
             NavigationStack { SettingsView() }
         }
         .onChange(of: sizeClass, initial: true) { _, newValue in
             // Backlog, Watched, Movies and TV Shows live inside the Library tab on iPhone.
-            if newValue == .compact, [.backlog, .watched, .movies, .shows].contains(appState.selectedTab) {
+            if newValue == .compact, appState.selectedTab.isSidebarOnly {
                 appState.selectedTab = .all
             }
         }
         #endif
+    }
+
+    private var collectionIDs: Set<UUID> {
+        Set(spaces.map(\.uuid) + smartLists.map(\.uuid) + tags.map(\.uuid))
     }
 
     /// Mac and iPad: every list is its own sidebar entry.
@@ -75,6 +91,37 @@ struct RootView: View {
                 Tab("TV Shows", systemImage: "tv", value: AppTab.shows) {
                     NavigationStack { LibraryView(scope: .shows).appDestinations() }
                 }
+                Tab("Organize", systemImage: "square.stack.3d.up", value: AppTab.organize) {
+                    NavigationStack { OrganizeView().appDestinations() }
+                }
+            }
+
+            if !spaces.isEmpty {
+                TabSection("Spaces") {
+                    ForEach(spaces) { space in
+                        Tab(space.name, systemImage: space.symbolName, value: AppTab.space(space.uuid)) {
+                            NavigationStack { LibraryView(scope: .space(space.uuid)).appDestinations() }
+                        }
+                    }
+                }
+            }
+            if !smartLists.isEmpty {
+                TabSection("Smart Lists") {
+                    ForEach(smartLists) { list in
+                        Tab(list.name, systemImage: list.symbolName, value: AppTab.smartList(list.uuid)) {
+                            NavigationStack { LibraryView(scope: .smartList(list.uuid)).appDestinations() }
+                        }
+                    }
+                }
+            }
+            if !tags.isEmpty {
+                TabSection("Tags") {
+                    ForEach(tags) { tag in
+                        Tab(tag.name, systemImage: "tag", value: AppTab.tag(tag.uuid)) {
+                            NavigationStack { LibraryView(scope: .tag(tag.uuid)).appDestinations() }
+                        }
+                    }
+                }
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -109,14 +156,18 @@ extension View {
         navigationDestination(for: Movie.self) { MovieDetailView(movie: $0) }
             .navigationDestination(for: TVShow.self) { TVShowDetailView(show: $0) }
             .navigationDestination(for: MediaSummary.self) { RemoteDetailView(summary: $0) }
+            .navigationDestination(for: LibraryScope.self) { LibraryView(scope: $0, showsSettingsButton: false) }
+            .navigationDestination(for: OrganizeRoute.self) { _ in OrganizeView() }
     }
 
     /// iOS toolbar button that opens Settings; macOS has a Settings menu item instead.
-    func settingsToolbarButton(_ appState: AppState) -> some View {
+    func settingsToolbarButton(_ appState: AppState, isVisible: Bool = true) -> some View {
         #if os(iOS)
         toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Settings", systemImage: "gearshape") { appState.isShowingSettings = true }
+            if isVisible {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Settings", systemImage: "gearshape") { appState.isShowingSettings = true }
+                }
             }
         }
         #else
@@ -133,5 +184,15 @@ extension SearchFieldPlacement {
         #else
         .automatic
         #endif
+    }
+}
+
+extension AppTab {
+    /// Tabs that exist only in the sidebar layout; iPhone reaches them from the Library tab.
+    var isSidebarOnly: Bool {
+        switch self {
+        case .backlog, .watched, .movies, .shows, .organize, .space, .tag, .smartList: true
+        default: false
+        }
     }
 }

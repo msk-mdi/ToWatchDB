@@ -193,3 +193,107 @@ private let now = date("2026-09-23")
     library.delete(movie)
     #expect(try library.context.fetchCount(FetchDescriptor<Note>()) == 0, "notes cascade with their movie")
 }
+
+// MARK: - Spaces, tags, smart lists
+
+@MainActor @Test func spaceAndTagMembership() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+
+    let space = try #require(library.createSpace(name: "  Mind Benders ", symbolName: "brain", colorName: "purple"))
+    #expect(space.name == "Mind Benders")
+    #expect(library.createSpace(name: "   ") == nil)
+
+    library.toggle(.movie(movie), in: space)
+    library.toggle(.show(show), in: space)
+    #expect(space.itemCount == 2)
+    #expect(library.isIn(.movie(movie), space))
+
+    library.toggle(.movie(movie), in: space)
+    #expect(!library.isIn(.movie(movie), space))
+    #expect(space.itemCount == 1)
+
+    let tag = try #require(library.createTag(name: "Rewatch", colorName: "red"))
+    #expect(library.createTag(name: "rewatch")?.persistentModelID == tag.persistentModelID, "tag names are case-insensitive")
+    library.toggle(tag, on: .movie(movie))
+    #expect(library.isTagged(.movie(movie), tag))
+    #expect(library.tag(uuid: tag.uuid)?.name == "Rewatch")
+
+    // Deleting a collection leaves its titles in the library.
+    library.delete(tag)
+    library.delete(space)
+    #expect(movie.tags?.isEmpty == true)
+    #expect(show.spaces?.isEmpty == true)
+    #expect(try library.context.fetchCount(FetchDescriptor<Movie>()) == 1)
+    #expect(try library.context.fetchCount(FetchDescriptor<TVShow>()) == 1)
+}
+
+@MainActor @Test func smartListRules() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+    let tag = try #require(library.createTag(name: "Rewatch"))
+    let space = try #require(library.createSpace(name: "Weekend"))
+
+    var rules = SmartListRules()
+    #expect(rules.matches(movie) && rules.matches(show, now: now), "empty rules match everything")
+
+    rules.media = .movies
+    #expect(rules.matches(movie) && !rules.matches(show, now: now))
+
+    rules = SmartListRules()
+    rules.genres = ["Drama", "Documentary"]
+    #expect(!rules.matches(movie), "Inception has no Drama/Documentary genre")
+    #expect(rules.matches(show, now: now))
+
+    rules = SmartListRules()
+    rules.statuses = [.notWatched]
+    #expect(rules.matches(movie) && rules.matches(show, now: now))
+    library.setWatched(movie, true, on: now)
+    #expect(!rules.matches(movie))
+
+    rules = SmartListRules()
+    rules.tagIDs = [tag.uuid]
+    #expect(!rules.matches(movie))
+    library.toggle(tag, on: .movie(movie))
+    #expect(rules.matches(movie))
+
+    rules = SmartListRules()
+    rules.spaceIDs = [space.uuid]
+    library.toggle(.show(show), in: space)
+    #expect(rules.matches(show, now: now) && !rules.matches(movie))
+
+    rules = SmartListRules()
+    rules.minimumRating = 8
+    #expect(!rules.matches(movie), "unrated never meets a minimum")
+    library.setRating(movie, 8)
+    #expect(rules.matches(movie))
+
+    rules = SmartListRules()
+    rules.releasedFrom = 2015
+    #expect(!rules.matches(movie) && rules.matches(show, now: now), "Inception is 2010, Severance 2022")
+    rules.releasedThrough = 2020
+    #expect(!rules.matches(show, now: now))
+
+    rules = SmartListRules()
+    rules.backlogOnly = true
+    rules.favoritesOnly = true
+    library.setBacklog(show, true)
+    #expect(!rules.matches(show, now: now))
+    library.setFavorite(show, true)
+    #expect(rules.matches(show, now: now))
+}
+
+@MainActor @Test func smartListPersistsRules() throws {
+    let library = try makeLibrary()
+    var rules = SmartListRules()
+    rules.media = .shows
+    rules.statuses = [.watching]
+    let list = try #require(library.createSmartList(name: "In Progress", rules: rules))
+    #expect(library.smartList(uuid: list.uuid)?.rules == rules)
+
+    rules.favoritesOnly = true
+    library.update(list, name: "Favorite Shows", symbolName: "heart", colorName: "pink", rules: rules)
+    #expect(list.rules.favoritesOnly && list.name == "Favorite Shows")
+}

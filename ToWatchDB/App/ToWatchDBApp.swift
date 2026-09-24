@@ -71,6 +71,10 @@ struct AppCommands: Commands {
         CommandGroup(after: .newItem) {
             Button("Search TMDB") { appState.selectedTab = .search }
                 .keyboardShortcut("n")
+            Divider()
+            Button("New Space…") { appState.collectionEditor = .newSpace() }
+            Button("New Smart List…") { appState.collectionEditor = .newSmartList }
+            Button("New Tag…") { appState.collectionEditor = .newTag() }
         }
         CommandMenu("Library") {
             Button("Refresh Library") { Task { await appState.refreshLibrary(force: true) } }

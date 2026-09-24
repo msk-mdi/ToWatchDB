@@ -3,6 +3,10 @@
 A movie and TV tracker for macOS, iOS and iPadOS, built with SwiftUI + SwiftData on top of TMDB.
 One multiplatform target: a sidebar on Mac and iPad, five compact tabs on iPhone.
 
+Organize with **spaces** (curated collections with an icon and color), **tags**, and **smart lists**
+(saved filters by type, status, genre, rating, year, tags, spaces, backlog, favorites). Create them from
+File ▸ New…, the Organize screen, or a title's "Spaces & Tags" menu; drop posters on a space or tag to file them.
+
 On iPad and Mac, any title can open in its own window, posters drag into the library or backlog
 (or out to other apps as a TMDB link), and the Title menu acts on the title on screen:
 ⇧⌘E mark watched / next episode, ⇧⌘B backlog, ⇧⌘L favorite, ⇧⌘R refresh.

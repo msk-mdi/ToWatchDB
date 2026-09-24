@@ -4,7 +4,8 @@ import SwiftData
 import ToWatchCore
 
 enum AppTab: Hashable {
-    case discover, search, all, movies, shows, nextToWatch, upcoming, backlog, watched
+    case discover, search, all, movies, shows, nextToWatch, upcoming, backlog, watched, organize
+    case space(UUID), tag(UUID), smartList(UUID)
 }
 
 /// App-wide state: the model container, TMDB configuration, navigation, and background refresh.
@@ -15,6 +16,8 @@ final class AppState {
     var selectedTab: AppTab = .discover
     /// iOS presents Settings as a sheet (macOS uses the Settings scene).
     var isShowingSettings = false
+    /// The space, tag, or smart list being created or edited, if any.
+    var collectionEditor: CollectionEditorTarget?
     private(set) var isRefreshing = false
     var errorMessage: String?
 

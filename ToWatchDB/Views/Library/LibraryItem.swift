@@ -64,6 +64,16 @@ enum LibraryItem: Identifiable, Hashable {
         }
     }
 
+    var libraryTitle: LibraryTitle {
+        switch self {
+        case let .movie(movie): .movie(movie)
+        case let .show(show): .show(show)
+        }
+    }
+
+    var spaces: [Space] { libraryTitle.spaces }
+    var tags: [MediaTag] { libraryTitle.tags }
+
     func watchStatus(asOf now: Date = .now) -> WatchStatus {
         switch self {
         case let .movie(movie): movie.watchStatus
@@ -72,18 +82,14 @@ enum LibraryItem: Identifiable, Hashable {
     }
 }
 
-enum LibraryScope: Hashable, CaseIterable {
+enum LibraryScope: Hashable {
     case all, movies, shows, backlog, watched
+    case space(UUID), tag(UUID), smartList(UUID)
 
-    var defaultSort: LibrarySort { self == .watched ? .lastWatched : .added }
+    /// Scopes offered by the iPhone segmented control.
+    static let fixed: [LibraryScope] = [.all, .movies, .shows, .backlog, .watched]
 
-    /// Dropping a title here adds it to the library (and the backlog, for Backlog).
-    /// Watched doesn't accept drops: marking a whole show watched by accident is too costly.
-    var acceptsDrops: Bool { self != .watched }
-
-    /// Short label for the iPhone segmented control.
-    var shortTitle: String { self == .shows ? "TV" : title }
-
+    /// Title for fixed scopes; collection scopes are named by their model.
     var title: String {
         switch self {
         case .all: "All"
@@ -91,8 +97,25 @@ enum LibraryScope: Hashable, CaseIterable {
         case .shows: "TV Shows"
         case .backlog: "Backlog"
         case .watched: "Watched"
+        case .space: "Space"
+        case .tag: "Tag"
+        case .smartList: "Smart List"
         }
     }
+
+    var defaultSort: LibrarySort { self == .watched ? .lastWatched : .added }
+
+    /// Dropping a title here adds it to the library (and the backlog, for Backlog; the space, for a space).
+    /// Watched and smart lists don't accept drops: their contents follow from rules, not placement.
+    var acceptsDrops: Bool {
+        switch self {
+        case .watched, .smartList: false
+        default: true
+        }
+    }
+
+    /// Short label for the iPhone segmented control.
+    var shortTitle: String { self == .shows ? "TV" : title }
 }
 
 enum LibrarySort: String, CaseIterable, Identifiable {

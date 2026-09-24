@@ -108,6 +108,7 @@ struct OpenInNewWindowButton: View {
 
 /// Root of a secondary window showing one title.
 struct TitleWindow: View {
+    @Environment(AppState.self) private var appState
     let reference: TitleReference?
 
     var body: some View {
@@ -118,6 +119,7 @@ struct TitleWindow: View {
                 ContentUnavailableView("No Title", systemImage: "film")
             }
         }
+        .collectionEditorSheet(appState)
         #if os(macOS)
         .frame(minWidth: 480, minHeight: 500)
         #endif

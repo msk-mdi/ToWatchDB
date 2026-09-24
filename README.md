@@ -17,6 +17,12 @@ with monthly activity, top genres and actors, highlights, a comparison with anot
 **Backup** (Settings, or File ▸ Import/Export on Mac): export the whole library as JSON and import it on any
 device. Importing merges, so nothing is lost or duplicated. **Export as CSV** gives one row per title for spreadsheets.
 
+**Siri & Shortcuts**: 18 actions (next episodes, upcoming, mark watched, rate, notes, backlog, stats, where to
+watch, open lists/collections/titles, search) and 9 ready-made Siri phrases such as "What's next in ToWatchDB"
+or "Mark Severance watched in ToWatchDB". The system only runs them for apps signed with a team: add a free Apple ID
+in Xcode ▸ Settings ▸ Accounts and set `DEVELOPMENT_TEAM` / `CODE_SIGN_IDENTITY` in `Config/Secrets.xcconfig`
+(see `Secrets.example.xcconfig`).
+
 On iPad and Mac, any title can open in its own window, posters drag into the library or backlog
 (or out to other apps as a TMDB link), and the Title menu acts on the title on screen:
 ⇧⌘E mark watched / next episode, ⇧⌘B backlog, ⇧⌘L favorite, ⇧⌘R refresh.
@@ -26,6 +32,7 @@ On iPad and Mac, any title can open in its own window, posters drag into the lib
 1. `brew install xcodegen`
 2. `cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig` and paste your TMDB v4 read access token
    (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain).
+   Optionally add your signing team there too, so Siri & Shortcuts actions run.
 3. `xcodegen generate && open ToWatchDB.xcodeproj`
 
 The Xcode project is generated from `project.yml` — edit that, not the `.xcodeproj`.

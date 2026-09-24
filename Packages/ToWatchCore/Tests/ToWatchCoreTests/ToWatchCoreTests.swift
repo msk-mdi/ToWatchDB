@@ -469,3 +469,42 @@ private var utcCalendar: Calendar {
     #expect(lines[1].contains("2024-12-31"))
     #expect(lines[2].hasPrefix("TV Show,95396,Severance,2022,Not Watched"))
 }
+
+// MARK: - Spoken summaries
+
+@MainActor @Test func spokenSummaries() throws {
+    let library = try makeLibrary()
+    let show = try insertSeverance(into: library)
+    #expect(SpokenSummaries.nextEpisodes([show], now: now) == "You have 1 show to continue: Severance S01E01.")
+
+    let s1e1 = try #require(show.regularEpisodes.first)
+    library.setWatched(s1e1, true, on: now)
+    let next = show.nextEpisodeToWatch(asOf: now)
+    #expect(SpokenSummaries.markedWatched(s1e1, next: next).hasPrefix("Marked Severance S01E01 as watched. Next up: S01E02"))
+
+    library.setWatched(show, true, on: now, now: now)
+    #expect(SpokenSummaries.nextEpisodes([show], now: now) == "You're all caught up. No episodes left to watch.")
+
+    let upcoming = UpcomingService.upcoming(movies: [], shows: [show], now: now)
+    #expect(SpokenSummaries.upcoming(upcoming, limit: 1, now: now).hasPrefix("Coming up: Severance S02E02 on "))
+    #expect(SpokenSummaries.upcoming(upcoming, limit: 1, now: now).hasSuffix(", and 1 more."))
+    #expect(SpokenSummaries.upcoming([], now: now) == "Nothing from your library is coming up.")
+
+    var stats = WatchStats()
+    #expect(SpokenSummaries.stats(stats, periodLabel: "2025") == "You haven't watched anything in 2025.")
+    stats.moviesWatched = 1
+    stats.episodesWatched = 9
+    stats.movieMinutes = 148
+    stats.episodeMinutes = 60
+    #expect(SpokenSummaries.stats(stats, periodLabel: "Last 30 Days")
+        == "In the last 30 days you watched 1 movie and 9 episodes, 3 hours, 28 minutes in total.")
+}
+
+@Test func spokenWhereToWatch() throws {
+    let providers: TMDBWatchProviders = try fixture("providers_inception")
+    let sentence = SpokenSummaries.whereToWatch("Inception", offers: providers.results["FR"], countryName: "France")
+    #expect(sentence.hasPrefix("In France, you can stream on "))
+    #expect(sentence.contains("rent on Apple TV Store"))
+    #expect(SpokenSummaries.whereToWatch("Inception", offers: nil, countryName: "Chad")
+        == "Inception isn't available to stream, rent, or buy in Chad.")
+}

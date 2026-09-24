@@ -4,6 +4,7 @@ import ToWatchCore
 
 @main
 struct ToWatchDBApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     #if DEBUG
     // Sample-data and snapshot runs use a throwaway in-memory library.
     @State private var appState = AppState(inMemory: DebugTools.usesSampleData)
@@ -25,6 +26,10 @@ struct ToWatchDBApp: App {
                     await DebugTools.runIfRequested(appState)
                     #endif
                     await appState.refreshLibrary()
+                }
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    // Teach Siri the current show and movie names for phrases like "Mark Severance watched".
+                    if phase == .active { ToWatchShortcuts.updateAppShortcutParameters() }
                 }
         }
         .modelContainer(appState.container)

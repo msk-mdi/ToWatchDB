@@ -7,6 +7,9 @@ struct RootView: View {
     @Query(sort: \Space.name) private var spaces: [Space]
     @Query(sort: \SmartList.name) private var smartLists: [SmartList]
     @Query(sort: \MediaTag.name) private var tags: [MediaTag]
+    @State private var router = IntentRouter.shared
+    /// iPhone: lists that aren't tabs, opened by a Siri or Shortcuts action.
+    @State private var intentSheet: IntentSheet?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -31,6 +34,37 @@ struct RootView: View {
         }
         .collectionEditorSheet(appState)
         .libraryFileTransfers($appState.fileRequest)
+        .onChange(of: router.destination, initial: true) { _, destination in
+            guard let destination else { return }
+            router.destination = nil
+            open(destination)
+        }
+        .sheet(item: $router.title) { reference in
+            NavigationStack {
+                RemoteDetailView(summary: MediaSummary(reference))
+                    .appDestinations()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Done") { router.title = nil } }
+                    }
+            }
+            #if os(macOS)
+            .frame(minWidth: 700, minHeight: 700)
+            #endif
+        }
+        .sheet(item: $intentSheet) { sheet in
+            NavigationStack {
+                Group {
+                    switch sheet {
+                    case let .scope(scope): LibraryView(scope: scope, showsSettingsButton: false)
+                    case .stats: StatsView()
+                    }
+                }
+                .appDestinations()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Done") { intentSheet = nil } }
+                }
+            }
+        }
         .onChange(of: collectionIDs) { _, ids in
             // Leave a space, tag, or smart list's tab if it was deleted.
             switch appState.selectedTab {
@@ -50,6 +84,36 @@ struct RootView: View {
             }
         }
         #endif
+    }
+
+    private enum IntentSheet: Identifiable {
+        case scope(LibraryScope), stats
+        var id: String { "\(self)" }
+    }
+
+    private var isCompact: Bool {
+        #if os(iOS)
+        sizeClass == .compact
+        #else
+        false
+        #endif
+    }
+
+    /// Goes where a Siri or Shortcuts action asked: a tab when one exists, otherwise a sheet (iPhone).
+    private func open(_ destination: IntentRouter.Destination) {
+        let tab: AppTab = switch destination {
+        case let .tab(tab): tab
+        case let .scope(scope): scope.tab
+        }
+        guard isCompact, tab.isSidebarOnly else {
+            appState.selectedTab = tab
+            return
+        }
+        switch destination {
+        case .tab(.stats): intentSheet = .stats
+        case let .scope(scope): intentSheet = .scope(scope)
+        case .tab: appState.selectedTab = .all
+        }
     }
 
     private var collectionIDs: Set<UUID> {
@@ -199,6 +263,22 @@ extension AppTab {
         switch self {
         case .backlog, .watched, .movies, .shows, .organize, .stats, .space, .tag, .smartList: true
         default: false
+        }
+    }
+}
+
+extension LibraryScope {
+    /// The sidebar tab that shows this scope.
+    var tab: AppTab {
+        switch self {
+        case .all: .all
+        case .movies: .movies
+        case .shows: .shows
+        case .backlog: .backlog
+        case .watched: .watched
+        case let .space(id): .space(id)
+        case let .tag(id): .tag(id)
+        case let .smartList(id): .smartList(id)
         }
     }
 }

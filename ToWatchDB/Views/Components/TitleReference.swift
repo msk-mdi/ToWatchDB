@@ -10,7 +10,7 @@ extension UTType {
 
 /// A lightweight, value-type pointer to a movie or show: dragged between views and windows,
 /// and used as the value that opens a title in its own window.
-struct TitleReference: Codable, Hashable, Sendable, Transferable {
+struct TitleReference: Codable, Hashable, Sendable, Transferable, Identifiable {
     let kind: MediaSummary.Kind
     let tmdbID: Int
     let title: String
@@ -27,6 +27,12 @@ struct TitleReference: Codable, Hashable, Sendable, Transferable {
     init(_ summary: MediaSummary) {
         kind = summary.kind; tmdbID = summary.tmdbID; title = summary.title; posterPath = summary.posterPath
     }
+
+    init(kind: MediaSummary.Kind, tmdbID: Int, title: String, posterPath: String?) {
+        self.kind = kind; self.tmdbID = tmdbID; self.title = title; self.posterPath = posterPath
+    }
+
+    var id: String { "\(kind.rawValue)-\(tmdbID)" }
 
     var tmdbURL: URL { URL(string: "https://www.themoviedb.org/\(kind.rawValue)/\(tmdbID)")! }
 

@@ -37,21 +37,13 @@ final class AppState {
     }
 
     init(inMemory: Bool = false) {
-        do {
-            let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
-            container = try ModelContainer(for: Schema(ToWatchSchema.models), configurations: configuration)
-        } catch {
-            fatalError("Couldn't open the library database: \(error)")
-        }
+        container = inMemory ? SharedLibrary.makeContainer(inMemory: true) : SharedLibrary.container
     }
 
     var token: String? { tokenOverride ?? TokenStore.bundledToken }
     var hasBundledToken: Bool { TokenStore.bundledToken != nil }
 
-    var client: TMDBClient? {
-        guard let token else { return nil }
-        return TMDBClient(token: token, language: language.isEmpty ? Locale.current.identifier(.bcp47) : language)
-    }
+    var client: TMDBClient? { SharedLibrary.makeClient(token: token, language: language) }
 
     var library: LibraryService { LibraryService(context: container.mainContext, client: client) }
 
@@ -83,4 +75,47 @@ final class AppState {
         defer { isRefreshing = false }
         await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
     }
+}
+
+/// The on-disk library, shared by the app's UI and Siri/Shortcuts actions. Actions run in the app's process,
+/// so using the same container (and main context) makes their changes appear in open windows immediately.
+@MainActor
+enum SharedLibrary {
+    static let container = makeContainer(inMemory: false)
+
+    static func makeContainer(inMemory: Bool) -> ModelContainer {
+        do {
+            let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
+            return try ModelContainer(for: Schema(ToWatchSchema.models), configurations: configuration)
+        } catch {
+            fatalError("Couldn't open the library database: \(error)")
+        }
+    }
+
+    /// TMDB client from the saved token and language, for code that runs outside the UI.
+    static func makeClient(token: String? = TokenStore.load() ?? TokenStore.bundledToken,
+                           language: String = UserDefaults.standard.string(forKey: "tmdbLanguage") ?? "") -> TMDBClient? {
+        guard let token else { return nil }
+        return TMDBClient(token: token, language: language.isEmpty ? Locale.current.identifier(.bcp47) : language)
+    }
+
+    static var service: LibraryService { LibraryService(context: container.mainContext, client: makeClient()) }
+
+    static var watchRegion: String {
+        UserDefaults.standard.string(forKey: "watchRegion") ?? Locale.current.region?.identifier ?? "US"
+    }
+}
+
+/// Where a Siri or Shortcuts action asked the app to go.
+@Observable @MainActor
+final class IntentRouter {
+    static let shared = IntentRouter()
+
+    enum Destination: Hashable {
+        case tab(AppTab)
+        case scope(LibraryScope)
+    }
+
+    var destination: Destination?
+    var title: TitleReference?
 }

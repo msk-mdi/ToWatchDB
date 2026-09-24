@@ -1,4 +1,13 @@
 // Shared build settings. Secrets are optional so the project builds without them;
 // a token can also be set at runtime in Settings.
 TMDB_READ_TOKEN =
+
+// Signing: ad-hoc by default, which runs the app but not its Siri & Shortcuts actions
+// (the system only runs App Intents from apps signed with a team). To enable them, add a
+// free Apple ID in Xcode ▸ Settings ▸ Accounts and put your team in Config/Secrets.xcconfig:
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM =
+CODE_SIGN_IDENTITY = -
+
 #include? "Secrets.xcconfig"

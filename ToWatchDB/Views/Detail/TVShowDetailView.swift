@@ -56,6 +56,7 @@ struct TVShowDetailView: View {
             NotesSection(notes: show.notes ?? []) { appState.library.addNote($0, to: show) }
         }
         .navigationTitle(show.name)
+        .focusedSceneValue(\.focusedTitle, .show(show))
         .toolbar {
             ToolbarItemGroup {
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh() }

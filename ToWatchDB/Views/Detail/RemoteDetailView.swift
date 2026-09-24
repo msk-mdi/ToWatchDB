@@ -37,8 +37,9 @@ private struct RemotePreview: View {
         DetailLayout(
             title: summary.title,
             subtitle: subtitle,
-            posterPath: summary.posterPath,
-            backdropPath: summary.backdropPath,
+            // Fall back to the fetched detail: summaries restored from a window reference carry no artwork.
+            posterPath: summary.posterPath ?? movie?.posterPath ?? show?.posterPath,
+            backdropPath: summary.backdropPath ?? movie?.backdropPath ?? show?.backdropPath,
             tagline: movie?.tagline ?? show?.tagline,
             overview: movie?.overview ?? show?.overview ?? summary.overview,
             genres: (movie?.genres ?? show?.genres ?? []).map(\.name),

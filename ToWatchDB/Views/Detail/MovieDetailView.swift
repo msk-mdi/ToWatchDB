@@ -44,6 +44,7 @@ struct MovieDetailView: View {
             NotesSection(notes: movie.notes ?? []) { appState.library.addNote($0, to: movie) }
         }
         .navigationTitle(movie.title)
+        .focusedSceneValue(\.focusedTitle, .movie(movie))
         .toolbar {
             ToolbarItemGroup {
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh() }

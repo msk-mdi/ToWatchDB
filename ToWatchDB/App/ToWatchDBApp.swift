@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import ToWatchCore
 
 @main
 struct ToWatchDBApp: App {
@@ -32,6 +33,16 @@ struct ToWatchDBApp: App {
         .defaultSize(width: 1200, height: 800)
         #endif
 
+        // A single title in its own window ("Open in New Window" on iPad and Mac).
+        WindowGroup("Title", for: TitleReference.self) { $reference in
+            TitleWindow(reference: reference)
+                .environment(appState)
+        }
+        .modelContainer(appState.container)
+        #if os(macOS)
+        .defaultSize(width: 900, height: 900)
+        #endif
+
         #if os(macOS)
         Settings {
             SettingsView()
@@ -42,8 +53,19 @@ struct ToWatchDBApp: App {
     }
 }
 
+/// The movie or show on screen in the focused window, for the Title menu.
+enum FocusedTitle {
+    case movie(Movie)
+    case show(TVShow)
+}
+
+extension FocusedValues {
+    @Entry var focusedTitle: FocusedTitle?
+}
+
 struct AppCommands: Commands {
     let appState: AppState
+    @FocusedValue(\.focusedTitle) private var title
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -63,6 +85,42 @@ struct AppCommands: Commands {
                 .keyboardShortcut("3")
             Button("All Titles") { appState.selectedTab = .all }
                 .keyboardShortcut("4")
+        }
+        CommandMenu("Title") { titleCommands }
+    }
+
+    @ViewBuilder
+    private var titleCommands: some View {
+        let library = appState.library
+        switch title {
+        case let .movie(movie):
+            Button(movie.isWatched ? "Mark as Not Watched" : "Mark as Watched") { library.setWatched(movie, !movie.isWatched) }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(!movie.isWatched && !movie.isReleased())
+            Button(movie.isInBacklog ? "Remove from Backlog" : "Add to Backlog") { library.setBacklog(movie, !movie.isInBacklog) }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+            Button(movie.isFavorite ? "Remove from Favorites" : "Add to Favorites") { library.setFavorite(movie, !movie.isFavorite) }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Divider()
+            Button("Refresh Title") { Task { await appState.perform { try await $0.refresh(movie) } } }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+        case let .show(show):
+            let next = show.nextEpisodeToWatch()
+            Button(next.map { "Mark \($0.code) as Watched" } ?? "Mark Next Episode as Watched") {
+                if let next { library.setWatched(next, true) }
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(next == nil)
+            Button(show.isInBacklog ? "Remove from Backlog" : "Add to Backlog") { library.setBacklog(show, !show.isInBacklog) }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+            Button(show.isFavorite ? "Remove from Favorites" : "Add to Favorites") { library.setFavorite(show, !show.isFavorite) }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Button(show.isAbandoned ? "Resume Watching" : "Abandon Show") { library.setAbandoned(show, !show.isAbandoned) }
+            Divider()
+            Button("Refresh Title") { Task { await appState.perform { try await $0.refresh(show) } } }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+        case nil:
+            Text("Open a movie or show to use these commands")
         }
     }
 }

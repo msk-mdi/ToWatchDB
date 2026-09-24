@@ -1,7 +1,11 @@
 # ToWatchDB
 
-A movie and TV tracker for macOS and iOS (iPadOS polish next), built with SwiftUI + SwiftData on top of TMDB.
+A movie and TV tracker for macOS, iOS and iPadOS, built with SwiftUI + SwiftData on top of TMDB.
 One multiplatform target: a sidebar on Mac and iPad, five compact tabs on iPhone.
+
+On iPad and Mac, any title can open in its own window, posters drag into the library or backlog
+(or out to other apps as a TMDB link), and the Title menu acts on the title on screen:
+⇧⌘E mark watched / next episode, ⇧⌘B backlog, ⇧⌘L favorite, ⇧⌘R refresh.
 
 ## Setup
 

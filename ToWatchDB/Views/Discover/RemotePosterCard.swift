@@ -23,11 +23,13 @@ struct RemotePosterCard: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .titleInteractions(TitleReference(summary))
         .contextMenu {
             if !isInLibrary {
                 Button("Add to Library", systemImage: "plus") { add(backlog: false) }
                 Button("Add to Backlog", systemImage: "tray.and.arrow.down") { add(backlog: true) }
             }
+            OpenInNewWindowButton(reference: TitleReference(summary))
         }
     }
 

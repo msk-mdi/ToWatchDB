@@ -3,7 +3,7 @@ import ToWatchCore
 
 /// A TMDB search/trending result that may or may not be in the library yet.
 struct MediaSummary: Hashable, Identifiable, Sendable {
-    enum Kind: String, Hashable, Sendable, CaseIterable, Identifiable {
+    enum Kind: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
         case movie, tv
         var id: Self { self }
         var label: String { self == .movie ? "Movies" : "TV Shows" }
@@ -29,6 +29,19 @@ struct MediaSummary: Hashable, Identifiable, Sendable {
         backdropPath = movie.backdropPath
         date = TMDBDate.parse(movie.releaseDate)
         voteAverage = movie.voteAverage
+    }
+
+    /// A bare summary for a title known only by reference (e.g. a window restored by ID).
+    /// The detail view fills in artwork and text once it loads.
+    init(_ reference: TitleReference) {
+        kind = reference.kind
+        tmdbID = reference.tmdbID
+        title = reference.title
+        overview = nil
+        posterPath = reference.posterPath
+        backdropPath = nil
+        date = nil
+        voteAverage = nil
     }
 
     init(_ show: TMDBTVSummary) {

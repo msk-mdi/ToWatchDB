@@ -14,6 +14,7 @@ struct LibraryView: View {
     @State private var statusFilter: WatchStatus?
     @State private var sort: LibrarySort
     @State private var searchText = ""
+    @State private var isDropTargeted = false
 
     init(scope: LibraryScope, allowsScopeChange: Bool = false) {
         _scope = State(initialValue: scope)
@@ -59,6 +60,19 @@ struct LibraryView: View {
                 sortPicker.pickerStyle(.menu).fixedSize()
             }
             #endif
+        }
+        .dropDestination(for: TitleReference.self) { references, _ in
+            guard scope.acceptsDrops else { return false }
+            Task { await appState.perform { try await $0.add(references, backlog: scope == .backlog) } }
+            return true
+        } isTargeted: { isDropTargeted = $0 && scope.acceptsDrops }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8, 6]))
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
         }
         .onChange(of: scope) { _, newScope in
             statusFilter = nil
@@ -153,6 +167,7 @@ struct LibraryPosterCard: View {
             }
         }
         .buttonStyle(.plain)
+        .titleInteractions(item.reference)
         .contextMenu { menu(status: status) }
         .confirmationDialog("Remove “\(item.title)” from your library?", isPresented: $confirmDelete) {
             Button("Remove", role: .destructive) {
@@ -221,6 +236,7 @@ struct LibraryPosterCard: View {
             }
         }
         Divider()
+        OpenInNewWindowButton(reference: item.reference)
         Button("Remove from Library…", systemImage: "trash", role: .destructive) { confirmDelete = true }
     }
 }

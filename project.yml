@@ -31,6 +31,10 @@ targets:
         LSApplicationCategoryType: public.app-category.entertainment
         TMDBReadToken: $(TMDB_READ_TOKEN)
         UILaunchScreen: {}
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.mehdi.towatchdb.title
+            UTTypeDescription: ToWatchDB Title
+            UTTypeConformsTo: [public.data]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
         UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]

@@ -44,5 +44,18 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>ToWatchDB Title</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.mehdi.towatchdb.title</string>
+		</dict>
+	</array>
 </dict>
 </plist>

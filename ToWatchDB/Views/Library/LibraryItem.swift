@@ -77,6 +77,10 @@ enum LibraryScope: Hashable, CaseIterable {
 
     var defaultSort: LibrarySort { self == .watched ? .lastWatched : .added }
 
+    /// Dropping a title here adds it to the library (and the backlog, for Backlog).
+    /// Watched doesn't accept drops: marking a whole show watched by accident is too costly.
+    var acceptsDrops: Bool { self != .watched }
+
     /// Short label for the iPhone segmented control.
     var shortTitle: String { self == .shows ? "TV" : title }
 

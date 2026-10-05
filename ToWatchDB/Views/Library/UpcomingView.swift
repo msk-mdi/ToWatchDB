@@ -4,6 +4,7 @@ import ToWatchCore
 
 /// Movies and episodes in your library releasing today or later, grouped by day.
 struct UpcomingView: View {
+    @Environment(AppState.self) private var appState
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
@@ -34,6 +35,16 @@ struct UpcomingView: View {
             }
         }
         .navigationTitle("Upcoming")
+        .toolbar {
+            // Also keeps the Mac toolbar from collapsing: a List page with an empty toolbar
+            // made the whole window shift up when you switched to it.
+            ToolbarItem {
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task { await appState.refreshLibrary(force: true) }
+                }
+                .disabled(appState.isRefreshing)
+            }
+        }
     }
 
     private func relative(_ day: Date, now: Date) -> String {

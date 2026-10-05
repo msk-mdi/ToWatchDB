@@ -16,13 +16,16 @@ struct StatsView: View {
     var body: some View {
         let stats = StatsService.stats(movies: movies, shows: shows, period: period)
         let years = StatsService.watchYears(movies: movies, shows: shows)
+        let showsCompare = if case let .year(year) = period { years.contains { $0 != year } } else { false }
+        // With nothing else on the page, the empty state is centered like every other screen's.
+        let isBlank = stats.isEmpty && !showsCompare && stats.undatedWatches == 0
 
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if stats.isEmpty {
-                    ContentUnavailableView("Nothing Watched \(periodPhrase)", systemImage: "chart.bar",
-                                           description: Text("Mark movies and episodes as watched to see your stats."))
-                        .padding(.top, 40)
+                    if !isBlank {
+                        emptyMessage.frame(maxWidth: .infinity).padding(.top, 40)
+                    }
                 } else {
                     SummaryTiles(stats: stats)
                     ActivityChart(stats: stats)
@@ -40,7 +43,7 @@ struct StatsView: View {
                     Highlights(stats: stats)
                 }
 
-                if case let .year(year) = period, years.contains(where: { $0 != year }) {
+                if showsCompare, case let .year(year) = period {
                     CompareSection(year: year, years: years.filter { $0 != year }, comparedYear: $comparedYear,
                                    movies: movies, shows: shows)
                 }
@@ -56,6 +59,7 @@ struct StatsView: View {
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .centeredEmptyState(isBlank) { emptyMessage }
         .navigationTitle("Stats")
         .toolbar {
             ToolbarItem {
@@ -87,6 +91,11 @@ struct StatsView: View {
 
     private var fixedPeriods: [StatsPeriod] {
         [.thisWeek, .thisMonth, .lastDays(30), .lastDays(90), .allTime]
+    }
+
+    private var emptyMessage: some View {
+        ContentUnavailableView("Nothing Watched \(periodPhrase)", systemImage: "chart.bar",
+                               description: Text("Mark movies and episodes as watched to see your stats."))
     }
 
     /// The current year is always offered, plus every year with watch history.

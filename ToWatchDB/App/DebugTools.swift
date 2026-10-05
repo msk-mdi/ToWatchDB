@@ -9,6 +9,7 @@ import AppKit
 /// Debug-only helpers for checking the UI with real TMDB data in a throwaway in-memory library.
 ///
 /// - `-UISeedSampleData YES` seeds sample titles (any platform; used with the iOS Simulator).
+///   Add `-UISkipSeed YES` for an empty library instead.
 /// - `-UISnapshotDir <dir>` (macOS) also seeds, visits each tab, writes a PNG per screen, and quits.
 ///   The app captures its own windows, so no screen-recording permission is needed. Next to each PNG
 ///   it writes a `.wid` file with the window number, for a faithful `screencapture -l` from outside.
@@ -19,7 +20,8 @@ enum DebugTools {
 
     static func runIfRequested(_ appState: AppState) async {
         guard usesSampleData else { return }
-        await seed(appState)
+        // `-UISkipSeed YES` keeps the library empty, to check empty states.
+        if !UserDefaults.standard.bool(forKey: "UISkipSeed") { await seed(appState) }
         #if os(macOS)
         if let snapshotDir { await snapshot(appState, to: URL(fileURLWithPath: snapshotDir, isDirectory: true)) }
         #endif

@@ -19,22 +19,25 @@ struct DiscoverView: View {
         let ids = LibraryIDs(movies: movies, shows: shows)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                if appState.client == nil {
-                    MissingTokenView()
-                } else if let loadError {
-                    ContentUnavailableView {
-                        Label("Couldn't Load Trending", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(loadError)
-                    } actions: {
-                        Button("Retry") { Task { await load() } }
-                    }
-                } else {
+                if appState.client != nil && loadError == nil {
                     shelf("Trending Movies", trendingMovies, ids)
                     shelf("Trending TV Shows", trendingShows, ids)
                 }
             }
             .padding()
+        }
+        .centeredEmptyState(appState.client == nil || loadError != nil) {
+            if appState.client == nil {
+                MissingTokenView()
+            } else {
+                ContentUnavailableView {
+                    Label("Couldn't Load Trending", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(loadError ?? "")
+                } actions: {
+                    Button("Retry") { Task { await load() } }
+                }
+            }
         }
         .navigationTitle("Discover")
         .settingsToolbarButton(appState)

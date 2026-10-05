@@ -23,16 +23,7 @@ struct SearchView: View {
                 .padding(.top, 8)
                 #endif
                 .padding(.horizontal)
-            if appState.client == nil {
-                MissingTokenView()
-            } else if let searchError {
-                ContentUnavailableView("Search Failed", systemImage: "exclamationmark.magnifyingglass", description: Text(searchError))
-            } else if trimmedQuery.isEmpty {
-                ContentUnavailableView("Search TMDB", systemImage: "magnifyingglass",
-                                       description: Text("Find movies and TV shows to add to your library."))
-            } else if results.isEmpty && !isSearching {
-                ContentUnavailableView.search(text: trimmedQuery)
-            } else {
+            if !showsPlaceholder {
                 PosterGrid {
                     ForEach(results) { item in
                         RemotePosterCard(summary: item, isInLibrary: ids.contains(item))
@@ -41,6 +32,7 @@ struct SearchView: View {
                 .padding()
             }
         }
+        .centeredEmptyState(showsPlaceholder) { placeholder }
         .navigationTitle("Search")
         .searchable(text: $query, placement: .adaptiveToolbar, prompt: kind == .movie ? "Search movies" : "Search TV shows")
         .toolbar {
@@ -49,6 +41,24 @@ struct SearchView: View {
             }
         }
         .task(id: "\(kind.rawValue):\(trimmedQuery)") { await search() }
+    }
+
+    private var showsPlaceholder: Bool {
+        appState.client == nil || searchError != nil || trimmedQuery.isEmpty || (results.isEmpty && !isSearching)
+    }
+
+    @ViewBuilder
+    private var placeholder: some View {
+        if appState.client == nil {
+            MissingTokenView()
+        } else if let searchError {
+            ContentUnavailableView("Search Failed", systemImage: "exclamationmark.magnifyingglass", description: Text(searchError))
+        } else if trimmedQuery.isEmpty {
+            ContentUnavailableView("Search TMDB", systemImage: "magnifyingglass",
+                                   description: Text("Find movies and TV shows to add to your library."))
+        } else {
+            ContentUnavailableView.search(text: trimmedQuery)
+        }
     }
 
     private var kindPicker: some View {

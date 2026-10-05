@@ -51,9 +51,7 @@ struct LibraryView: View {
                 #endif
                 CollectionShortcuts(showsStats: !AppTab.hasStatsTab)
             }
-            if items.isEmpty {
-                emptyState
-            } else {
+            if !items.isEmpty {
                 PosterGrid {
                     ForEach(items) { item in
                         LibraryPosterCard(item: item)
@@ -62,6 +60,7 @@ struct LibraryView: View {
                 .padding()
             }
         }
+        .centeredEmptyState(items.isEmpty) { emptyState }
         .navigationTitle(allowsScopeChange ? "Library" : title)
         .navigationSubtitleIfAvailable("\(items.count) title\(items.count == 1 ? "" : "s")")
         .librarySearch(isEnabled: !hasInlineFilters, text: $searchText, prompt: "Filter \(scope.title.lowercased())")

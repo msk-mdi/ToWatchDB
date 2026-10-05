@@ -17,9 +17,12 @@ struct SearchView: View {
     var body: some View {
         let ids = LibraryIDs(movies: movies, shows: shows)
         ScrollView {
-            #if os(iOS)
-            kindPicker.padding(.horizontal)
-            #endif
+            kindPicker
+                #if os(macOS)
+                .fixedSize()
+                .padding(.top, 8)
+                #endif
+                .padding(.horizontal)
             if appState.client == nil {
                 MissingTokenView()
             } else if let searchError {
@@ -41,9 +44,6 @@ struct SearchView: View {
         .navigationTitle("Search")
         .searchable(text: $query, placement: .adaptiveToolbar, prompt: kind == .movie ? "Search movies" : "Search TV shows")
         .toolbar {
-            #if os(macOS)
-            ToolbarItem(placement: .principal) { kindPicker.fixedSize() }
-            #endif
             if isSearching {
                 ToolbarItem { ProgressView().controlSize(.small) }
             }
@@ -56,6 +56,7 @@ struct SearchView: View {
             ForEach(MediaSummary.Kind.allCases) { Text($0.label).tag($0) }
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }

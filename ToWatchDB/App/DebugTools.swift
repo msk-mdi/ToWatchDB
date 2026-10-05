@@ -10,7 +10,8 @@ import AppKit
 ///
 /// - `-UISeedSampleData YES` seeds sample titles (any platform; used with the iOS Simulator).
 /// - `-UISnapshotDir <dir>` (macOS) also seeds, visits each tab, writes a PNG per screen, and quits.
-///   The app captures its own windows, so no screen-recording permission is needed.
+///   The app captures its own windows, so no screen-recording permission is needed. Next to each PNG
+///   it writes a `.wid` file with the window number, for a faithful `screencapture -l` from outside.
 @MainActor
 enum DebugTools {
     static var snapshotDir: String? { UserDefaults.standard.string(forKey: "UISnapshotDir") }
@@ -77,7 +78,7 @@ enum DebugTools {
         for (tab, name) in tabs {
             appState.selectedTab = tab
             try? await Task.sleep(for: .seconds(4))
-            if let window = NSApp.windows.first(where: \.isVisible) { capture(window, to: output.appending(path: "\(name).png")) }
+            if let window = NSApp.windows.first(where: \.isVisible) { await capture(window, to: output.appending(path: "\(name).png")) }
         }
         // Detail screens, hosted in their own windows since tab stacks have no programmatic path.
         if let show = library.show(tmdbID: 95396) {
@@ -108,15 +109,20 @@ enum DebugTools {
         window.contentView = NSHostingView(rootView: view.environment(appState).modelContainer(appState.container))
         window.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .seconds(4))
-        capture(window, to: url)
+        await capture(window, to: url)
         window.close()
     }
 
-    private static func capture(_ window: NSWindow, to url: URL) {
+    private static func capture(_ window: NSWindow, to url: URL) async {
         guard let view = window.contentView?.superview,
               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        // cacheDisplay can't draw sidebar and toolbar materials. Leave the window number for an outside
+        // `screencapture -l <id>` (which needs Screen Recording permission), and hold still for it.
+        try? String(window.windowNumber).write(to: url.deletingPathExtension().appendingPathExtension("wid"),
+                                               atomically: true, encoding: .utf8)
+        try? await Task.sleep(for: .seconds(1.5))
     }
     #endif
 }

@@ -142,62 +142,11 @@ struct RootView: View {
     /// Mac and iPad: every list is its own sidebar entry. The sidebar can't be collapsed.
     private var sidebar: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(selection: Binding(
-                get: { appState.selectedTab },
-                set: { if let tab = $0 { appState.selectedTab = tab } }
-            )) {
-                Label("Discover", systemImage: "sparkles.tv").tag(AppTab.discover)
-                Label("Search", systemImage: "magnifyingglass").tag(AppTab.search)
-
-                Section("Lists") {
-                    Label("Next to Watch", systemImage: "play.circle").tag(AppTab.nextToWatch)
-                    Label("Upcoming", systemImage: "calendar").tag(AppTab.upcoming)
-                    Label("Backlog", systemImage: "tray.full").tag(AppTab.backlog)
-                    Label("Watched", systemImage: "checkmark.circle").tag(AppTab.watched)
-                    Label("Stats", systemImage: "chart.bar.xaxis").tag(AppTab.stats)
-                }
-
-                Section("Library") {
-                    Label("All", systemImage: "square.grid.2x2").tag(AppTab.all)
-                    Label("Movies", systemImage: "film").tag(AppTab.movies)
-                    Label("TV Shows", systemImage: "tv").tag(AppTab.shows)
-                    Label("Organize", systemImage: "square.stack.3d.up").tag(AppTab.organize)
-                }
-
-                if !spaces.isEmpty {
-                    Section("Spaces") {
-                        ForEach(spaces) { space in
-                            Label { Text(space.name) } icon: {
-                                Image(systemName: space.symbolName).foregroundStyle(space.color)
-                            }
-                            .tag(AppTab.space(space.uuid))
-                        }
-                    }
-                }
-                if !smartLists.isEmpty {
-                    Section("Smart Lists") {
-                        ForEach(smartLists) { list in
-                            Label { Text(list.name) } icon: {
-                                Image(systemName: list.symbolName).foregroundStyle(list.color)
-                            }
-                            .tag(AppTab.smartList(list.uuid))
-                        }
-                    }
-                }
-                if !tags.isEmpty {
-                    Section("Tags") {
-                        ForEach(tags) { tag in
-                            Label { Text(tag.name) } icon: {
-                                Image(systemName: "tag").foregroundStyle(tag.color)
-                            }
-                            .tag(AppTab.tag(tag.uuid))
-                        }
-                    }
-                }
-            }
-            .navigationTitle("ToWatchDB")
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
-            .toolbar(removing: .sidebarToggle)
+            sidebarList
+                .navigationTitle("ToWatchDB")
+                .navigationSplitViewColumnWidth(min: 220, ideal: 230, max: 320)
+                .frame(minWidth: 220)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             // A fresh stack per list, so going back to a list doesn't land on a stale detail page.
             NavigationStack { screen(for: appState.selectedTab).appDestinations() }
@@ -206,8 +155,65 @@ struct RootView: View {
         .navigationSplitViewStyle(.balanced)
     }
 
+    /// iPad uses native list selection. A Mac sidebar would draw its selection in the system accent color
+    /// (or the built-in coral), so on Mac the rows draw their own highlight in the chosen color.
     @ViewBuilder
-    private func screen(for tab: AppTab) -> some View {
+    private var sidebarList: some View {
+        #if os(macOS)
+        List { sidebarRows }
+        #else
+        List(selection: Binding(
+            get: { appState.selectedTab },
+            set: { if let tab = $0 { appState.selectedTab = tab } }
+        )) { sidebarRows }
+        #endif
+    }
+
+    @ViewBuilder
+    private var sidebarRows: some View {
+        SidebarRow(title: "Discover", symbol: "sparkles.tv", tab: .discover)
+        SidebarRow(title: "Search", symbol: "magnifyingglass", tab: .search)
+
+        Section("Lists") {
+            SidebarRow(title: "Next to Watch", symbol: "play.circle", tab: .nextToWatch)
+            SidebarRow(title: "Upcoming", symbol: "calendar", tab: .upcoming)
+            SidebarRow(title: "Backlog", symbol: "tray.full", tab: .backlog)
+            SidebarRow(title: "Watched", symbol: "checkmark.circle", tab: .watched)
+            SidebarRow(title: "Stats", symbol: "chart.bar.xaxis", tab: .stats)
+        }
+
+        Section("Library") {
+            SidebarRow(title: "All", symbol: "square.grid.2x2", tab: .all)
+            SidebarRow(title: "Movies", symbol: "film", tab: .movies)
+            SidebarRow(title: "TV Shows", symbol: "tv", tab: .shows)
+            SidebarRow(title: "Organize", symbol: "square.stack.3d.up", tab: .organize)
+        }
+
+        if !spaces.isEmpty {
+            Section("Spaces") {
+                ForEach(spaces) { space in
+                    SidebarRow(title: space.name, symbol: space.symbolName, tab: .space(space.uuid), iconColor: space.color)
+                }
+            }
+        }
+        if !smartLists.isEmpty {
+            Section("Smart Lists") {
+                ForEach(smartLists) { list in
+                    SidebarRow(title: list.name, symbol: list.symbolName, tab: .smartList(list.uuid), iconColor: list.color)
+                }
+            }
+        }
+        if !tags.isEmpty {
+            Section("Tags") {
+                ForEach(tags) { tag in
+                    SidebarRow(title: tag.name, symbol: "tag", tab: .tag(tag.uuid), iconColor: tag.color)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func screen(for tab: AppTab, inTabBar: Bool = false) -> some View {
         switch tab {
         case .discover: DiscoverView()
         case .search: SearchView()
@@ -215,7 +221,7 @@ struct RootView: View {
         case .upcoming: UpcomingView()
         case .stats: StatsView()
         case .organize: OrganizeView()
-        default: LibraryView(scope: tab.libraryScope ?? .all)
+        default: LibraryView(scope: tab.libraryScope ?? .all, allowsScopeChange: inTabBar)
         }
     }
 
@@ -224,7 +230,22 @@ struct RootView: View {
     /// iPhone, and Mac or iPad with the Top Bar layout. Library scopes collapse into one tab with a
     /// scope picker; collections are chips under it. iOS has no Stats tab (on iPhone a fifth tab would
     /// push Search into "More"; on iPad it would overflow the top bar), so Stats is a chip there too.
+    @ViewBuilder
     private var tabBar: some View {
+        #if os(macOS)
+        // A segmented control in the toolbar's center: unlike TabView's tab bar, it stays in place
+        // whatever toolbar items the current screen adds.
+        NavigationStack { screen(for: appState.selectedTab, inTabBar: true).appDestinations() }
+            .id(appState.selectedTab)
+            .toolbar {
+                ToolbarItem(placement: .principal) { TopBarPicker(tabs: tabBarTabs) }
+            }
+        #else
+        tabView
+        #endif
+    }
+
+    private var tabView: some View {
         @Bindable var appState = appState
         return TabView(selection: $appState.selectedTab) {
             Tab("Discover", systemImage: "sparkles.tv", value: AppTab.discover) {
@@ -251,6 +272,75 @@ struct RootView: View {
         .tabViewStyle(.tabBarOnly)
     }
 }
+
+/// A sidebar entry. On Mac it's a button with its own highlight in the theme color; on iPad, a tagged
+/// row for the list's native selection.
+private struct SidebarRow: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.themeColor) private var themeColor
+    let title: String
+    let symbol: String
+    let tab: AppTab
+    /// Spaces, tags, and smart lists keep their own color; built-in lists use the theme color.
+    var iconColor: Color?
+
+    var body: some View {
+        #if os(macOS)
+        let isSelected = appState.selectedTab == tab
+        Button { appState.selectedTab = tab } label: {
+            Label {
+                Text(title).foregroundStyle(isSelected ? Color.white : Color.primary)
+            } icon: {
+                Image(systemName: symbol).foregroundStyle(isSelected ? Color.white : iconColor ?? themeColor)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? themeColor : .clear)
+                .padding(.horizontal, 10)
+        )
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        #else
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(iconColor ?? themeColor)
+        }
+        .tag(tab)
+        #endif
+    }
+}
+
+#if os(macOS)
+/// Mac top bar: the main sections as a segmented control.
+private struct TopBarPicker: View {
+    @Environment(AppState.self) private var appState
+    let tabs: [AppTab]
+
+    var body: some View {
+        @Bindable var appState = appState
+        Picker("Section", selection: $appState.selectedTab) {
+            ForEach(tabs, id: \.self) { tab in
+                switch tab {
+                case .discover: Text("Discover").tag(tab)
+                case .nextToWatch: Text("Next to Watch").tag(tab)
+                case .upcoming: Text("Upcoming").tag(tab)
+                case .all: Text("Library").tag(tab)
+                case .stats: Text("Stats").tag(tab)
+                case .search: Image(systemName: "magnifyingglass").accessibilityLabel("Search").tag(tab)
+                default: EmptyView()
+                }
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+    }
+}
+#endif
 
 extension View {
     /// Registers detail destinations shared by every tab's navigation stack.

@@ -32,11 +32,23 @@ struct LibraryView: View {
         let items = filteredItems
         ScrollView {
             if allowsScopeChange {
-                Picker("Show", selection: $scope) {
-                    ForEach(LibraryScope.fixed, id: \.self) { Text($0.shortTitle).tag($0) }
+                #if os(macOS)
+                // Mac top bar: filters live here, so the toolbar (and the section picker in it) never shifts.
+                HStack(spacing: 12) {
+                    scopePicker.fixedSize()
+                    Spacer()
+                    statusPicker.pickerStyle(.menu).fixedSize()
+                    sortPicker.pickerStyle(.menu).fixedSize()
+                    TextField("Filter", text: $searchText, prompt: Text("Filter \(scope.title.lowercased())"))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
                 }
-                .pickerStyle(.segmented)
+                .labelsHidden()
                 .padding(.horizontal)
+                .padding(.top, 8)
+                #else
+                scopePicker.padding(.horizontal)
+                #endif
                 CollectionShortcuts(showsStats: !AppTab.hasStatsTab)
             }
             if items.isEmpty {
@@ -52,7 +64,7 @@ struct LibraryView: View {
         }
         .navigationTitle(allowsScopeChange ? "Library" : title)
         .navigationSubtitleIfAvailable("\(items.count) title\(items.count == 1 ? "" : "s")")
-        .searchable(text: $searchText, placement: .adaptiveToolbar, prompt: "Filter \(scope.title.lowercased())")
+        .librarySearch(isEnabled: !hasInlineFilters, text: $searchText, prompt: "Filter \(scope.title.lowercased())")
         .toolbar {
             if let editTarget {
                 ToolbarItem {
@@ -67,12 +79,14 @@ struct LibraryView: View {
                 }
             }
             #else
-            // Separate items with their own padding, so each label has room inside its toolbar capsule.
-            ToolbarItem {
-                statusPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
-            }
-            ToolbarItem {
-                sortPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
+            if !hasInlineFilters {
+                // Separate items with their own padding, so each label has room inside its toolbar capsule.
+                ToolbarItem {
+                    statusPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
+                }
+                ToolbarItem {
+                    sortPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
+                }
             }
             #endif
         }
@@ -105,6 +119,22 @@ struct LibraryView: View {
             appState.requestedLibraryScope = nil
         }
         .settingsToolbarButton(appState, isVisible: showsSettingsButton)
+    }
+
+    /// Mac top bar: the filters sit in the page header instead of the toolbar.
+    private var hasInlineFilters: Bool {
+        #if os(macOS)
+        allowsScopeChange
+        #else
+        false
+        #endif
+    }
+
+    private var scopePicker: some View {
+        Picker("Show", selection: $scope) {
+            ForEach(LibraryScope.fixed, id: \.self) { Text($0.shortTitle).tag($0) }
+        }
+        .pickerStyle(.segmented)
     }
 
     @ViewBuilder
@@ -326,5 +356,16 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func librarySearch(isEnabled: Bool, text: Binding<String>, prompt: String) -> some View {
+        if isEnabled {
+            searchable(text: text, placement: .adaptiveToolbar, prompt: prompt)
+        } else {
+            self
+        }
     }
 }

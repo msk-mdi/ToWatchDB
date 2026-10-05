@@ -36,6 +36,7 @@ struct PosterImage: View {
 
 /// Wide backdrop image that fades into the window background.
 struct BackdropImage: View {
+    @Environment(\.themeColor) private var themeColor
     let path: String?
     var height: CGFloat = 320
 
@@ -43,7 +44,7 @@ struct BackdropImage: View {
         AsyncImage(url: TMDBImage.url(path, size: .backdrop)) { image in
             image.resizable().scaledToFill()
         } placeholder: {
-            LinearGradient(colors: [.accentColor.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [themeColor.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)

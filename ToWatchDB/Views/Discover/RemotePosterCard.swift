@@ -51,7 +51,7 @@ struct RemotePosterCard: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.title2)
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, Color.accentColor)
+                    .foregroundStyle(.white, .tint)
                     .shadow(radius: 2)
             }
             .buttonStyle(.plain)

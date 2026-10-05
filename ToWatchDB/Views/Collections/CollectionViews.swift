@@ -123,8 +123,11 @@ struct FlowLayout: Layout {
     }
 }
 
-/// iPhone: spaces, smart lists, and tags as a scrolling row under the Library scope picker.
+/// Tab bar layouts: spaces, smart lists, and tags as a scrolling row under the Library scope picker.
 struct CollectionShortcuts: View {
+    @Environment(\.themeColor) private var themeColor
+    /// iOS has no Stats tab, so it gets a chip here.
+    var showsStats = true
     @Query(sort: \Space.name) private var spaces: [Space]
     @Query(sort: \SmartList.name) private var smartLists: [SmartList]
     @Query(sort: \MediaTag.name) private var tags: [MediaTag]
@@ -132,8 +135,10 @@ struct CollectionShortcuts: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                NavigationLink(value: StatsRoute()) {
-                    CollectionChip(name: "Stats", symbol: "chart.bar.xaxis", color: .accentColor)
+                if showsStats {
+                    NavigationLink(value: StatsRoute()) {
+                        CollectionChip(name: "Stats", symbol: "chart.bar.xaxis", color: themeColor)
+                    }
                 }
                 ForEach(spaces) { space in
                     NavigationLink(value: LibraryScope.space(space.uuid)) {

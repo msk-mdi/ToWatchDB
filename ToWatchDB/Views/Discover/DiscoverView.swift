@@ -42,7 +42,7 @@ struct DiscoverView: View {
     }
 
     private func shelf(_ title: String, _ items: [MediaSummary], _ ids: LibraryIDs) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.title2.bold())
             if items.isEmpty {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 200)
@@ -54,9 +54,11 @@ struct DiscoverView: View {
                                 .frame(width: shelfCardWidth)
                         }
                     }
-                    .padding(.bottom, 8)
+                    // Room for a poster to grow on hover without being cut off at the top.
+                    .padding(.vertical, 8)
                 }
                 .scrollIndicators(.hidden)
+                .scrollClipDisabled()
             }
         }
     }

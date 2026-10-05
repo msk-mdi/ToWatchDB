@@ -4,11 +4,12 @@ import ToWatchCore
 
 struct RootView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage(NavigationLayout.storageKey) private var layout: NavigationLayout = .sidebar
     @Query(sort: \Space.name) private var spaces: [Space]
     @Query(sort: \SmartList.name) private var smartLists: [SmartList]
     @Query(sort: \MediaTag.name) private var tags: [MediaTag]
     @State private var router = IntentRouter.shared
-    /// iPhone: lists that aren't tabs, opened by a Siri or Shortcuts action.
+    /// Tab bar layouts: lists that aren't tabs, opened by a menu command or a Siri or Shortcuts action.
     @State private var intentSheet: IntentSheet?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -18,11 +19,7 @@ struct RootView: View {
         @Bindable var appState = appState
 
         Group {
-            #if os(iOS)
-            if sizeClass == .compact { compactTabs } else { sidebarTabs }
-            #else
-            sidebarTabs
-            #endif
+            if usesTabBar { tabBar } else { sidebar }
         }
         .alert("Something went wrong", isPresented: Binding(
             get: { appState.errorMessage != nil },
@@ -37,7 +34,22 @@ struct RootView: View {
         .onChange(of: router.destination, initial: true) { _, destination in
             guard let destination else { return }
             router.destination = nil
-            open(destination)
+            switch destination {
+            case let .tab(tab): appState.selectedTab = tab
+            case let .scope(scope): appState.selectedTab = scope.tab
+            }
+        }
+        .onChange(of: appState.selectedTab, initial: true) { _, tab in
+            guard usesTabBar, !tabBarTabs.contains(tab) else { return }
+            open(tab)
+        }
+        .onChange(of: usesTabBar) { _, usesTabBar in
+            // Switching layouts: land on the Library tab when the current list has no tab of its own.
+            guard usesTabBar, !tabBarTabs.contains(appState.selectedTab) else { return }
+            if let scope = appState.selectedTab.libraryScope, LibraryScope.fixed.contains(scope) {
+                appState.requestedLibraryScope = scope
+            }
+            appState.selectedTab = .all
         }
         .sheet(item: $router.title) { reference in
             NavigationStack {
@@ -57,6 +69,7 @@ struct RootView: View {
                     switch sheet {
                     case let .scope(scope): LibraryView(scope: scope, showsSettingsButton: false)
                     case .stats: StatsView()
+                    case .organize: OrganizeView()
                     }
                 }
                 .appDestinations()
@@ -64,6 +77,9 @@ struct RootView: View {
                     ToolbarItem(placement: .cancellationAction) { Button("Done") { intentSheet = nil } }
                 }
             }
+            #if os(macOS)
+            .frame(minWidth: 700, minHeight: 600)
+            #endif
         }
         .onChange(of: collectionIDs) { _, ids in
             // Leave a space, tag, or smart list's tab if it was deleted.
@@ -77,17 +93,11 @@ struct RootView: View {
         .sheet(isPresented: $appState.isShowingSettings) {
             NavigationStack { SettingsView() }
         }
-        .onChange(of: sizeClass, initial: true) { _, newValue in
-            // Backlog, Watched, Movies and TV Shows live inside the Library tab on iPhone.
-            if newValue == .compact, appState.selectedTab.isSidebarOnly {
-                appState.selectedTab = .all
-            }
-        }
         #endif
     }
 
     private enum IntentSheet: Identifiable {
-        case scope(LibraryScope), stats
+        case scope(LibraryScope), stats, organize
         var id: String { "\(self)" }
     }
 
@@ -99,105 +109,122 @@ struct RootView: View {
         #endif
     }
 
-    /// Goes where a Siri or Shortcuts action asked: a tab when one exists, otherwise a sheet (iPhone).
-    private func open(_ destination: IntentRouter.Destination) {
-        let tab: AppTab = switch destination {
-        case let .tab(tab): tab
-        case let .scope(scope): scope.tab
+    /// iPhone always uses tabs; Mac and iPad follow the layout chosen in Settings.
+    private var usesTabBar: Bool { isCompact || layout == .topBar }
+
+    /// The tabs in the tab bar. Every other list opens in the Library tab or a sheet.
+    private var tabBarTabs: [AppTab] {
+        AppTab.hasStatsTab ? [.discover, .nextToWatch, .upcoming, .all, .stats, .search]
+            : [.discover, .nextToWatch, .upcoming, .all, .search]
+    }
+
+    /// Tab bar layouts: shows a list that isn't a tab, as a Library scope when it is one, otherwise in a sheet.
+    private func open(_ tab: AppTab) {
+        let scope = tab.libraryScope
+        if let scope, LibraryScope.fixed.contains(scope) {
+            appState.requestedLibraryScope = scope
+        } else if let scope {
+            intentSheet = .scope(scope)
+        } else if tab == .stats {
+            intentSheet = .stats
+        } else if tab == .organize {
+            intentSheet = .organize
         }
-        guard isCompact, tab.isSidebarOnly else {
-            appState.selectedTab = tab
-            return
-        }
-        switch destination {
-        case .tab(.stats): intentSheet = .stats
-        case let .scope(scope): intentSheet = .scope(scope)
-        case .tab: appState.selectedTab = .all
-        }
+        appState.selectedTab = .all
     }
 
     private var collectionIDs: Set<UUID> {
         Set(spaces.map(\.uuid) + smartLists.map(\.uuid) + tags.map(\.uuid))
     }
 
-    /// Mac and iPad: every list is its own sidebar entry.
-    private var sidebarTabs: some View {
-        @Bindable var appState = appState
-        return TabView(selection: $appState.selectedTab) {
-            Tab("Discover", systemImage: "sparkles.tv", value: AppTab.discover) {
-                NavigationStack { DiscoverView().appDestinations() }
-            }
-            Tab(value: AppTab.search, role: .search) {
-                NavigationStack { SearchView().appDestinations() }
-            }
+    // MARK: Sidebar
 
-            TabSection("Lists") {
-                Tab("Next to Watch", systemImage: "play.circle", value: AppTab.nextToWatch) {
-                    NavigationStack { NextToWatchView().appDestinations() }
-                }
-                Tab("Upcoming", systemImage: "calendar", value: AppTab.upcoming) {
-                    NavigationStack { UpcomingView().appDestinations() }
-                }
-                Tab("Backlog", systemImage: "tray.full", value: AppTab.backlog) {
-                    NavigationStack { LibraryView(scope: .backlog).appDestinations() }
-                }
-                Tab("Watched", systemImage: "checkmark.circle", value: AppTab.watched) {
-                    NavigationStack { LibraryView(scope: .watched).appDestinations() }
-                }
-                Tab("Stats", systemImage: "chart.bar.xaxis", value: AppTab.stats) {
-                    NavigationStack { StatsView().appDestinations() }
-                }
-            }
+    /// Mac and iPad: every list is its own sidebar entry. The sidebar can't be collapsed.
+    private var sidebar: some View {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            List(selection: Binding(
+                get: { appState.selectedTab },
+                set: { if let tab = $0 { appState.selectedTab = tab } }
+            )) {
+                Label("Discover", systemImage: "sparkles.tv").tag(AppTab.discover)
+                Label("Search", systemImage: "magnifyingglass").tag(AppTab.search)
 
-            TabSection("Library") {
-                Tab("All", systemImage: "square.grid.2x2", value: AppTab.all) {
-                    NavigationStack { LibraryView(scope: .all).appDestinations() }
+                Section("Lists") {
+                    Label("Next to Watch", systemImage: "play.circle").tag(AppTab.nextToWatch)
+                    Label("Upcoming", systemImage: "calendar").tag(AppTab.upcoming)
+                    Label("Backlog", systemImage: "tray.full").tag(AppTab.backlog)
+                    Label("Watched", systemImage: "checkmark.circle").tag(AppTab.watched)
+                    Label("Stats", systemImage: "chart.bar.xaxis").tag(AppTab.stats)
                 }
-                Tab("Movies", systemImage: "film", value: AppTab.movies) {
-                    NavigationStack { LibraryView(scope: .movies).appDestinations() }
-                }
-                Tab("TV Shows", systemImage: "tv", value: AppTab.shows) {
-                    NavigationStack { LibraryView(scope: .shows).appDestinations() }
-                }
-                Tab("Organize", systemImage: "square.stack.3d.up", value: AppTab.organize) {
-                    NavigationStack { OrganizeView().appDestinations() }
-                }
-            }
 
-            if !spaces.isEmpty {
-                TabSection("Spaces") {
-                    ForEach(spaces) { space in
-                        Tab(space.name, systemImage: space.symbolName, value: AppTab.space(space.uuid)) {
-                            NavigationStack { LibraryView(scope: .space(space.uuid)).appDestinations() }
+                Section("Library") {
+                    Label("All", systemImage: "square.grid.2x2").tag(AppTab.all)
+                    Label("Movies", systemImage: "film").tag(AppTab.movies)
+                    Label("TV Shows", systemImage: "tv").tag(AppTab.shows)
+                    Label("Organize", systemImage: "square.stack.3d.up").tag(AppTab.organize)
+                }
+
+                if !spaces.isEmpty {
+                    Section("Spaces") {
+                        ForEach(spaces) { space in
+                            Label { Text(space.name) } icon: {
+                                Image(systemName: space.symbolName).foregroundStyle(space.color)
+                            }
+                            .tag(AppTab.space(space.uuid))
+                        }
+                    }
+                }
+                if !smartLists.isEmpty {
+                    Section("Smart Lists") {
+                        ForEach(smartLists) { list in
+                            Label { Text(list.name) } icon: {
+                                Image(systemName: list.symbolName).foregroundStyle(list.color)
+                            }
+                            .tag(AppTab.smartList(list.uuid))
+                        }
+                    }
+                }
+                if !tags.isEmpty {
+                    Section("Tags") {
+                        ForEach(tags) { tag in
+                            Label { Text(tag.name) } icon: {
+                                Image(systemName: "tag").foregroundStyle(tag.color)
+                            }
+                            .tag(AppTab.tag(tag.uuid))
                         }
                     }
                 }
             }
-            if !smartLists.isEmpty {
-                TabSection("Smart Lists") {
-                    ForEach(smartLists) { list in
-                        Tab(list.name, systemImage: list.symbolName, value: AppTab.smartList(list.uuid)) {
-                            NavigationStack { LibraryView(scope: .smartList(list.uuid)).appDestinations() }
-                        }
-                    }
-                }
-            }
-            if !tags.isEmpty {
-                TabSection("Tags") {
-                    ForEach(tags) { tag in
-                        Tab(tag.name, systemImage: "tag", value: AppTab.tag(tag.uuid)) {
-                            NavigationStack { LibraryView(scope: .tag(tag.uuid)).appDestinations() }
-                        }
-                    }
-                }
-            }
+            .navigationTitle("ToWatchDB")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            // A fresh stack per list, so going back to a list doesn't land on a stale detail page.
+            NavigationStack { screen(for: appState.selectedTab).appDestinations() }
+                .id(appState.selectedTab)
         }
-        .tabViewStyle(.sidebarAdaptable)
+        .navigationSplitViewStyle(.balanced)
     }
 
-    /// iPhone: four tabs plus Search (a fifth would push Search into "More"). The library scopes
-    /// collapse into one tab with a scope picker; Stats and collections are chips under it.
-    private var compactTabs: some View {
+    @ViewBuilder
+    private func screen(for tab: AppTab) -> some View {
+        switch tab {
+        case .discover: DiscoverView()
+        case .search: SearchView()
+        case .nextToWatch: NextToWatchView()
+        case .upcoming: UpcomingView()
+        case .stats: StatsView()
+        case .organize: OrganizeView()
+        default: LibraryView(scope: tab.libraryScope ?? .all)
+        }
+    }
+
+    // MARK: Tab bar
+
+    /// iPhone, and Mac or iPad with the Top Bar layout. Library scopes collapse into one tab with a
+    /// scope picker; collections are chips under it. iOS has no Stats tab (on iPhone a fifth tab would
+    /// push Search into "More"; on iPad it would overflow the top bar), so Stats is a chip there too.
+    private var tabBar: some View {
         @Bindable var appState = appState
         return TabView(selection: $appState.selectedTab) {
             Tab("Discover", systemImage: "sparkles.tv", value: AppTab.discover) {
@@ -212,10 +239,16 @@ struct RootView: View {
             Tab("Library", systemImage: "square.grid.2x2", value: AppTab.all) {
                 NavigationStack { LibraryView(scope: .all, allowsScopeChange: true).appDestinations() }
             }
+            if AppTab.hasStatsTab {
+                Tab("Stats", systemImage: "chart.bar.xaxis", value: AppTab.stats) {
+                    NavigationStack { StatsView().appDestinations() }
+                }
+            }
             Tab(value: AppTab.search, role: .search) {
                 NavigationStack { SearchView().appDestinations() }
             }
         }
+        .tabViewStyle(.tabBarOnly)
     }
 }
 
@@ -258,11 +291,27 @@ extension SearchFieldPlacement {
 }
 
 extension AppTab {
-    /// Tabs that exist only in the sidebar layout; iPhone reaches them from the Library tab.
-    var isSidebarOnly: Bool {
+    /// Whether the tab bar layout has room for a Stats tab (Mac only).
+    static var hasStatsTab: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The library scope this tab shows, if it's a library list.
+    var libraryScope: LibraryScope? {
         switch self {
-        case .backlog, .watched, .movies, .shows, .organize, .stats, .space, .tag, .smartList: true
-        default: false
+        case .all: .all
+        case .movies: .movies
+        case .shows: .shows
+        case .backlog: .backlog
+        case .watched: .watched
+        case let .space(id): .space(id)
+        case let .tag(id): .tag(id)
+        case let .smartList(id): .smartList(id)
+        default: nil
         }
     }
 }

@@ -1,7 +1,8 @@
 # ToWatchDB
 
 A movie and TV tracker for macOS, iOS and iPadOS, built with SwiftUI + SwiftData on top of TMDB.
-One multiplatform target: a sidebar on Mac and iPad, five compact tabs on iPhone.
+One multiplatform target: on Mac and iPad, a permanent sidebar or a top tab bar (chosen in Settings); five compact tabs on iPhone.
+Settings also picks the accent color and the app icon color (iOS alternate icons; on macOS, the Dock icon while the app runs).
 
 Organize with **spaces** (curated collections with an icon and color), **tags**, and **smart lists**
 (saved filters by type, status, genre, rating, year, tags, spaces, backlog, favorites). Create them from
@@ -9,7 +10,7 @@ File ▸ New…, the Organize screen, or a title's "Spaces & Tags" menu; drop po
 
 **Stats** show watch time, movies, episodes, and shows for a week, month, 30/90 days, a year, or all time,
 with monthly activity, top genres and actors, highlights, a comparison with another year, and a shareable
-**Year in Review** card. (Mac/iPad: sidebar; iPhone: the Stats chip in the Library tab.)
+**Year in Review** card. (Sidebar layout: its own entry; Mac top bar: a tab; iPhone and iPad top bar: the Stats chip in the Library tab.)
 
 **Where to Watch** on every title lists streaming, free, ad-supported, rent, and buy options for a country
 (default: your device's region; change it per title or in Settings). Availability powered by JustWatch via TMDB.
@@ -40,7 +41,8 @@ The Xcode project is generated from `project.yml` — edit that, not the `.xcode
 ## Layout
 
 - `Packages/ToWatchCore` — TMDB client, SwiftData models, library/watch-state/upcoming logic. Tested with `swift test`.
-- `ToWatchDB/` — SwiftUI app (sidebar-adaptable tabs, detail views, settings).
+- `ToWatchDB/` — SwiftUI app (sidebar or tab bar layouts, detail views, settings).
+- `Scripts/generate-icons.swift` — redraws the themed app icons and their Settings previews.
 
 ## Checks
 

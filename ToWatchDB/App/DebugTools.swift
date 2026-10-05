@@ -86,6 +86,7 @@ enum DebugTools {
         if let movie = library.movie(tmdbID: 27205) {
             await captureDetail(NavigationStack { MovieDetailView(movie: movie) }, appState, output.appending(path: "movie.png"))
         }
+        await captureDetail(SettingsView().themed(), appState, output.appending(path: "settings.png"))
         // Year in Review card, rendered the same way the share sheet renders it.
         let year = Calendar.current.component(.year, from: .now)
         let movies = (try? library.context.fetch(FetchDescriptor<Movie>())) ?? []

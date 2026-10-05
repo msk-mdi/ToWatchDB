@@ -51,6 +51,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.mehdi.towatchdb
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # Theme-colored app icons the user can pick in Settings (iOS; macOS changes the Dock icon instead).
+        "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=iphone*]": AppIcon-Orange AppIcon-Yellow AppIcon-Green AppIcon-Teal AppIcon-Blue AppIcon-Indigo AppIcon-Purple AppIcon-Pink AppIcon-Graphite
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
         SWIFT_STRICT_CONCURRENCY: complete

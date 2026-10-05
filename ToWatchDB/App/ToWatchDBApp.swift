@@ -5,6 +5,7 @@ import ToWatchCore
 @main
 struct ToWatchDBApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(ThemeColor.appIconKey) private var appIcon: ThemeColor = .coral
     #if DEBUG
     // Sample-data and snapshot runs use a throwaway in-memory library.
     @State private var appState = AppState(inMemory: DebugTools.usesSampleData)
@@ -21,6 +22,7 @@ struct ToWatchDBApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
+                .themed()
                 .task {
                     #if DEBUG
                     await DebugTools.runIfRequested(appState)
@@ -31,6 +33,7 @@ struct ToWatchDBApp: App {
                     // Teach Siri the current show and movie names for phrases like "Mark Severance watched".
                     if phase == .active { ToWatchShortcuts.updateAppShortcutParameters() }
                 }
+                .onChange(of: appIcon, initial: true) { _, icon in icon.applyAsAppIcon() }
         }
         .modelContainer(appState.container)
         .commands { AppCommands(appState: appState) }
@@ -42,6 +45,7 @@ struct ToWatchDBApp: App {
         WindowGroup("Title", for: TitleReference.self) { $reference in
             TitleWindow(reference: reference)
                 .environment(appState)
+                .themed()
         }
         .modelContainer(appState.container)
         #if os(macOS)
@@ -52,6 +56,7 @@ struct ToWatchDBApp: App {
         Settings {
             SettingsView()
                 .environment(appState)
+                .themed()
                 .modelContainer(appState.container)
         }
         #endif

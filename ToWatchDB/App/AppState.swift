@@ -14,6 +14,8 @@ final class AppState {
     let container: ModelContainer
 
     var selectedTab: AppTab = .discover
+    /// Tab bar layouts: a library scope to show in the Library tab's scope picker.
+    var requestedLibraryScope: LibraryScope?
     /// iOS presents Settings as a sheet (macOS uses the Settings scene).
     var isShowingSettings = false
     /// A backup, CSV export, or import requested from the File menu.

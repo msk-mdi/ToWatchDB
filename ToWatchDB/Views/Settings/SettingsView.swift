@@ -4,6 +4,9 @@ import ToWatchCore
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage(NavigationLayout.storageKey) private var layout: NavigationLayout = .sidebar
+    @AppStorage(ThemeColor.accentKey) private var accent: ThemeColor = .coral
+    @AppStorage(ThemeColor.appIconKey) private var appIcon: ThemeColor = .coral
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
@@ -23,6 +26,23 @@ struct SettingsView: View {
         @Bindable var appState = appState
 
         Form {
+            Section {
+                if hasLayoutChoice {
+                    Picker("Navigation", selection: $layout) {
+                        ForEach(NavigationLayout.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                AppearanceRow("Accent Color") { ThemeSwatches(selection: $accent) }
+                AppearanceRow("App Icon") { AppIconPicker(selection: $appIcon) }
+            } header: {
+                Text("Appearance")
+            } footer: {
+                #if os(macOS)
+                Text("macOS shows the chosen icon in the Dock while ToWatchDB is open; Finder keeps the original icon.")
+                #endif
+            }
+
             Section("TMDB") {
                 LabeledContent("Access Token") {
                     Text(tokenStatus).foregroundStyle(appState.token == nil ? .red : .secondary)
@@ -129,6 +149,15 @@ struct SettingsView: View {
                 .localizedStandardCompare(Locale.current.localizedString(forRegionCode: $1) ?? $1) == .orderedAscending
         }
 
+    /// iPhone always uses its tab bar; Mac and iPad can choose.
+    private var hasLayoutChoice: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom != .phone
+        #else
+        true
+        #endif
+    }
+
     private var tokenStatus: String {
         if appState.tokenOverride != nil { return "Custom token (Keychain)" }
         if appState.hasBundledToken { return "Built-in token" }
@@ -158,6 +187,95 @@ private extension View {
         buttonStyle(.borderless)
         #else
         self
+        #endif
+    }
+}
+
+/// Label beside the control on macOS, above it on iOS where rows are narrow.
+private struct AppearanceRow<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        #if os(macOS)
+        LabeledContent(title) { content }
+        #else
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+            content
+        }
+        .padding(.vertical, 4)
+        #endif
+    }
+}
+
+/// A row of theme colors to choose from.
+private struct ThemeSwatches: View {
+    @Binding var selection: ThemeColor
+
+    var body: some View {
+        #if os(macOS)
+        HStack(spacing: 8) { swatches }
+        #else
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 28), spacing: 4)], spacing: 6) { swatches }
+        #endif
+    }
+
+    private var swatches: some View {
+        Group {
+            ForEach(ThemeColor.allCases) { theme in
+                Button { selection = theme } label: {
+                    Circle()
+                        .fill(theme.color)
+                        .frame(width: 22, height: 22)
+                        .overlay {
+                            if selection == theme {
+                                Image(systemName: "checkmark").font(.caption2.bold()).foregroundStyle(.white)
+                            }
+                        }
+                        .padding(3)
+                        .overlay { Circle().strokeBorder(theme.color, lineWidth: selection == theme ? 2 : 0) }
+                }
+                .buttonStyle(.plain)
+                .help(theme.label)
+                .accessibilityLabel(theme.label)
+                .accessibilityAddTraits(selection == theme ? .isSelected : [])
+            }
+        }
+    }
+}
+
+/// The app icon in each theme color.
+private struct AppIconPicker: View {
+    @Binding var selection: ThemeColor
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 52, maximum: 60), spacing: 8)], spacing: 8) {
+            ForEach(ThemeColor.allCases) { theme in
+                Button { selection = theme } label: {
+                    Image(theme.iconPreviewName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 52, height: 52)
+                        .padding(2)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(.tint, lineWidth: selection == theme ? 2.5 : 0)
+                        }
+                }
+                .buttonStyle(.plain)
+                .help(theme.label)
+                .accessibilityLabel("\(theme.label) icon")
+                .accessibilityAddTraits(selection == theme ? .isSelected : [])
+            }
+        }
+        #if os(macOS)
+        .frame(width: 320)
         #endif
     }
 }

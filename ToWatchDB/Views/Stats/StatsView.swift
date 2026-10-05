@@ -175,6 +175,7 @@ private struct SummaryTiles: View {
 /// Watch time per day, month, or year. Single series in the accent color, so no legend;
 /// hovering (or dragging on touch) reads out the bucket.
 private struct ActivityChart: View {
+    @Environment(\.themeColor) private var themeColor
     let stats: WatchStats
     @State private var selectedDate: Date?
 
@@ -192,7 +193,7 @@ private struct ActivityChart: View {
                         y: .value("Hours", Double(bucket.minutes) / 60)
                     )
                     .cornerRadius(4)
-                    .foregroundStyle(isSelected(bucket) || selectedBucket == nil ? Color.accentColor : Color.accentColor.opacity(0.35))
+                    .foregroundStyle(isSelected(bucket) || selectedBucket == nil ? themeColor : themeColor.opacity(0.35))
                     .accessibilityLabel(label(for: bucket.start))
                     .accessibilityValue("\(bucket.minutes.watchTimeString), \(bucket.movies) movies, \(bucket.episodes) episodes")
                 }
@@ -256,6 +257,7 @@ private struct ActivityChart: View {
 // MARK: - Genres and actors
 
 private struct GenreChart: View {
+    @Environment(\.themeColor) private var themeColor
     let genres: [RankedEntry]
 
     var body: some View {
@@ -268,7 +270,7 @@ private struct GenreChart: View {
                 Chart(shown) { genre in
                     BarMark(x: .value("Titles", genre.count), y: .value("Genre", genre.name))
                         .cornerRadius(4)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(themeColor)
                         .annotation(position: .trailing, spacing: 6) {
                             Text(genre.count.formatted()).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }

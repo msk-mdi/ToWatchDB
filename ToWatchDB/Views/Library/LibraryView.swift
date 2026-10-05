@@ -12,7 +12,7 @@ struct LibraryView: View {
     @Query private var smartLists: [SmartList]
 
     @State private var scope: LibraryScope
-    /// iPhone shows one Library tab with a scope picker instead of separate sidebar entries.
+    /// Tab bar layouts show one Library tab with a scope picker instead of separate sidebar entries.
     let allowsScopeChange: Bool
     /// Pushed collection lists leave Settings to the root screen.
     let showsSettingsButton: Bool
@@ -37,7 +37,7 @@ struct LibraryView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
-                CollectionShortcuts()
+                CollectionShortcuts(showsStats: !AppTab.hasStatsTab)
             }
             if items.isEmpty {
                 emptyState
@@ -67,9 +67,12 @@ struct LibraryView: View {
                 }
             }
             #else
-            ToolbarItemGroup {
-                statusPicker.pickerStyle(.menu).fixedSize()
-                sortPicker.pickerStyle(.menu).fixedSize()
+            // Separate items with their own padding, so each label has room inside its toolbar capsule.
+            ToolbarItem {
+                statusPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
+            }
+            ToolbarItem {
+                sortPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
             }
             #endif
         }
@@ -86,7 +89,7 @@ struct LibraryView: View {
         .overlay {
             if isDropTargeted {
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8, 6]))
+                    .strokeBorder(.tint, style: StrokeStyle(lineWidth: 3, dash: [8, 6]))
                     .padding(6)
                     .allowsHitTesting(false)
             }
@@ -94,6 +97,12 @@ struct LibraryView: View {
         .onChange(of: scope) { _, newScope in
             statusFilter = nil
             sort = newScope.defaultSort
+        }
+        .onChange(of: appState.requestedLibraryScope, initial: true) { _, requested in
+            // A menu command or Siri asked for a list that's a scope of this tab.
+            guard allowsScopeChange, let requested, LibraryScope.fixed.contains(requested) else { return }
+            scope = requested
+            appState.requestedLibraryScope = nil
         }
         .settingsToolbarButton(appState, isVisible: showsSettingsButton)
     }

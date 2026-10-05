@@ -91,6 +91,7 @@ private struct TitleInteractions: ViewModifier {
             .hoverEffect(.lift)
             #else
             .scaleEffect(isHovering ? 1.03 : 1)
+            .zIndex(isHovering ? 1 : 0)
             .animation(.easeOut(duration: 0.15), value: isHovering)
             .onHover { isHovering = $0 }
             #endif

@@ -299,6 +299,10 @@ private struct SidebarRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // Select on mouse-down, like a native sidebar; a button alone waits for mouse-up, which felt slow.
+        .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
+            if appState.selectedTab != tab { appState.selectedTab = tab }
+        })
         .listRowBackground(
             RoundedRectangle(cornerRadius: 8)
                 .fill(isSelected ? themeColor : .clear)

@@ -307,9 +307,9 @@ private struct ActorList: View {
                     ForEach(Array(actors.prefix(8).enumerated()), id: \.element.id) { index, actor in
                         HStack(spacing: 10) {
                             Text("\(index + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 20)
-                            AsyncImage(url: TMDBImage.url(actor.imagePath, size: .small)) { image in
+                            RemoteImage(url: TMDBImage.url(actor.imagePath, size: .small)) { image in
                                 image.resizable().scaledToFill()
-                            } placeholder: {
+                            } placeholder: { _ in
                                 Image(systemName: "person.fill").foregroundStyle(.tertiary)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(.quaternary)
                             }

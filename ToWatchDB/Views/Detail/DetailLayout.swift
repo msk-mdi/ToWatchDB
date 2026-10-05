@@ -130,9 +130,9 @@ struct CastRow: View {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(cast) { person in
                         VStack(spacing: 6) {
-                            AsyncImage(url: TMDBImage.url(person.profilePath, size: .small)) { image in
+                            RemoteImage(url: TMDBImage.url(person.profilePath, size: .small)) { image in
                                 image.resizable().scaledToFill()
-                            } placeholder: {
+                            } placeholder: { _ in
                                 Image(systemName: "person.fill")
                                     .font(.title2)
                                     .foregroundStyle(.tertiary)

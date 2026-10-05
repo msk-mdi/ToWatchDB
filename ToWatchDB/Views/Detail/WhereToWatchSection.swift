@@ -103,9 +103,9 @@ private struct ProviderRow: View {
     @ViewBuilder
     private func providerTile(_ provider: TMDBProvider) -> some View {
         let tile = VStack(spacing: 4) {
-            AsyncImage(url: TMDBImage.url(provider.logoPath, size: .logo)) { image in
+            RemoteImage(url: TMDBImage.url(provider.logoPath, size: .logo)) { image in
                 image.resizable().scaledToFit()
-            } placeholder: {
+            } placeholder: { _ in
                 RoundedRectangle(cornerRadius: 10).fill(.quaternary)
             }
             .frame(width: 48, height: 48)

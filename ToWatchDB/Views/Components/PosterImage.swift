@@ -11,17 +11,11 @@ struct PosterImage: View {
         Color.secondary.opacity(0.15)
             .aspectRatio(2 / 3, contentMode: .fit)
             .overlay {
-                AsyncImage(url: TMDBImage.url(path, size: size), transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        placeholder
-                    case .empty:
-                        if path == nil { placeholder } else { ProgressView().controlSize(.small) }
-                    @unknown default:
-                        placeholder
-                    }
+                RemoteImage(url: TMDBImage.url(path, size: size)) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: { isLoading in
+                    // While loading, the tinted box alone: a spinner on every poster read as lag.
+                    if !isLoading { placeholder }
                 }
             }
             .clipShape(.rect(cornerRadius: cornerRadius))
@@ -41,9 +35,9 @@ struct BackdropImage: View {
     var height: CGFloat = 320
 
     var body: some View {
-        AsyncImage(url: TMDBImage.url(path, size: .backdrop)) { image in
+        RemoteImage(url: TMDBImage.url(path, size: .backdrop)) { image in
             image.resizable().scaledToFill()
-        } placeholder: {
+        } placeholder: { _ in
             LinearGradient(colors: [themeColor.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
         }
         .frame(height: height)

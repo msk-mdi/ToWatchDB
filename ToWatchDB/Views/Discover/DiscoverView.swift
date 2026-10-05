@@ -11,9 +11,10 @@ struct DiscoverView: View {
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
-    @State private var trendingMovies: [MediaSummary] = []
-    @State private var trendingShows: [MediaSummary] = []
     @State private var loadError: String?
+
+    private var trendingMovies: [MediaSummary] { appState.trending?.movies ?? [] }
+    private var trendingShows: [MediaSummary] { appState.trending?.shows ?? [] }
 
     var body: some View {
         let ids = LibraryIDs(movies: movies, shows: shows)
@@ -35,7 +36,7 @@ struct DiscoverView: View {
                 } description: {
                     Text(loadError ?? "")
                 } actions: {
-                    Button("Retry") { Task { await load() } }
+                    Button("Retry") { Task { await load(force: true) } }
                 }
             }
         }
@@ -74,14 +75,16 @@ struct DiscoverView: View {
         #endif
     }
 
-    private func load() async {
-        guard let client = appState.client else { return }
+    private func load(force: Bool = false) async {
+        guard let client = appState.client, let token = appState.token else { return }
+        if !force, appState.trending?.isFresh(token: token, language: appState.language) == true { return }
         loadError = nil
         do {
             async let movies = client.trendingMovies()
             async let shows = client.trendingTVShows()
-            trendingMovies = try await movies.results.map(MediaSummary.init)
-            trendingShows = try await shows.results.map(MediaSummary.init)
+            appState.trending = .init(movies: try await movies.results.map(MediaSummary.init),
+                                      shows: try await shows.results.map(MediaSummary.init),
+                                      token: token, language: appState.language, loadedAt: .now)
         } catch is CancellationError {
         } catch {
             loadError = error.localizedDescription

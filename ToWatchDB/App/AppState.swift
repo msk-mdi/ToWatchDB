@@ -18,6 +18,20 @@ final class AppState {
     var requestedLibraryScope: LibraryScope?
     /// Open main windows (macOS keeps running with none), so menu commands can reopen one.
     var mainWindowCount = 0
+    /// Discover's trending lists, kept across page switches so Discover doesn't refetch and redraw every visit.
+    var trending: Trending?
+
+    struct Trending {
+        let movies: [MediaSummary]
+        let shows: [MediaSummary]
+        let token: String
+        let language: String
+        let loadedAt: Date
+
+        func isFresh(token: String?, language: String, now: Date = .now) -> Bool {
+            token == self.token && language == self.language && now.timeIntervalSince(loadedAt) < 30 * 60
+        }
+    }
     /// iOS presents Settings as a sheet (macOS uses the Settings scene).
     var isShowingSettings = false
     /// A backup, CSV export, or import requested from the File menu.

@@ -135,11 +135,12 @@ enum LibrarySort: String, CaseIterable, Identifiable {
     /// Ties (same rating, no release date, never watched…) fall back to title order, so the grid doesn't
     /// reshuffle those titles every time it redraws: @Query results come back in no particular order.
     func areInOrder(_ lhs: LibraryItem, _ rhs: LibraryItem) -> Bool {
-        let byTitle = lhs.title.localizedStandardCompare(rhs.title)
-        func ordered<T: Comparable>(_ l: T, _ r: T) -> Bool { l == r ? byTitle == .orderedAscending : l > r }
+        // The title comparison is locale-aware and comparatively slow, so it only runs on ties.
+        func byTitle() -> Bool { lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
+        func ordered<T: Comparable>(_ l: T, _ r: T) -> Bool { l == r ? byTitle() : l > r }
         switch self {
         case .added: return ordered(lhs.addedDate, rhs.addedDate)
-        case .title: return byTitle == .orderedAscending
+        case .title: return byTitle()
         case .release: return ordered(lhs.releaseDate ?? .distantPast, rhs.releaseDate ?? .distantPast)
         case .rating: return ordered(lhs.userRating ?? -1, rhs.userRating ?? -1)
         case .lastWatched: return ordered(lhs.lastWatched ?? .distantPast, rhs.lastWatched ?? .distantPast)

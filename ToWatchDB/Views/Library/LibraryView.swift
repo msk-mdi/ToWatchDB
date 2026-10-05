@@ -80,12 +80,23 @@ struct LibraryView: View {
             }
             #else
             if !hasInlineFilters {
-                // Separate items with their own padding, so each label has room inside its toolbar capsule.
+                // Menus rather than menu-style pickers: a picker draws its own bezel inside the toolbar's
+                // glass capsule, and the two shapes don't line up on hover.
                 ToolbarItem {
-                    statusPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
+                    Menu {
+                        statusPicker.pickerStyle(.inline)
+                    } label: {
+                        Text(statusFilter?.label ?? "Any Status")
+                    }
+                    .help("Filter by status")
                 }
                 ToolbarItem {
-                    sortPicker.pickerStyle(.menu).fixedSize().padding(.horizontal, 8)
+                    Menu {
+                        sortPicker.pickerStyle(.inline)
+                    } label: {
+                        Text(sort.label)
+                    }
+                    .help("Sort")
                 }
             }
             #endif

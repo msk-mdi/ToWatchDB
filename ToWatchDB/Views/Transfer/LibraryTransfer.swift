@@ -37,14 +37,16 @@ private struct LibraryFileTransfers: ViewModifier {
     @State private var isExporting = false
     @State private var isImporting = false
     @State private var resultMessage: String?
+    #if os(macOS)
+    @Environment(\.appearsActive) private var appearsActive
+    #endif
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: request) { _, newValue in
-                guard let newValue else { return }
-                request = nil
-                start(newValue)
-            }
+            .onChange(of: request, initial: true) { claim() }
+            #if os(macOS)
+            .onChange(of: appearsActive) { claim() }
+            #endif
             .fileExporter(isPresented: $isExporting, document: document, contentType: contentType,
                           defaultFilename: filename) { result in
                 if case let .failure(error) = result { appState.errorMessage = error.localizedDescription }
@@ -66,8 +68,19 @@ private struct LibraryFileTransfers: ViewModifier {
             }
     }
 
+    /// Every window has this modifier, so only one takes a request: the active window on macOS, the first
+    /// to see it on iPad. Reading the binding (not the onChange value) lets a later window see it's taken.
+    private func claim() {
+        #if os(macOS)
+        guard appearsActive else { return }
+        #endif
+        guard let pending = request else { return }
+        request = nil
+        start(pending)
+    }
+
     private func start(_ request: LibraryFileRequest) {
-        let today = Date.now.formatted(.iso8601.year().month().day())
+        let today = Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
         do {
             switch request {
             case .exportBackup:

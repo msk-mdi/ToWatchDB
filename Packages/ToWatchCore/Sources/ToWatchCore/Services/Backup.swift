@@ -293,7 +293,11 @@ public extension LibraryService {
             }
         }
         for record in backup.smartLists where smartList(uuid: record.uuid) == nil {
-            let list = SmartList(name: record.name, rules: record.rules)
+            // A backup tag can match an existing tag by name with a different ID; point the rules at the one kept.
+            var rules = record.rules
+            rules.tagIDs = Set(rules.tagIDs.map { tags[$0]?.uuid ?? $0 })
+            rules.spaceIDs = Set(rules.spaceIDs.map { spaces[$0]?.uuid ?? $0 })
+            let list = SmartList(name: record.name, rules: rules)
             list.uuid = record.uuid
             list.symbolName = record.symbolName
             list.colorName = record.colorName
@@ -469,12 +473,13 @@ private struct NoteKey: Hashable {
 
 public extension LibraryService {
     /// One row per title, for spreadsheets. Export only; restore uses the JSON backup.
-    func exportCSV(now: Date = .now) throws -> String {
+    func exportCSV(now: Date = .now, timeZone: TimeZone = .current) throws -> String {
         let header = ["Type", "TMDB ID", "Title", "Year", "Status", "Watched Date", "Rating (0-10)", "Backlog", "Favorite",
                       "Episodes Watched", "Episodes Aired", "Genres", "Spaces", "Tags", "Added"]
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .gmt
-        let day = Date.ISO8601FormatStyle().year().month().day()
+        // Watch and added dates are the user's own moments, so they're written as local calendar days.
+        let day = Date.ISO8601FormatStyle(timeZone: timeZone).year().month().day()
         func year(_ date: Date?) -> String { date.map { String(calendar.component(.year, from: $0)) } ?? "" }
 
         var rows = [header]

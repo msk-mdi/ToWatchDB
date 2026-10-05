@@ -26,23 +26,50 @@ enum CollectionEditorTarget: Identifiable {
 extension View {
     /// Presents the collection editor requested through `AppState.collectionEditor`.
     func collectionEditorSheet(_ appState: AppState) -> some View {
-        @Bindable var appState = appState
-        return sheet(item: $appState.collectionEditor) { target in
-            NavigationStack {
-                switch target {
-                case let .newSpace(title): SpaceEditor(space: nil, assigning: title)
-                case let .editSpace(space): SpaceEditor(space: space)
-                case let .newTag(title): TagEditor(tag: nil, assigning: title)
-                case let .editTag(tag): TagEditor(tag: tag)
-                case .newSmartList: SmartListEditor(list: nil)
-                case let .editSmartList(list): SmartListEditor(list: list)
-                }
-            }
-            .environment(appState)
+        modifier(CollectionEditorPresenter(appState: appState))
+    }
+}
+
+/// The request is app-wide, but the sheet belongs in one window: the active one on macOS (a title window or
+/// the main window), the first to see it on iPad. Without this, every open window showed its own editor.
+private struct CollectionEditorPresenter: ViewModifier {
+    let appState: AppState
+    @State private var target: CollectionEditorTarget?
+    #if os(macOS)
+    @Environment(\.appearsActive) private var appearsActive
+    #endif
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: appState.collectionEditor?.id, initial: true) { claim() }
             #if os(macOS)
-            .frame(minWidth: 460, minHeight: 520)
+            .onChange(of: appearsActive) { claim() }
             #endif
-        }
+            .sheet(item: $target) { target in
+                NavigationStack {
+                    switch target {
+                    case let .newSpace(title): SpaceEditor(space: nil, assigning: title)
+                    case let .editSpace(space): SpaceEditor(space: space)
+                    case let .newTag(title): TagEditor(tag: nil, assigning: title)
+                    case let .editTag(tag): TagEditor(tag: tag)
+                    case .newSmartList: SmartListEditor(list: nil)
+                    case let .editSmartList(list): SmartListEditor(list: list)
+                    }
+                }
+                .environment(appState)
+                #if os(macOS)
+                .frame(minWidth: 460, minHeight: 520)
+                #endif
+            }
+    }
+
+    private func claim() {
+        #if os(macOS)
+        guard appearsActive else { return }
+        #endif
+        guard target == nil, let pending = appState.collectionEditor else { return }
+        appState.collectionEditor = nil
+        target = pending
     }
 }
 
@@ -236,6 +263,8 @@ private struct SmartListEditor: View {
             symbol = list.symbolName
             colorName = list.colorName
             rules = list.rules
+            // Keep genres the rules use even if no title has them anymore, so they can still be turned off.
+            genres = Array(Set(genres).union(rules.genres)).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         }
     }
 
@@ -257,6 +286,10 @@ private struct SmartListEditor: View {
 
     private func save() {
         let library = appState.library
+        // Spaces and tags deleted since this list was made can't be shown or matched; drop them.
+        var rules = rules
+        rules.spaceIDs.formIntersection(spaces.map(\.uuid))
+        rules.tagIDs.formIntersection(tags.map(\.uuid))
         if let list {
             library.update(list, name: name, symbolName: symbol, colorName: colorName, rules: rules)
         } else {

@@ -508,3 +508,55 @@ private var utcCalendar: Calendar {
     #expect(SpokenSummaries.whereToWatch("Inception", offers: nil, countryName: "Chad")
         == "Inception isn't available to stream, rent, or buy in Chad.")
 }
+
+// MARK: - Bug fixes
+
+@Test func trailersFallBackToEnglish() {
+    #expect(TMDBClient(token: "t", language: "fr-FR").videoLanguages == "fr,en,null")
+    #expect(TMDBClient(token: "t", language: "en-US").videoLanguages == "en,null")
+}
+
+@MainActor
+@Test func deletingSpaceOrTagCleansSmartListRules() throws {
+    let library = try makeLibrary()
+    let space = try #require(library.createSpace(name: "Family"))
+    let tag = try #require(library.createTag(name: "Rewatch"))
+    var rules = SmartListRules()
+    rules.spaceIDs = [space.uuid]
+    rules.tagIDs = [tag.uuid]
+    let list = try #require(library.createSmartList(name: "Mixed", rules: rules))
+
+    library.delete(space)
+    library.delete(tag)
+    #expect(list.rules.spaceIDs.isEmpty)
+    #expect(list.rules.tagIDs.isEmpty)
+}
+
+@MainActor
+@Test func importPointsSmartListRulesAtTagsMatchedByName() throws {
+    let source = try makeLibrary()
+    let sourceTag = try #require(source.createTag(name: "Rewatch"))
+    var rules = SmartListRules()
+    rules.tagIDs = [sourceTag.uuid]
+    source.createSmartList(name: "Rewatches", rules: rules)
+    let backup = try source.makeBackup()
+
+    let target = try makeLibrary()
+    let localTag = try #require(target.createTag(name: "rewatch"))
+    target.importBackup(backup)
+    let imported = try #require(try target.context.fetch(FetchDescriptor<SmartList>()).first)
+    #expect(imported.rules.tagIDs == [localTag.uuid])
+}
+
+@MainActor
+@Test func csvDatesAreLocalDays() throws {
+    let library = try makeLibrary()
+    let movie = Movie(tmdbID: 1, title: "Late Show")
+    library.context.insert(movie)
+    // 23:30 in New York is already the next day in UTC.
+    let lateEvening = try Date("2026-03-10T23:30:00-04:00", strategy: .iso8601)
+    library.setWatched(movie, true, on: lateEvening)
+    let csv = try library.exportCSV(timeZone: TimeZone(identifier: "America/New_York")!)
+    #expect(csv.contains("2026-03-10"))
+    #expect(!csv.contains("2026-03-11"))
+}

@@ -16,6 +16,8 @@ final class AppState {
     var selectedTab: AppTab = .discover
     /// Tab bar layouts: a library scope to show in the Library tab's scope picker.
     var requestedLibraryScope: LibraryScope?
+    /// Open main windows (macOS keeps running with none), so menu commands can reopen one.
+    var mainWindowCount = 0
     /// iOS presents Settings as a sheet (macOS uses the Settings scene).
     var isShowingSettings = false
     /// A backup, CSV export, or import requested from the File menu.

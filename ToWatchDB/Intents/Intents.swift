@@ -161,6 +161,10 @@ struct MarkMovieWatchedIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let library = SharedLibrary.service
         guard let model = library.movie(tmdbID: movie.id) else { throw IntentError.notInLibrary(movie.title) }
+        // Same rule as the app: a movie can't be watched before it comes out.
+        guard model.isReleased(asOf: date ?? .now) else {
+            return .result(dialog: "\(model.title) isn't out yet, so it can't be marked as watched.")
+        }
         library.setWatched(model, true, on: date ?? .now)
         let when = date.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
         return .result(dialog: "Marked \(model.title) as watched\(when).")

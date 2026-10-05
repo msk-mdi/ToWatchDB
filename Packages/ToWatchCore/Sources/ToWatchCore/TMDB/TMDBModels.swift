@@ -69,6 +69,7 @@ public struct TMDBVideoList: Codable, Sendable, Hashable {
     public let results: [TMDBVideo]
 
     /// Best YouTube trailer key: official trailers first, then any trailer, then teasers.
+    /// Results come in the user's language first (see `TMDBClient.videoLanguages`), then English.
     public var bestTrailerKey: String? {
         let youtube = results.filter { $0.site == "YouTube" }
         let trailers = youtube.filter { $0.type == "Trailer" }

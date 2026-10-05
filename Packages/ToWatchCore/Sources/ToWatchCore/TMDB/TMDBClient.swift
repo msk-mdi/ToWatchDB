@@ -56,11 +56,18 @@ public struct TMDBClient: Sendable {
     }
 
     public func movie(id: Int) async throws -> TMDBMovieDetail {
-        try await get("movie/\(id)", ["append_to_response": "credits,videos"])
+        try await get("movie/\(id)", ["append_to_response": "credits,videos", "include_video_language": videoLanguages])
     }
 
     public func tvShow(id: Int) async throws -> TMDBTVDetail {
-        try await get("tv/\(id)", ["append_to_response": "credits,videos"])
+        try await get("tv/\(id)", ["append_to_response": "credits,videos", "include_video_language": videoLanguages])
+    }
+
+    /// Videos are filtered by `language`, and most trailers exist only in English: without a fallback,
+    /// a French or German user would get no trailer at all. Order doesn't matter to TMDB; ranking does that.
+    var videoLanguages: String {
+        let primary = language.split(separator: "-").first.map(String.init) ?? "en"
+        return primary == "en" ? "en,null" : "\(primary),en,null"
     }
 
     public func season(showID: Int, seasonNumber: Int) async throws -> TMDBSeasonDetail {

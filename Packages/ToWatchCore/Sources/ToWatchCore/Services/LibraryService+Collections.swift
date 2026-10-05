@@ -61,6 +61,14 @@ public extension LibraryService {
         save()
     }
 
+    /// Deletes a space and drops it from smart-list rules, which would otherwise match nothing.
+    func delete(_ space: Space) {
+        let id = space.uuid
+        forEachSmartList { $0.spaceIDs.remove(id) }
+        context.delete(space)
+        save()
+    }
+
     // MARK: Tags
 
     @discardableResult
@@ -106,6 +114,14 @@ public extension LibraryService {
         save()
     }
 
+    /// Deletes a tag and drops it from smart-list rules, which would otherwise match nothing.
+    func delete(_ tag: MediaTag) {
+        let id = tag.uuid
+        forEachSmartList { $0.tagIDs.remove(id) }
+        context.delete(tag)
+        save()
+    }
+
     // MARK: Smart lists
 
     @discardableResult
@@ -141,6 +157,14 @@ public extension LibraryService {
         let movies = (try? context.fetch(FetchDescriptor<Movie>())) ?? []
         let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
         return Set(movies.flatMap(\.genres) + shows.flatMap(\.genres)).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private func forEachSmartList(_ change: (inout SmartListRules) -> Void) {
+        for list in (try? context.fetch(FetchDescriptor<SmartList>())) ?? [] {
+            var rules = list.rules
+            change(&rules)
+            if rules != list.rules { list.rules = rules }
+        }
     }
 
     private static func toggled<M: PersistentModel>(_ model: M, in list: [M]?) -> [M] {

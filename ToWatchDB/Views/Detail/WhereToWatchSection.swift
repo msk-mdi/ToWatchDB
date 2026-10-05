@@ -62,7 +62,13 @@ struct WhereToWatchSection: View {
     }
 
     private func load() async {
-        guard let client = appState.client else { return }
+        // Start clean: this view can be reused for another title, and a missing token shouldn't spin forever.
+        providers = nil
+        failed = false
+        guard let client = appState.client else {
+            failed = true
+            return
+        }
         do {
             providers = switch kind {
             case .movie: try await client.watchProviders(movieID: tmdbID)

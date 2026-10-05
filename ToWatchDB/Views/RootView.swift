@@ -31,6 +31,8 @@ struct RootView: View {
         }
         .collectionEditorSheet(appState)
         .libraryFileTransfers($appState.fileRequest)
+        .onAppear { appState.mainWindowCount += 1 }
+        .onDisappear { appState.mainWindowCount -= 1 }
         .onChange(of: router.destination, initial: true) { _, destination in
             guard let destination else { return }
             router.destination = nil

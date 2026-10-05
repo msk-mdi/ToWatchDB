@@ -19,7 +19,7 @@ struct ToWatchDBApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: AppCommands.mainWindowID) {
             RootView()
                 .environment(appState)
                 .themed()
@@ -74,42 +74,72 @@ extension FocusedValues {
 }
 
 struct AppCommands: Commands {
+    static let mainWindowID = "main"
+
     let appState: AppState
     @FocusedValue(\.focusedTitle) private var title
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        CommandGroup(after: .newItem) {
-            Button("Search TMDB") { appState.selectedTab = .search }
-                .keyboardShortcut("n")
+        #if os(macOS)
+        // Replaces File ▸ New Window, which also claimed ⌘N and so shadowed Search TMDB.
+        // There's one main window; title windows open from a poster's context menu.
+        CommandGroup(replacing: .newItem) { fileCommands }
+        CommandGroup(before: .windowList) {
+            Button("Library Window") { openWindow(id: Self.mainWindowID) }
+                .keyboardShortcut("0")
+                .disabled(appState.mainWindowCount > 0)
             Divider()
-            Button("New Space…") { appState.collectionEditor = .newSpace() }
-            Button("New Smart List…") { appState.collectionEditor = .newSmartList }
-            Button("New Tag…") { appState.collectionEditor = .newTag() }
         }
+        #else
+        CommandGroup(after: .newItem) { fileCommands }
+        #endif
         CommandGroup(after: .importExport) {
-            Button("Import Backup…") { appState.fileRequest = .importBackup }
+            Button("Import Backup…") { inMainWindow { appState.fileRequest = .importBackup } }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
-            Button("Export Backup…") { appState.fileRequest = .exportBackup }
+            Button("Export Backup…") { inMainWindow { appState.fileRequest = .exportBackup } }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-            Button("Export as CSV…") { appState.fileRequest = .exportCSV }
+            Button("Export as CSV…") { inMainWindow { appState.fileRequest = .exportCSV } }
         }
         CommandMenu("Library") {
             Button("Refresh Library") { Task { await appState.refreshLibrary(force: true) } }
                 .keyboardShortcut("r")
                 .disabled(appState.isRefreshing)
             Divider()
-            Button("Next to Watch") { appState.selectedTab = .nextToWatch }
+            Button("Next to Watch") { show(.nextToWatch) }
                 .keyboardShortcut("1")
-            Button("Upcoming") { appState.selectedTab = .upcoming }
+            Button("Upcoming") { show(.upcoming) }
                 .keyboardShortcut("2")
-            Button("Backlog") { appState.selectedTab = .backlog }
+            Button("Backlog") { show(.backlog) }
                 .keyboardShortcut("3")
-            Button("All Titles") { appState.selectedTab = .all }
+            Button("All Titles") { show(.all) }
                 .keyboardShortcut("4")
-            Button("Stats") { appState.selectedTab = .stats }
+            Button("Stats") { show(.stats) }
                 .keyboardShortcut("5")
         }
         CommandMenu("Title") { titleCommands }
+    }
+
+    @ViewBuilder
+    private var fileCommands: some View {
+        Button("Search TMDB") { show(.search) }
+            .keyboardShortcut("n")
+        Divider()
+        Button("New Space…") { inMainWindow { appState.collectionEditor = .newSpace() } }
+        Button("New Smart List…") { inMainWindow { appState.collectionEditor = .newSmartList } }
+        Button("New Tag…") { inMainWindow { appState.collectionEditor = .newTag() } }
+    }
+
+    private func show(_ tab: AppTab) {
+        inMainWindow { appState.selectedTab = tab }
+    }
+
+    /// On macOS the app keeps running with its main window closed; reopen it so the command isn't lost.
+    private func inMainWindow(_ action: () -> Void) {
+        #if os(macOS)
+        if appState.mainWindowCount == 0 { openWindow(id: Self.mainWindowID) }
+        #endif
+        action()
     }
 
     @ViewBuilder

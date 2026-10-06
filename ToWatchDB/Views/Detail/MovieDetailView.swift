@@ -12,6 +12,17 @@ struct MovieDetailView: View {
     @State private var isRefreshing = false
 
     var body: some View {
+        // A sync can delete the title while it's open; a deleted model can't be read.
+        if movie.modelContext == nil {
+            ContentUnavailableView("Removed from Library", systemImage: "trash",
+                                   description: Text("This title was removed on another device."))
+        } else {
+            page
+        }
+    }
+
+    @ViewBuilder
+    private var page: some View {
         DetailLayout(
             title: movie.title,
             subtitle: subtitle,

@@ -197,13 +197,14 @@ public extension LibraryService {
         var backup = LibraryBackup()
         backup.movies = try context.fetch(FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])).map(Self.record)
         backup.shows = try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)])).map(Self.record)
-        backup.spaces = try context.fetch(FetchDescriptor<Space>()).map {
+        // Collections in a stable order, so an unchanged library writes an identical file.
+        backup.spaces = try context.fetch(FetchDescriptor<Space>(sortBy: [SortDescriptor(\.createdAt)])).map {
             .init(uuid: $0.uuid, name: $0.name, symbolName: $0.symbolName, colorName: $0.colorName, createdAt: $0.createdAt)
         }
-        backup.tags = try context.fetch(FetchDescriptor<MediaTag>()).map {
+        backup.tags = try context.fetch(FetchDescriptor<MediaTag>(sortBy: [SortDescriptor(\.createdAt)])).map {
             .init(uuid: $0.uuid, name: $0.name, colorName: $0.colorName, createdAt: $0.createdAt)
         }
-        backup.smartLists = try context.fetch(FetchDescriptor<SmartList>()).map {
+        backup.smartLists = try context.fetch(FetchDescriptor<SmartList>(sortBy: [SortDescriptor(\.createdAt)])).map {
             .init(uuid: $0.uuid, name: $0.name, symbolName: $0.symbolName, colorName: $0.colorName, createdAt: $0.createdAt, rules: $0.rules)
         }
         return backup
@@ -356,7 +357,7 @@ public extension LibraryService {
         importBackup(try BackupCoding.decode(data))
     }
 
-    private func makeMovie(_ record: LibraryBackup.MovieRecord) -> Movie {
+    func makeMovie(_ record: LibraryBackup.MovieRecord) -> Movie {
         let movie = Movie(tmdbID: record.tmdbID, title: record.title)
         movie.originalTitle = record.originalTitle
         movie.overview = record.overview
@@ -378,7 +379,7 @@ public extension LibraryService {
         return movie
     }
 
-    private func makeShow(_ record: LibraryBackup.ShowRecord) -> TVShow {
+    func makeShow(_ record: LibraryBackup.ShowRecord) -> TVShow {
         let show = TVShow(tmdbID: record.tmdbID, name: record.name)
         show.originalName = record.originalName
         show.overview = record.overview
@@ -406,32 +407,12 @@ public extension LibraryService {
     private func mergeSeasons(_ records: [LibraryBackup.SeasonRecord], into show: TVShow) {
         var seasons = Dictionary((show.seasons ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
         for record in records {
-            let season = seasons[record.seasonNumber] ?? {
-                let season = Season(tmdbID: record.tmdbID, seasonNumber: record.seasonNumber)
-                season.name = record.name
-                season.overview = record.overview
-                season.posterPath = record.posterPath
-                season.airDate = record.airDate
-                context.insert(season)
-                season.show = show
-                seasons[record.seasonNumber] = season
-                return season
-            }()
+            let season = seasons[record.seasonNumber] ?? makeSeason(record, in: show)
+            seasons[record.seasonNumber] = season
             var episodes = Dictionary((season.episodes ?? []).map { ($0.episodeNumber, $0) }) { first, _ in first }
             for episodeRecord in record.episodes {
-                let episode = episodes[episodeRecord.episodeNumber] ?? {
-                    let episode = Episode(tmdbID: episodeRecord.tmdbID, seasonNumber: record.seasonNumber,
-                                          episodeNumber: episodeRecord.episodeNumber)
-                    episode.name = episodeRecord.name
-                    episode.overview = episodeRecord.overview
-                    episode.airDate = episodeRecord.airDate
-                    episode.runtime = episodeRecord.runtime
-                    episode.stillPath = episodeRecord.stillPath
-                    context.insert(episode)
-                    episode.season = season
-                    episodes[episodeRecord.episodeNumber] = episode
-                    return episode
-                }()
+                let episode = episodes[episodeRecord.episodeNumber] ?? makeEpisode(episodeRecord, in: season)
+                episodes[episodeRecord.episodeNumber] = episode
                 if episodeRecord.isWatched, !episode.isWatched {
                     episode.isWatched = true
                     episode.watchedDate = episodeRecord.watchedDate
@@ -442,6 +423,29 @@ public extension LibraryService {
                 mergeNotes(episodeRecord.notes, into: episode.notes) { $0.episode = episode }
             }
         }
+    }
+
+    func makeSeason(_ record: LibraryBackup.SeasonRecord, in show: TVShow) -> Season {
+        let season = Season(tmdbID: record.tmdbID, seasonNumber: record.seasonNumber)
+        season.name = record.name
+        season.overview = record.overview
+        season.posterPath = record.posterPath
+        season.airDate = record.airDate
+        context.insert(season)
+        season.show = show
+        return season
+    }
+
+    func makeEpisode(_ record: LibraryBackup.EpisodeRecord, in season: Season) -> Episode {
+        let episode = Episode(tmdbID: record.tmdbID, seasonNumber: season.seasonNumber, episodeNumber: record.episodeNumber)
+        episode.name = record.name
+        episode.overview = record.overview
+        episode.airDate = record.airDate
+        episode.runtime = record.runtime
+        episode.stillPath = record.stillPath
+        context.insert(episode)
+        episode.season = season
+        return episode
     }
 
     /// `existing` is an autoclosure: most records have no notes, and reading every episode's notes faults them in.

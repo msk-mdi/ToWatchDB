@@ -13,6 +13,17 @@ struct TVShowDetailView: View {
     @State private var notesEpisode: Episode?
 
     var body: some View {
+        // A sync can delete the title while it's open; a deleted model can't be read.
+        if show.modelContext == nil {
+            ContentUnavailableView("Removed from Library", systemImage: "trash",
+                                   description: Text("This title was removed on another device."))
+        } else {
+            page
+        }
+    }
+
+    @ViewBuilder
+    private var page: some View {
         // One pass over the episodes for the whole page: each of these walks every episode, and the page
         // redraws on every episode toggle.
         let progress = show.progressSummary()

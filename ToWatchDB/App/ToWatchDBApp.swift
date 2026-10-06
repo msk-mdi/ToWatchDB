@@ -5,6 +5,9 @@ import ToWatchCore
 @main
 struct ToWatchDBApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    #if DEBUG && os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @AppStorage(ThemeColor.appIconKey) private var appIcon: ThemeColor = .coral
     #if DEBUG
     // Sample-data and snapshot runs use a throwaway in-memory library.
@@ -27,6 +30,9 @@ struct ToWatchDBApp: App {
                 .themed()
                 .task {
                     #if DEBUG
+                    #if os(macOS)
+                    if DebugTools.opensSettings { openSettings() }
+                    #endif
                     await DebugTools.runIfRequested(appState)
                     #endif
                     await appState.refreshLibrary()
@@ -39,6 +45,10 @@ struct ToWatchDBApp: App {
                         shortcutsVersion = appState.libraryVersion
                         ToWatchShortcuts.updateAppShortcutParameters()
                     }
+                    appState.syncWithDropbox(for: phase)
+                }
+                .onChange(of: appState.libraryVersion) { _, version in
+                    if version != appState.dropbox.syncedVersion { appState.syncWithDropbox(after: .seconds(5)) }
                 }
                 .onChange(of: appIcon, initial: true) { _, icon in icon.applyAsAppIcon() }
         }
@@ -66,6 +76,7 @@ struct ToWatchDBApp: App {
                 .themed()
                 .modelContainer(appState.container)
         }
+        .windowResizability(.contentMinSize)
         #endif
     }
 }
@@ -113,6 +124,8 @@ struct AppCommands: Commands {
             Button("Refresh Library") { Task { await appState.refreshLibrary(force: true) } }
                 .keyboardShortcut("r")
                 .disabled(appState.isRefreshing)
+            Button("Sync with Dropbox") { appState.syncWithDropbox() }
+                .disabled(!appState.dropbox.isConnected || appState.dropbox.isSyncing)
             Divider()
             Button("Next to Watch") { show(.nextToWatch) }
                 .keyboardShortcut("1")

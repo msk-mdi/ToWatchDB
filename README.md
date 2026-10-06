@@ -18,6 +18,10 @@ with monthly activity, top genres and actors, highlights, a comparison with anot
 **Backup** (Settings, or File ▸ Import/Export on Mac): export the whole library as JSON and import it on any
 device. Importing merges, so nothing is lost or duplicated. **Export as CSV** gives one row per title for spreadsheets.
 
+**Dropbox Sync** (Settings ▸ Dropbox Sync): connect a Dropbox account and every device connected to it keeps
+the same library, backlog, watch history, ratings, notes, and collections. Changes sync when the app opens and a
+few seconds after each edit; removals and un-watching sync too. Needs a Dropbox app key (see Setup).
+
 **Siri & Shortcuts**: 18 actions (next episodes, upcoming, mark watched, rate, notes, backlog, stats, where to
 watch, open lists/collections/titles, search) and 9 ready-made Siri phrases such as "What's next in ToWatchDB"
 or "Mark Severance watched in ToWatchDB". The system only runs them for apps signed with a team: add a free Apple ID
@@ -35,6 +39,10 @@ On iPad and Mac, any title can open in its own window, posters drag into the lib
    (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain).
    Only Debug builds use it: Release builds ship without a token.
    Optionally add your signing team there too, so Siri & Shortcuts actions run.
+   For Dropbox Sync, create an app at <https://www.dropbox.com/developers/apps> (Scoped access, **App folder**,
+   named e.g. ToWatchDB), enable the `files.content.read` and `files.content.write` permissions, and put its
+   app key in `DROPBOX_APP_KEY`. The key isn't secret (sign-in uses PKCE), so Release builds keep it. While the
+   Dropbox app is in development mode, only your own account (plus up to 500 users you link) can connect.
 3. `xcodegen generate && open ToWatchDB.xcodeproj`
 
 The Xcode project is generated from `project.yml` — edit that, not the `.xcodeproj`.

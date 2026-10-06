@@ -126,6 +126,7 @@ About 9,500 lines of Swift in total.
 | Project | `project.yml` | Run `xcodegen generate` after adding or removing files. Never edit the `.xcodeproj`. |
 | TMDB token | `Config/Secrets.xcconfig` → `TMDB_READ_TOKEN` | Gitignored. Copied into Info.plist as `TMDBReadToken` in Debug only: `Config/Release.xcconfig` clears it, so Release users paste their own. Never commit it. |
 | Release builds | `Scripts/build-mac.sh`, `Scripts/install-ios.sh` | Mac: ad-hoc signed `dist/ToWatchDB.app`. iOS: free Apple ID team from Secrets, installed on a connected device. No `get-task-allow` in Release. |
+| Dropbox app key | `Config/Secrets.xcconfig` → `DROPBOX_APP_KEY` | Copied into Info.plist as `DropboxAppKey` in every configuration (it isn't a secret). Without it, Settings ▸ Dropbox Sync says sync is unavailable. |
 | Token override | Settings ▸ TMDB | Stored in the Keychain by `TokenStore`. It takes priority over the built-in token. |
 | Signing | `Config/App.xcconfig` | Ad-hoc by default (`CODE_SIGN_IDENTITY = -`). Set `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY = Apple Development` in Secrets so App Intents run. |
 | Entitlements | `project.yml` | macOS sandbox: network client and user-selected file read/write. Not used on iOS (`CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` is empty). |
@@ -477,6 +478,23 @@ Several windows carry it: the main window, title windows, and the macOS Settings
 window claims a request (§8). Imported files are opened with security-scoped access. Export file names use
 the local date.
 
+### 5.10a Dropbox sync
+
+- **Core (`LibrarySync.swift`):** `LibrarySync.merge(base:local:remote:)` is a three-way merge of backup
+  snapshots. The base is what this device last synced. A field changed here since the base wins; otherwise the
+  file's value is taken. Something in the base but missing on one side was deleted there (deletion beats an
+  edit). With no base (first sync) nothing is deleted and sides combine like `importBackup`. Seasons and
+  episodes are metadata, so they're never deleted by a merge. Same-name tags settle on the smaller UUID.
+  `applySyncedBackup` then makes the store match the merge exactly, writing only real changes.
+- **App (`Sync/`):** `DropboxClient` does OAuth with PKCE (redirect `db-<app key>://2/token`, caught by
+  `WebAuthenticationSession`), download, and upload with the file's `rev`, so a concurrent write from another
+  device comes back as a conflict and the sync re-merges. `DropboxSync` keeps the refresh token in the Keychain
+  and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`.
+- **When:** `AppState.syncWithDropbox` runs when the app becomes active (at most once a minute), when it goes to
+  the background with unsynced changes, 5 s after the last save, and from Settings or Library ▸ Sync with
+  Dropbox. In-memory (sample data) runs never sync.
+- **Deleted while open:** a sync can delete the title on screen, so the detail pages check `modelContext == nil`.
+
 ### 5.11 Siri & Shortcuts (App Intents)
 
 `Intents/Entities.swift`:
@@ -670,8 +688,9 @@ JSON with defaults.
 
 ## 11. Known limitations
 
-- **No sync.** The library is local to each device. Use backup export and import to move it. The models are
-  ready for CloudKit if that changes.
+- **Sync is through Dropbox only, and not instant.** Devices merge one shared file (§5.10a); there's no push,
+  so another device sees a change the next time it syncs. A title deleted on one device and edited on another
+  before they sync is deleted.
 - **Siri & Shortcuts need a signed build.** The system ignores intents from ad-hoc signed apps (§3).
 - **macOS app icon changes are temporary.** They only affect the Dock while the app runs. Finder keeps the
   coral icon.

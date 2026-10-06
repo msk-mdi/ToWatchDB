@@ -587,6 +587,119 @@ private var utcCalendar: Calendar {
     #expect(!csv.contains("2026-03-11"))
 }
 
+// MARK: - Sync
+
+/// One device's side of a sync through a shared file, as the app does it with Dropbox.
+@MainActor
+private final class SyncDevice {
+    let library: LibraryService
+    var base: LibraryBackup?
+
+    init() throws { library = try makeLibrary() }
+
+    /// Returns whether the merge changed this device's library.
+    @discardableResult
+    func sync(_ file: inout LibraryBackup?) throws -> Bool {
+        var changed = false
+        if let remote = file {
+            let merged = LibrarySync.merge(base: base, local: try library.makeBackup(), remote: remote)
+            changed = try library.applySyncedBackup(merged)
+        }
+        let snapshot = LibrarySync.normalized(try library.makeBackup())
+        file = snapshot
+        base = snapshot
+        return changed
+    }
+}
+
+@MainActor @Test func syncCombinesDevicesThenCarriesRemovals() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    mac.library.setWatched(movie, true, on: date("2024-12-31"))
+    mac.library.addNote("Rewatch in IMAX", to: movie)
+    let show = try insertSeverance(into: phone.library)
+    phone.library.setWatched(try #require(show.regularEpisodes.first), true, on: date("2025-01-02"))
+
+    try mac.sync(&file)
+    try phone.sync(&file)
+    try mac.sync(&file)
+    let phoneMovie = try #require(phone.library.movie(tmdbID: movie.tmdbID))
+    let macShow = try #require(mac.library.show(tmdbID: show.tmdbID))
+    #expect(phoneMovie.isWatched && phoneMovie.watchedDate == date("2024-12-31"))
+    #expect(phoneMovie.notes?.map(\.text) == ["Rewatch in IMAX"])
+    #expect(macShow.watchedEpisodeCount() == 1 && macShow.regularEpisodes.count == 12)
+
+    // Un-watching, deleting a note, and removing a title all reach the other device.
+    phone.library.setWatched(phoneMovie, false)
+    phone.library.delete(try #require(phoneMovie.notes?.first))
+    try phone.sync(&file)
+    mac.library.delete(macShow)
+    try mac.sync(&file)
+    try phone.sync(&file)
+    #expect(!movie.isWatched && movie.notes?.isEmpty == true)
+    #expect(phone.library.show(tmdbID: show.tmdbID) == nil)
+    #expect(try phone.library.context.fetchCount(FetchDescriptor<Episode>()) == 0)
+}
+
+@MainActor @Test func syncKeepsEditsMadeOnBothDevices() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    try mac.sync(&file)
+    try phone.sync(&file)
+    let phoneMovie = try #require(phone.library.movie(tmdbID: movie.tmdbID))
+
+    // Different fields changed on each side between syncs.
+    mac.library.setRating(movie, 8)
+    phone.library.setFavorite(phoneMovie, true)
+    phone.library.addNote("From the phone", to: phoneMovie)
+    try mac.sync(&file)
+    try phone.sync(&file)
+    try mac.sync(&file)
+    for movie in [movie, phoneMovie] {
+        #expect(movie.userRating == 8 && movie.isFavorite)
+        #expect(movie.notes?.map(\.text) == ["From the phone"])
+    }
+
+    // Nothing changed since: syncing again saves nothing on either side.
+    #expect(try mac.sync(&file) == false)
+    #expect(try phone.sync(&file) == false)
+}
+
+@MainActor @Test func syncMergesTagsWithTheSameNameAndCarriesCollections() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    let macTag = try #require(mac.library.createTag(name: "Rewatch"))
+    mac.library.toggle(macTag, on: .movie(movie))
+    let phoneTag = try #require(phone.library.createTag(name: "rewatch"))
+    var rules = SmartListRules()
+    rules.tagIDs = [phoneTag.uuid]
+    phone.library.createSmartList(name: "Rewatches", rules: rules)
+    let space = try #require(mac.library.createSpace(name: "Mind Benders", symbolName: "brain", colorName: "purple"))
+
+    try mac.sync(&file)
+    try phone.sync(&file)
+    try mac.sync(&file)
+    // One tag on each device, with the same ID, so the file stops changing.
+    let tagID = min(macTag.uuid.uuidString, phoneTag.uuid.uuidString)
+    for library in [mac.library, phone.library] {
+        let tags = try library.context.fetch(FetchDescriptor<MediaTag>())
+        #expect(tags.map(\.uuid.uuidString) == [tagID])
+        let list = try #require(try library.context.fetch(FetchDescriptor<SmartList>()).first)
+        #expect(list.rules.tagIDs.map(\.uuidString) == [tagID])
+        #expect(list.rules.matches(try #require(library.movie(tmdbID: movie.tmdbID))))
+    }
+    #expect(try mac.sync(&file) == false && phone.sync(&file) == false)
+
+    // Deleting a space on one device deletes it on the other.
+    phone.library.delete(try #require(phone.library.space(uuid: space.uuid)))
+    try phone.sync(&file)
+    try mac.sync(&file)
+    #expect(try mac.library.context.fetchCount(FetchDescriptor<Space>()) == 0)
+}
+
 // MARK: - List import
 
 @Test func parsesExportedTitleLists() {

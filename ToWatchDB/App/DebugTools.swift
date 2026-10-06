@@ -16,9 +16,11 @@ private let pageLog = OSLog(subsystem: "com.mehdi.towatchdb", category: .pointsO
 /// - `-UISnapshotDir <dir>` (macOS) also seeds, visits each tab, writes a PNG per screen, and quits.
 ///   The app captures its own windows, so no screen-recording permission is needed. Next to each PNG
 ///   it writes a `.wid` file with the window number, for a faithful `screencapture -l` from outside.
+/// - `-UIOpenSettings YES` (macOS) opens the Settings window at launch, to check its size and layout.
 @MainActor
 enum DebugTools {
     static var snapshotDir: String? { UserDefaults.standard.string(forKey: "UISnapshotDir") }
+    static var opensSettings: Bool { UserDefaults.standard.bool(forKey: "UIOpenSettings") }
     static var usesSampleData: Bool { UserDefaults.standard.bool(forKey: "UISeedSampleData") || snapshotDir != nil }
 
     static func runIfRequested(_ appState: AppState) async {

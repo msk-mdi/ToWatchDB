@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftData
 import SwiftUI
 import ToWatchCore
@@ -8,12 +9,16 @@ struct SettingsView: View {
     @AppStorage(ThemeColor.accentKey) private var accent: ThemeColor = .coral
     @AppStorage(ThemeColor.appIconKey) private var appIcon: ThemeColor = .coral
     @Environment(\.modelContext) private var context
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     @State private var tokenDraft = ""
     /// Settings runs its own panels: on macOS it's a separate window from the one handling File menu requests.
     @State private var fileRequest: LibraryFileRequest?
     @State private var testResult: String?
     @State private var isTesting = false
+    #if os(macOS)
+    @State private var formWidth: CGFloat = 0
+    #endif
 
     private static let languages: [(code: String, name: String)] = [
         ("", "System Default"), ("en-US", "English"), ("fr-FR", "Français"), ("es-ES", "Español"),
@@ -123,6 +128,8 @@ struct SettingsView: View {
                 Text("A backup holds your whole library: titles, watch history, ratings, notes, spaces, tags, and smart lists. Importing merges into what's here, so nothing is lost or duplicated. CSV is for spreadsheets and can't be imported. A list of titles (a text file with one per line, like “Arrival (2016)”) can be imported: each title is looked up on TMDB.")
             }
 
+            dropboxSection
+
             Section("About") {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "film.stack").font(.largeTitle).foregroundStyle(.tint)
@@ -139,8 +146,13 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .libraryFileTransfers($fileRequest)
         #if os(macOS)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
+        // The window opens filling the screen. The form keeps a readable width in the middle, while the
+        // scroll view (and its scroll bar) spans the window.
+        .scrollIndicators(.visible)
+        .contentMargins(.horizontal, max(0, (formWidth - 760) / 2), for: .scrollContent)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { formWidth = $0 }
+        .frame(minWidth: 520, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
+        .background(SettingsWindowSetup())
         #else
         .navigationTitle("Settings")
         .toolbar {
@@ -149,6 +161,53 @@ struct SettingsView: View {
             }
         }
         #endif
+    }
+
+    @ViewBuilder
+    private var dropboxSection: some View {
+        let dropbox = appState.dropbox
+        Section {
+            if dropbox.client == nil {
+                Text("This build has no Dropbox app key. Set DROPBOX_APP_KEY in Config/Secrets.xcconfig to turn on sync.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if dropbox.isConnected {
+                LabeledContent("Account", value: dropbox.accountEmail ?? "Connected")
+                LabeledContent("Last Synced") {
+                    if dropbox.isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(dropbox.lastSynced?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
+                    }
+                }
+                HStack {
+                    Button("Sync Now") { appState.syncWithDropbox() }
+                        .disabled(dropbox.isSyncing)
+                    Spacer()
+                    Button("Disconnect", role: .destructive) { dropbox.disconnect() }
+                }
+                .rowButtonStyle()
+            } else {
+                Button("Connect Dropbox…") { connectDropbox() }
+            }
+            if let error = dropbox.lastError {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+        } header: {
+            Text("Dropbox Sync")
+        } footer: {
+            Text("Keeps your library, backlog, watch history, ratings, notes, spaces, tags, and smart lists the same on every device connected to the same Dropbox. It's stored in Dropbox ▸ Apps ▸ ToWatchDB, and syncs when the app opens and a few seconds after each change. Disconnecting keeps everything on this device and in Dropbox.")
+        }
+    }
+
+    private func connectDropbox() {
+        Task {
+            await appState.dropbox.connect { url, scheme in
+                try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme),
+                                                                preferredBrowserSession: nil, additionalHeaderFields: [:])
+            }
+            appState.syncWithDropbox()
+        }
     }
 
     /// Every ISO country, sorted by localized name, for the Where to Watch default.
@@ -290,3 +349,65 @@ private struct AppIconPicker: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// Sets up the Settings window, which SwiftUI doesn't expose:
+/// - It fills the screen (all but the menu bar and Dock) each time it opens, and can be resized.
+/// - With "Show scroll bars: Automatically" (the default with a trackpad), macOS hides scroll bars until you
+///   scroll, even with `.scrollIndicators(.visible)`. The form keeps a classic, always-visible scroll bar.
+private struct SettingsWindowSetup: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Probe: NSView {
+        /// Set when the window closes: SwiftUI keeps the window and its views for the next time it opens.
+        private var fillsOnNextShow = true
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self)
+            guard let window else { return }
+            window.styleMask.insert(.resizable)
+            center.addObserver(self, selector: #selector(windowDidBecomeKey),
+                               name: NSWindow.didBecomeKeyNotification, object: window)
+            center.addObserver(self, selector: #selector(windowWillClose),
+                               name: NSWindow.willCloseNotification, object: window)
+            // macOS resets the scroll bar style when the system preference changes.
+            center.addObserver(self, selector: #selector(applyScrollBarStyle),
+                               name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+            // The form's scroll view is built alongside this background view; style it once both exist.
+            DispatchQueue.main.async { [weak self] in
+                self?.applyScrollBarStyle()
+                self?.fillScreenIfNeeded()
+            }
+        }
+
+        @objc private func windowDidBecomeKey() { fillScreenIfNeeded() }
+        @objc private func windowWillClose() { fillsOnNextShow = true }
+
+        private func fillScreenIfNeeded() {
+            guard fillsOnNextShow, let window, let screen = window.screen ?? NSScreen.main else { return }
+            fillsOnNextShow = false
+            window.setFrame(screen.visibleFrame, display: true, animate: false)
+        }
+
+        @objc private func applyScrollBarStyle() {
+            guard let root = window?.contentView else { return }
+            for scrollView in Self.scrollViews(in: root) {
+                scrollView.scrollerStyle = .legacy
+                scrollView.hasVerticalScroller = true
+                scrollView.autohidesScrollers = true // Only when everything fits.
+            }
+        }
+
+        private static func scrollViews(in view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+        }
+    }
+}
+#else
+private struct SettingsWindowSetup: View {
+    var body: some View { EmptyView() }
+}
+#endif

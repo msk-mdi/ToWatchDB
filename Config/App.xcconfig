@@ -2,6 +2,10 @@
 // a token can also be set at runtime in Settings.
 TMDB_READ_TOKEN =
 
+// Dropbox sync: the app key of a Dropbox app (www.dropbox.com/developers/apps). Not a secret, so
+// Release builds keep it. Without one, Settings explains how to turn sync on.
+DROPBOX_APP_KEY =
+
 // Signing: ad-hoc by default, which runs the app but not its Siri & Shortcuts actions
 // (the system only runs App Intents from apps signed with a team). To enable them, add a
 // free Apple ID in Xcode ▸ Settings ▸ Accounts and put your team in Config/Secrets.xcconfig:

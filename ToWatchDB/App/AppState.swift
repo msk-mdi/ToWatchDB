@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import SwiftData
 import ToWatchCore
 
@@ -43,6 +44,11 @@ final class AppState {
 
     private(set) var tokenOverride: String? = TokenStore.load()
 
+    let dropbox = DropboxSync()
+    /// Sample-data and snapshot runs use a throwaway library, which must never reach Dropbox.
+    private let isInMemory: Bool
+    @ObservationIgnored private var dropboxDelay: Task<Void, Never>?
+
     /// TMDB `language` parameter; empty means follow the system.
     var language: String = UserDefaults.standard.string(forKey: "tmdbLanguage") ?? "" {
         didSet { UserDefaults.standard.set(language, forKey: "tmdbLanguage") }
@@ -64,6 +70,7 @@ final class AppState {
     @ObservationIgnored private var saveObserver: (any NSObjectProtocol)?
 
     init(inMemory: Bool = false) {
+        isInMemory = inMemory
         container = inMemory ? SharedLibrary.makeContainer(inMemory: true) : SharedLibrary.container
         saveObserver = NotificationCenter.default.addObserver(
             // No queue: the version must change synchronously with the save, before any view redraws with the
@@ -156,6 +163,37 @@ final class AppState {
         } catch is CancellationError {
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Syncs with Dropbox if connected. `delay` coalesces a burst of edits into one sync; a later call
+    /// restarts the wait. A sync already running finishes, then runs once more.
+    func syncWithDropbox(after delay: Duration = .zero) {
+        guard dropbox.isConnected, !isInMemory else { return }
+        dropboxDelay?.cancel()
+        dropboxDelay = Task {
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+                // The sync that ran meanwhile may have covered these changes (its own save bumps the version too).
+                guard !Task.isCancelled, libraryVersion != dropbox.syncedVersion else { return }
+            }
+            // Its own task, so a later call's cancel can't interrupt a sync midway.
+            Task { await dropbox.sync(library: { self.library }, version: { self.libraryVersion }) }
+        }
+    }
+
+    /// Syncs when the app comes to the front (at most once a minute) and before it goes to the background
+    /// if there are unsynced changes.
+    func syncWithDropbox(for phase: ScenePhase) {
+        switch phase {
+        case .active:
+            if libraryVersion != dropbox.syncedVersion || dropbox.lastSynced.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true {
+                syncWithDropbox()
+            }
+        case .background where libraryVersion != dropbox.syncedVersion:
+            syncWithDropbox()
+        default:
+            break
         }
     }
 

@@ -32,6 +32,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.entertainment
         TMDBReadToken: $(TMDB_READ_TOKEN)
+        DropboxAppKey: $(DROPBOX_APP_KEY)
         UILaunchScreen: {}
         NSPhotoLibraryAddUsageDescription: Save your Year in Review card to your photo library.
         UTExportedTypeDeclarations:

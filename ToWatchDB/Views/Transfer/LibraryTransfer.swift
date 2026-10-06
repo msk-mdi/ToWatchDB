@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 
 /// A backup, CSV export, or import the user asked for, from Settings or the File menu.
 enum LibraryFileRequest: Hashable {
-    case exportBackup, exportCSV, importBackup
+    /// `importList`: a plain-text list of titles ("Arrival (2016)"), looked up on TMDB.
+    case exportBackup, exportCSV, importBackup, importList
 }
 
 /// In-memory file handed to the system save panel.
@@ -36,6 +37,9 @@ private struct LibraryFileTransfers: ViewModifier {
     @State private var filename = ""
     @State private var isExporting = false
     @State private var isImporting = false
+    /// What the open panel is for: a backup (JSON) or a list of titles (text).
+    @State private var importKind: LibraryFileRequest = .importBackup
+    @State private var listDraft: ListImportDraft?
     @State private var resultMessage: String?
     #if os(macOS)
     @Environment(\.appearsActive) private var appearsActive
@@ -52,12 +56,15 @@ private struct LibraryFileTransfers: ViewModifier {
                 if case let .failure(error) = result { appState.errorMessage = error.localizedDescription }
                 document = nil
             }
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
+            // One open panel for both imports: a second fileImporter on the same view doesn't present.
+            .fileImporter(isPresented: $isImporting,
+                          allowedContentTypes: importKind == .importList ? [.plainText, .text] : [.json]) { result in
                 switch result {
-                case let .success(url): importBackup(from: url)
+                case let .success(url): importKind == .importList ? readList(from: url) : importBackup(from: url)
                 case let .failure(error): appState.errorMessage = error.localizedDescription
                 }
             }
+            .sheet(item: $listDraft) { ListImportSheet(draft: $0) }
             .alert("Import Complete", isPresented: Binding(
                 get: { resultMessage != nil },
                 set: { if !$0 { resultMessage = nil } }
@@ -93,9 +100,31 @@ private struct LibraryFileTransfers: ViewModifier {
                 contentType = .commaSeparatedText
                 filename = "ToWatchDB \(today).csv"
                 isExporting = true
-            case .importBackup:
+            case .importBackup, .importList:
+                if request == .importList, appState.client == nil {
+                    appState.errorMessage = "Add your TMDB token in Settings first: titles in the list are looked up on TMDB."
+                    return
+                }
+                importKind = request
                 isImporting = true
             }
+        } catch {
+            appState.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func readList(from url: URL) {
+        let isScoped = url.startAccessingSecurityScopedResource()
+        defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            let text = String(decoding: data, as: UTF8.self)
+            let entries = ListImport.parse(text)
+            guard !entries.isEmpty else {
+                appState.errorMessage = "No titles found in “\(url.lastPathComponent)”. Put one title per line, like “Arrival (2016)”."
+                return
+            }
+            listDraft = ListImportDraft(fileName: url.lastPathComponent, entries: entries)
         } catch {
             appState.errorMessage = error.localizedDescription
         }

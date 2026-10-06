@@ -174,4 +174,9 @@ public enum TMDBDate {
         guard let string, !string.isEmpty else { return nil }
         return try? Date(string, strategy: Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
     }
+
+    /// The year of a TMDB `yyyy-MM-dd` date.
+    public static func year(_ string: String?) -> Int? {
+        string.flatMap { Int($0.prefix(4)) }
+    }
 }

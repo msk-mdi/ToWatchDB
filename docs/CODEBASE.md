@@ -284,6 +284,11 @@ one from `SharedLibrary.service`.
   - Notes are deduplicated by text plus creation second.
   - Spaces match by UUID. Tags match by UUID or name. Smart-list rules are remapped to the tags and spaces
     that were kept.
+- **Lists of titles (`ListImport.swift`):** `ListImport.parse` reads plain text, one title per line
+  ("Arrival (2016) - drama"), with optional MOVIES / TV SHOWS headings. `LibraryService.importList` searches
+  TMDB for each (with the year, which matches any release date, then without), picks a result with
+  `ListImport.bestMatch` (exact title first, then year; listed years are often regional), downloads 4 at a time,
+  and saves once. It can mark titles watched (no date) or backlog, never un-marking. File ▸ Import List of Titles….
 - **CSV (`exportCSV(now:timeZone:)`):** one row per title, quoted per RFC 4180. Watch and added dates are
   written as **local** calendar days.
 
@@ -401,6 +406,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 | `Stats/YearInReview.swift` | A 4:5 share card rendered with `ImageRenderer` (posters downloaded first) |
 | `Settings/SettingsView.swift` | Appearance (layout, accent color, app icon), TMDB token, language and region, library refresh, backup, about |
 | `Transfer/LibraryTransfer.swift` | `LibraryFileRequest` and the save/open panels (§5.10) |
+| `Transfer/ListImportSheet.swift` | Importing a list of titles: counts, "add as" choice, progress, and titles not found |
 
 ### 5.6 Shared components
 

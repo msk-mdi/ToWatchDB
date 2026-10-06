@@ -586,3 +586,52 @@ private var utcCalendar: Calendar {
     #expect(csv.contains("2026-03-10"))
     #expect(!csv.contains("2026-03-11"))
 }
+
+// MARK: - List import
+
+@Test func parsesExportedTitleLists() {
+    let text = """
+    MOVIES
+    ======
+    Adaptation. (2002) - comedy, crime, drama
+    Crazy, Stupid, Love. (2011) - comedy, drama, romance
+    Æon Flux (2005) - action, sciencefiction, thriller
+    Once Upon a Time... in Hollywood (2019) - comedy, drama, thriller
+
+    TV SHOWS
+    ========
+    The Sopranos (1999) - crime, drama - 6 season(s), 86 episodes
+    - Spare Me, Great Lord! (2021)
+    3. Untitled Show
+    """
+    let entries = ListImport.parse(text)
+    #expect(entries.map(\.label) == ["Adaptation. (2002)", "Crazy, Stupid, Love. (2011)", "Æon Flux (2005)",
+                                     "Once Upon a Time... in Hollywood (2019)", "The Sopranos (1999)",
+                                     "Spare Me, Great Lord! (2021)", "Untitled Show"])
+    #expect(entries.map(\.kind) == [.movie, .movie, .movie, .movie, .show, .show, .show])
+    #expect(entries.first?.line == 3)
+}
+
+@Test func matchesListTitlesOnTMDB() {
+    typealias C = ListImport.Candidate
+    // A regional re-release year still finds the film by its exact title.
+    #expect(ListImport.bestMatch([C(id: 1, titles: ["Princess Mononoke Returns"], year: 2022),
+                                  C(id: 2, titles: ["Princess Mononoke", "もののけ姫"], year: 1997)],
+                                 title: "Princess Mononoke", year: 2022) == 2)
+    // Same title, different films: the year decides.
+    #expect(ListImport.bestMatch([C(id: 1, titles: ["Brothers"], year: 2024), C(id: 2, titles: ["Brothers"], year: 2009)],
+                                 title: "Brothers", year: 2009) == 2)
+    // Accents, punctuation, and "&" don't matter.
+    #expect(ListImport.bestMatch([C(id: 7, titles: ["Æon Flux"], year: 2005)], title: "Aeon Flux", year: 2005) == 7)
+    #expect(ListImport.bestMatch([C(id: 8, titles: ["Pride and Prejudice"], year: 2005)], title: "Pride & Prejudice", year: 2005) == 8)
+    // A romanized title: TMDB's top result with the right year is taken, a lower one isn't.
+    #expect(ListImport.bestMatch([C(id: 9, titles: ["Heavenly Delusion", "天国大魔境"], year: 2023)],
+                                 title: "Tengoku Daimakyo", year: 2023) == 9)
+    #expect(ListImport.bestMatch([C(id: 1, titles: ["Something Else"], year: 2010), C(id: 9, titles: ["Other"], year: 2023)],
+                                 title: "Tengoku Daimakyo", year: 2023) == nil)
+    #expect(ListImport.bestMatch([], title: "Anything", year: nil) == nil)
+    // A regional year (2001) shouldn't pull in a lesser entry whose title only matches without punctuation.
+    #expect(ListImport.bestMatch([C(id: 1, titles: ["In the Mood for Love", "花樣年華"], year: 2000),
+                                  C(id: 2, titles: ["@ in the mood for love"], year: 2001)],
+                                 title: "In the Mood for Love", year: 2001) == 1)
+}

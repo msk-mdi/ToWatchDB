@@ -104,6 +104,7 @@ struct AppCommands: Commands {
         CommandGroup(after: .importExport) {
             Button("Import Backup…") { inMainWindow { appState.fileRequest = .importBackup } }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Import List of Titles…") { inMainWindow { appState.fileRequest = .importList } }
             Button("Export Backup…") { inMainWindow { appState.fileRequest = .exportBackup } }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             Button("Export as CSV…") { inMainWindow { appState.fileRequest = .exportCSV } }

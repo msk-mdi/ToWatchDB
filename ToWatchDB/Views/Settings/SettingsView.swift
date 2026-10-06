@@ -107,18 +107,20 @@ struct SettingsView: View {
                 Button("Export Backup…", systemImage: "square.and.arrow.up") { fileRequest = .exportBackup }
                 Button("Export as CSV…", systemImage: "tablecells") { fileRequest = .exportCSV }
                 Button("Import Backup…", systemImage: "square.and.arrow.down") { fileRequest = .importBackup }
+                Button("Import List of Titles…", systemImage: "list.bullet") { fileRequest = .importList }
                 #else
                 HStack {
                     Button("Export Backup…") { fileRequest = .exportBackup }
                     Button("Export as CSV…") { fileRequest = .exportCSV }
                     Spacer()
+                    Button("Import List…") { fileRequest = .importList }
                     Button("Import Backup…") { fileRequest = .importBackup }
                 }
                 #endif
             } header: {
                 Text("Backup")
             } footer: {
-                Text("A backup holds your whole library: titles, watch history, ratings, notes, spaces, tags, and smart lists. Importing merges into what's here, so nothing is lost or duplicated. CSV is for spreadsheets and can't be imported.")
+                Text("A backup holds your whole library: titles, watch history, ratings, notes, spaces, tags, and smart lists. Importing merges into what's here, so nothing is lost or duplicated. CSV is for spreadsheets and can't be imported. A list of titles (a text file with one per line, like “Arrival (2016)”) can be imported: each title is looked up on TMDB.")
             }
 
             Section("About") {

@@ -39,12 +39,17 @@ public struct TMDBClient: Sendable {
 
     // MARK: Endpoints
 
-    public func searchMovies(_ query: String, page: Int = 1) async throws -> TMDBPage<TMDBMovieSummary> {
-        try await get("search/movie", ["query": query, "page": String(page), "include_adult": "false"])
+    /// `year` matches any of a movie's release dates (theatrical, regional, re-release), not just the first.
+    public func searchMovies(_ query: String, year: Int? = nil, page: Int = 1) async throws -> TMDBPage<TMDBMovieSummary> {
+        var parameters = ["query": query, "page": String(page), "include_adult": "false"]
+        if let year { parameters["year"] = String(year) }
+        return try await get("search/movie", parameters)
     }
 
-    public func searchTVShows(_ query: String, page: Int = 1) async throws -> TMDBPage<TMDBTVSummary> {
-        try await get("search/tv", ["query": query, "page": String(page), "include_adult": "false"])
+    public func searchTVShows(_ query: String, year: Int? = nil, page: Int = 1) async throws -> TMDBPage<TMDBTVSummary> {
+        var parameters = ["query": query, "page": String(page), "include_adult": "false"]
+        if let year { parameters["first_air_date_year"] = String(year) }
+        return try await get("search/tv", parameters)
     }
 
     public func trendingMovies() async throws -> TMDBPage<TMDBMovieSummary> {

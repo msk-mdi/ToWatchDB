@@ -12,7 +12,7 @@ public struct LibraryService {
         self.client = client
     }
 
-    private func requireClient() throws -> TMDBClient {
+    func requireClient() throws -> TMDBClient {
         guard let client else { throw TMDBError.missingToken }
         return client
     }
@@ -60,13 +60,7 @@ public struct LibraryService {
     /// Inserts (or updates) a movie from an already-fetched TMDB payload.
     @discardableResult
     public func insertMovie(_ detail: TMDBMovieDetail) -> Movie {
-        // Re-check: another add may have finished while this one was awaiting the network.
-        let movie = movie(tmdbID: detail.id) ?? {
-            let movie = Movie(tmdbID: detail.id, title: detail.title)
-            context.insert(movie)
-            return movie
-        }()
-        movie.apply(detail)
+        let movie = upsertMovie(detail)
         save()
         return movie
     }
@@ -74,6 +68,25 @@ public struct LibraryService {
     /// Inserts (or updates) a show from already-fetched TMDB payloads.
     @discardableResult
     public func insertShow(_ detail: TMDBTVDetail, seasons: [TMDBSeasonDetail]) -> TVShow {
+        let show = upsertShow(detail, seasons: seasons)
+        save()
+        return show
+    }
+
+    /// `insertMovie` without saving, for batches that save once.
+    func upsertMovie(_ detail: TMDBMovieDetail) -> Movie {
+        // Re-check: another add may have finished while this one was awaiting the network.
+        let movie = movie(tmdbID: detail.id) ?? {
+            let movie = Movie(tmdbID: detail.id, title: detail.title)
+            context.insert(movie)
+            return movie
+        }()
+        movie.apply(detail)
+        return movie
+    }
+
+    /// `insertShow` without saving, for batches that save once.
+    func upsertShow(_ detail: TMDBTVDetail, seasons: [TMDBSeasonDetail]) -> TVShow {
         let show = show(tmdbID: detail.id) ?? {
             let show = TVShow(tmdbID: detail.id, name: detail.name)
             context.insert(show)
@@ -81,7 +94,6 @@ public struct LibraryService {
         }()
         show.apply(detail)
         merge(seasons, into: show)
-        save()
         return show
     }
 
@@ -139,7 +151,7 @@ public struct LibraryService {
 
     /// Runs `fetch` for each ID with at most `limit` running at once, and hands each result to `apply` on the
     /// main actor as it arrives.
-    private static func forEachConcurrently<Value: Sendable>(
+    static func forEachConcurrently<Value: Sendable>(
         _ ids: [Int], limit: Int,
         fetch: @escaping @Sendable (Int) async -> Value,
         apply: (Int, Value) -> Void

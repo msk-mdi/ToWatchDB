@@ -41,6 +41,13 @@ struct DiscoverView: View {
             }
         }
         .pageTitle("Discover")
+        .pageToolbar {
+            // Also keeps the Mac toolbar from being empty, which made macOS collapse it and shift the window.
+            ToolbarItem {
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(force: true) } }
+                    .disabled(appState.client == nil)
+            }
+        }
         .settingsToolbarButton(appState)
         .task(id: appState.token) { await load() }
     }

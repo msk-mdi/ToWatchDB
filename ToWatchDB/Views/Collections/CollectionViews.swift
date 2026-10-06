@@ -230,6 +230,16 @@ struct OrganizeView: View {
             }
         }
         .pageTitle("Organize")
+        .pageToolbar {
+            // Also keeps the Mac toolbar from being empty, which made macOS collapse it and shift the window.
+            ToolbarItem {
+                Menu("Add", systemImage: "plus") {
+                    Button("New Space…", systemImage: "square.stack") { appState.collectionEditor = .newSpace() }
+                    Button("New Smart List…", systemImage: "wand.and.stars") { appState.collectionEditor = .newSmartList }
+                    Button("New Tag…", systemImage: "tag") { appState.collectionEditor = .newTag() }
+                }
+            }
+        }
         .confirmationDialog("Delete “\(pendingDeletion?.name ?? "")”?", isPresented: Binding(
             get: { pendingDeletion != nil },
             set: { if !$0 { pendingDeletion = nil } }

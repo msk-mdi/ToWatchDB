@@ -58,10 +58,11 @@ public struct TMDBWatchProviders: Codable, Sendable, Hashable {
 
     /// Country codes with any offer, sorted by their name in the given locale.
     public func countries(locale: Locale = .current) -> [String] {
-        results.keys.sorted {
-            (locale.localizedString(forRegionCode: $0) ?? $0)
-                .localizedStandardCompare(locale.localizedString(forRegionCode: $1) ?? $1) == .orderedAscending
-        }
+        // Each name looked up once, not twice per comparison.
+        results.keys
+            .map { (code: $0, name: locale.localizedString(forRegionCode: $0) ?? $0) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .map(\.code)
     }
 }
 

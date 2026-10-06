@@ -63,16 +63,21 @@ struct WhereToWatchSection: View {
 
     private func load() async {
         // Start clean: this view can be reused for another title, and a missing token shouldn't spin forever.
-        providers = nil
+        // A title seen in the last hour shows its providers at once, without a spinner.
+        let key = "providers-\(kind.rawValue)-\(tmdbID)"
+        providers = appState.cachedResponse(key)
         failed = false
+        guard providers == nil else { return }
         guard let client = appState.client else {
             failed = true
             return
         }
         do {
-            providers = switch kind {
-            case .movie: try await client.watchProviders(movieID: tmdbID)
-            case .tv: try await client.watchProviders(showID: tmdbID)
+            providers = try await appState.cachedResponse(key) {
+                switch kind {
+                case .movie: try await client.watchProviders(movieID: tmdbID)
+                case .tv: try await client.watchProviders(showID: tmdbID)
+                }
             }
         } catch is CancellationError {
         } catch {

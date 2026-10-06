@@ -526,6 +526,17 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
 5. **Keep pages alive on macOS** (`PageHost`). What remains on a switch is mostly AppKit relaying out the
    toolbar.
 6. **Discover's trending lists** are cached in `AppState` for 30 minutes.
+7. **Don't sort to walk episodes.** `regularEpisodes` sorts every season and episode; use
+   `forEachRegularEpisode` (unsorted) or `progressSummary()`, which also returns `lastWatched`.
+8. **Share per-show progress.** `appState.progress(of: shows)` computes every show's `ShowProgress` once per
+   save; the library grids and Next to Watch read it instead of walking episodes themselves.
+9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
+   save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
+   served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.
+10. **Refresh in parallel, save once.** `refreshStale` fetches 4 titles at a time and saves at the end; every
+    save redraws each open page. `apply` only writes episode and season fields that changed.
+11. **One download per image.** `ImageCache` shares in-flight downloads between views showing the same URL.
+12. **Detail responses are cached for an hour** (`appState.cachedResponse`): Where to Watch and TMDB previews.
 
 To measure page switches, see §9.
 

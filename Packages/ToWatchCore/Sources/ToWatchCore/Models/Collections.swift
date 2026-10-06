@@ -67,9 +67,12 @@ public final class SmartList {
     }
 
     public var rules: SmartListRules {
-        get { rulesData.flatMap { try? JSONDecoder().decode(SmartListRules.self, from: $0) } ?? SmartListRules() }
-        set { rulesData = try? JSONEncoder().encode(newValue) }
+        get { rulesData.flatMap { try? Self.decoder.decode(SmartListRules.self, from: $0) } ?? SmartListRules() }
+        set { rulesData = try? Self.encoder.encode(newValue) }
     }
+
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
 }
 
 /// Criteria for a smart list. Every set criterion must match (AND); within a set, any value matches (OR).
@@ -108,16 +111,17 @@ public struct SmartListRules: Codable, Sendable, Hashable {
                              backlog: movie.isInBacklog, favorite: movie.isFavorite)
     }
 
-    public func matches(_ show: TVShow, now: Date = .now) -> Bool {
+    /// `status` can be passed in when the caller already has it; a show's status walks all of its episodes.
+    public func matches(_ show: TVShow, now: Date = .now, status: WatchStatus? = nil) -> Bool {
         media != .movies
-            && matchesCommon(status: show.watchStatus(asOf: now), genres: show.genres, tags: show.tags, spaces: show.spaces,
+            && matchesCommon(status: status ?? show.watchStatus(asOf: now), genres: show.genres, tags: show.tags, spaces: show.spaces,
                              rating: show.userRating, date: show.firstAirDate,
                              backlog: show.isInBacklog, favorite: show.isFavorite)
     }
 
-    private func matchesCommon(status: WatchStatus, genres itemGenres: [String], tags: [MediaTag]?, spaces: [Space]?,
+    /// The status is checked last: for a show it's the expensive part.
+    private func matchesCommon(status: @autoclosure () -> WatchStatus, genres itemGenres: [String], tags: [MediaTag]?, spaces: [Space]?,
                                rating: Double?, date: Date?, backlog: Bool, favorite: Bool) -> Bool {
-        if !statuses.isEmpty, !statuses.contains(status) { return false }
         if !genres.isEmpty, genres.isDisjoint(with: itemGenres) { return false }
         if !tagIDs.isEmpty, tagIDs.isDisjoint(with: (tags ?? []).map(\.uuid)) { return false }
         if !spaceIDs.isEmpty, spaceIDs.isDisjoint(with: (spaces ?? []).map(\.uuid)) { return false }
@@ -129,12 +133,17 @@ public struct SmartListRules: Codable, Sendable, Hashable {
         }
         if backlogOnly, !backlog { return false }
         if favoritesOnly, !favorite { return false }
+        if !statuses.isEmpty, !statuses.contains(status()) { return false }
         return true
     }
 
     private static func utcYear(_ date: Date) -> Int {
+        utcCalendar.component(.year, from: date)
+    }
+
+    private static let utcCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .gmt
-        return calendar.component(.year, from: date)
-    }
+        return calendar
+    }()
 }

@@ -27,19 +27,34 @@ final class ImageCache: @unchecked Sendable {
         cache.setObject(entry, forKey: url as NSURL, cost: entry.image.bytesPerRow * entry.image.height)
     }
 
+    /// Downloads in progress, so views showing the same image (a title on two pages, an actor in two casts)
+    /// share one download and one decode.
+    private var inFlight: [URL: Task<Entry, Error>] = [:]
+    private let lock = NSLock()
+
     /// Fetches (through the shared URL cache) and decodes off the main thread.
     func load(_ url: URL) async throws -> Entry {
         if let image = image(for: url) { return Entry(image) }
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let entry = try await Task.detached(priority: .userInitiated) {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let image = CGImageSourceCreateImageAtIndex(
-                      source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
-                  ) else { throw URLError(.cannotDecodeContentData) }
-            return Entry(image)
-        }.value
-        store(entry, for: url)
-        return entry
+        let task = lock.withLock {
+            if let task = inFlight[url] { return task }
+            // Unstructured, so one view scrolling away (cancelling its wait) doesn't cancel the others'.
+            let task = Task.detached(priority: .userInitiated) { [self] in
+                defer { lock.withLock { inFlight[url] = nil } }
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let image = CGImageSourceCreateImageAtIndex(
+                          source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+                      ) else { throw URLError(.cannotDecodeContentData) }
+                let entry = Entry(image)
+                store(entry, for: url)
+                return entry
+            }
+            inFlight[url] = task
+            return task
+        }
+        // A download that a view stops waiting for (scrolled away) still finishes into the cache, so scrolling
+        // back finds it.
+        return try await task.value
     }
 }
 
@@ -66,8 +81,9 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
 
     private func load() async {
         guard let url else { return }
-        if let cached = ImageCache.shared.image(for: url) {
-            loaded = cached
+        if ImageCache.shared.image(for: url) != nil {
+            // The body already draws it from the cache; only clear an image left from a previous URL.
+            if loaded != nil { loaded = nil }
             return
         }
         loaded = nil

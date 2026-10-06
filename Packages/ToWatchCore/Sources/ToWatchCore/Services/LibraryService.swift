@@ -102,10 +102,52 @@ public struct LibraryService {
         let movies = ((try? context.fetch(FetchDescriptor<Movie>())) ?? [])
             .filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
 
+        guard let client, !shows.isEmpty || !movies.isEmpty else { return 0 }
+
+        // A few titles download at a time (a show's seasons already download in parallel), and the library is
+        // saved once at the end: every save redraws each open page, so saving per title made a refresh of
+        // many shows keep the main thread busy.
+        let showsByID = Dictionary(shows.map { ($0.tmdbID, $0) }) { first, _ in first }
+        let moviesByID = Dictionary(movies.map { ($0.tmdbID, $0) }) { first, _ in first }
         var count = 0
-        for show in shows where (try? await refresh(show)) != nil { count += 1 }
-        for movie in movies where (try? await refresh(movie)) != nil { count += 1 }
+        await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) {
+            try? await client.tvShowWithSeasons(id: $0)
+        } apply: { id, payload in
+            guard let (detail, seasons) = payload, let show = showsByID[id] else { return }
+            show.apply(detail)
+            merge(seasons, into: show)
+            count += 1
+        }
+        await Self.forEachConcurrently(Array(moviesByID.keys), limit: 4) {
+            try? await client.movie(id: $0)
+        } apply: { id, detail in
+            guard let detail, let movie = moviesByID[id] else { return }
+            movie.apply(detail)
+            count += 1
+        }
+        if count > 0 { save() }
         return count
+    }
+
+    /// Runs `fetch` for each ID with at most `limit` running at once, and hands each result to `apply` on the
+    /// main actor as it arrives.
+    private static func forEachConcurrently<Value: Sendable>(
+        _ ids: [Int], limit: Int,
+        fetch: @escaping @Sendable (Int) async -> Value,
+        apply: (Int, Value) -> Void
+    ) async {
+        await withTaskGroup(of: (Int, Value).self) { group in
+            var pending = ids.makeIterator()
+            func startNext() {
+                guard let id = pending.next() else { return }
+                group.addTask { (id, await fetch(id)) }
+            }
+            for _ in 0..<limit { startNext() }
+            while let (id, value) = await group.next() {
+                apply(id, value)
+                startNext()
+            }
+        }
     }
 
     /// Upserts seasons and episodes by number, keeping the user's watch data.
@@ -293,22 +335,31 @@ extension TVShow {
 
 extension Season {
     func apply(_ detail: TMDBSeasonDetail) {
-        tmdbID = detail.id
-        name = detail.name
-        overview = detail.overview
-        posterPath = detail.posterPath
-        airDate = TMDBDate.parse(detail.airDate)
+        update(\.tmdbID, detail.id)
+        update(\.name, detail.name)
+        update(\.overview, detail.overview)
+        update(\.posterPath, detail.posterPath)
+        update(\.airDate, TMDBDate.parse(detail.airDate))
     }
 }
 
 extension Episode {
+    /// Writes only the fields that changed. A refresh re-applies every episode of a show, and each write
+    /// marks the episode as changed, so unchanged episodes would otherwise all be saved again.
     func apply(_ detail: TMDBEpisode) {
-        tmdbID = detail.id
-        name = detail.name
-        overview = detail.overview
-        airDate = TMDBDate.parse(detail.airDate)
-        runtime = detail.runtime
-        stillPath = detail.stillPath
+        update(\.tmdbID, detail.id)
+        update(\.name, detail.name)
+        update(\.overview, detail.overview)
+        update(\.airDate, TMDBDate.parse(detail.airDate))
+        update(\.runtime, detail.runtime)
+        update(\.stillPath, detail.stillPath)
+    }
+}
+
+extension PersistentModel {
+    /// Assigns only when the value differs, so an unchanged field doesn't mark the model as changed.
+    fileprivate func update<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<Self, Value>, _ value: Value) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
     }
 }
 

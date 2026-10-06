@@ -16,7 +16,8 @@ struct SearchView: View {
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        let ids = LibraryIDs(movies: movies, shows: shows)
+        // Rebuilt once per save, not on every keystroke.
+        let ids = appState.cached("library-ids") { LibraryIDs(movies: movies, shows: shows) }
         ScrollView {
             kindPicker
                 #if os(macOS)

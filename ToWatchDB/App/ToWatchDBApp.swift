@@ -12,6 +12,8 @@ struct ToWatchDBApp: App {
     #else
     @State private var appState = AppState()
     #endif
+    /// Library version the App Shortcut parameters were last updated for.
+    @State private var shortcutsVersion: Int?
 
     init() {
         // Posters are requested constantly while scrolling; a larger shared cache keeps them local.
@@ -31,7 +33,12 @@ struct ToWatchDBApp: App {
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     // Teach Siri the current show and movie names for phrases like "Mark Severance watched".
-                    if phase == .active { ToWatchShortcuts.updateAppShortcutParameters() }
+                    // On Mac the app becomes active every time it comes to the front, so only when the library
+                    // changed since the last update.
+                    if phase == .active, shortcutsVersion != appState.libraryVersion {
+                        shortcutsVersion = appState.libraryVersion
+                        ToWatchShortcuts.updateAppShortcutParameters()
+                    }
                 }
                 .onChange(of: appIcon, initial: true) { _, icon in icon.applyAsAppIcon() }
         }

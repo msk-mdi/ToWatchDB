@@ -145,6 +145,27 @@ private let now = date("2026-09-23")
     #expect(show.watchedEpisodeCount() == 0)
 }
 
+/// `progressSummary` walks the episodes unsorted; it must agree with the airing-order answers.
+@MainActor @Test func progressSummaryMatchesAiringOrder() throws {
+    let library = try makeLibrary()
+    let show = try insertSeverance(into: library)
+    let episodes = show.regularEpisodes
+    // Watched out of order, with the latest date on an earlier episode.
+    library.setWatched(episodes[0], true, on: date("2026-03-01"))
+    library.setWatched(episodes[2], true, on: date("2026-05-01"))
+    library.setWatched(episodes[9], true, on: date("2026-04-01"))
+
+    let summary = show.progressSummary(asOf: now)
+    let aired = episodes.filter { $0.hasAired(asOf: now) }
+    #expect(summary.nextEpisode?.code == aired.first { !$0.isWatched }?.code)
+    #expect(summary.nextEpisode?.code == "S01E02")
+    #expect(summary.lastWatched == date("2026-05-01"))
+    #expect(summary.airedCount == aired.count)
+    #expect(summary.remainingCount == aired.count - 3)
+    #expect(show.lastWatchedDate == date("2026-05-01"))
+    #expect(show.nextEpisodeToWatch(asOf: now)?.code == "S01E02")
+}
+
 @MainActor @Test func refreshMergeKeepsWatchData() throws {
     let library = try makeLibrary()
     let show = try insertSeverance(into: library)

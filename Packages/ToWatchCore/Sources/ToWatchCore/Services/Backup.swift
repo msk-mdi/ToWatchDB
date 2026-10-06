@@ -306,9 +306,14 @@ public extension LibraryService {
             summary.collectionsAdded += 1
         }
 
+        // One fetch each instead of one per record (which also had to search the growing unsaved inserts).
+        var moviesByID = Dictionary(((try? context.fetch(FetchDescriptor<Movie>())) ?? []).map { ($0.tmdbID, $0) }) { first, _ in first }
+        var showsByID = Dictionary(((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).map { ($0.tmdbID, $0) }) { first, _ in first }
+
         for record in backup.movies {
-            let existing = movie(tmdbID: record.tmdbID)
+            let existing = moviesByID[record.tmdbID]
             let movie = existing ?? makeMovie(record)
+            moviesByID[record.tmdbID] = movie
             if existing == nil { summary.moviesAdded += 1 } else { summary.moviesMerged += 1 }
 
             if record.isWatched, !movie.isWatched {
@@ -327,8 +332,9 @@ public extension LibraryService {
         }
 
         for record in backup.shows {
-            let existing = show(tmdbID: record.tmdbID)
+            let existing = showsByID[record.tmdbID]
             let show = existing ?? makeShow(record)
+            showsByID[record.tmdbID] = show
             if existing == nil { summary.showsAdded += 1 } else { summary.showsMerged += 1 }
 
             show.userRating = show.userRating ?? record.userRating
@@ -438,8 +444,11 @@ public extension LibraryService {
         }
     }
 
-    private func mergeNotes(_ records: [LibraryBackup.NoteRecord], into existing: [Note]?, attach: (Note) -> Void) {
-        let present = Set((existing ?? []).map { NoteKey(text: $0.text, createdAt: $0.createdAt) })
+    /// `existing` is an autoclosure: most records have no notes, and reading every episode's notes faults them in.
+    private func mergeNotes(_ records: [LibraryBackup.NoteRecord], into existing: @autoclosure () -> [Note]?,
+                            attach: (Note) -> Void) {
+        guard !records.isEmpty else { return }
+        let present = Set((existing() ?? []).map { NoteKey(text: $0.text, createdAt: $0.createdAt) })
         for record in records where !present.contains(NoteKey(text: record.text, createdAt: record.createdAt)) {
             let note = Note(text: record.text)
             note.createdAt = record.createdAt
@@ -493,10 +502,11 @@ public extension LibraryService {
                          movie.addedDate.formatted(day)])
         }
         for show in try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.name)])) {
-            rows.append(["TV Show", String(show.tmdbID), show.name, year(show.firstAirDate), show.watchStatus(asOf: now).label,
-                         show.lastWatchedDate?.formatted(day) ?? "", show.userRating.map { String(format: "%g", $0) } ?? "",
+            let progress = show.progressSummary(asOf: now)
+            rows.append(["TV Show", String(show.tmdbID), show.name, year(show.firstAirDate), progress.status.label,
+                         progress.lastWatched?.formatted(day) ?? "", show.userRating.map { String(format: "%g", $0) } ?? "",
                          show.isInBacklog ? "Yes" : "No", show.isFavorite ? "Yes" : "No",
-                         String(show.watchedEpisodeCount()), String(show.airedEpisodes(asOf: now).count),
+                         String(show.watchedEpisodeCount()), String(progress.airedCount),
                          show.genres.joined(separator: "; "),
                          (show.spaces ?? []).map(\.name).sorted().joined(separator: "; "),
                          (show.tags ?? []).map(\.name).sorted().joined(separator: "; "),

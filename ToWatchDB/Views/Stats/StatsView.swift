@@ -6,6 +6,7 @@ import ToWatchCore
 /// Watch statistics for a period, with activity, top genres and actors, highlights, and a year comparison.
 struct StatsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
@@ -16,10 +17,11 @@ struct StatsView: View {
     var body: some View {
         // Cached until the library changes, so coming back to Stats doesn't recompute everything.
         let day = Calendar.current.startOfDay(for: .now)
-        let stats = appState.cached("stats-\(period.label)-\(day)") {
+        // A hidden page (kept alive on Mac) shows its last stats instead of recomputing after every save.
+        let stats = appState.cached("stats-\(period.label)-\(day)", allowStale: !isActive) {
             StatsService.stats(movies: movies, shows: shows, period: period)
         }
-        let years = appState.cached("watch-years") { StatsService.watchYears(movies: movies, shows: shows) }
+        let years = appState.cached("watch-years", allowStale: !isActive) { StatsService.watchYears(movies: movies, shows: shows) }
         let showsCompare = if case let .year(year) = period { years.contains { $0 != year } } else { false }
         // With nothing else on the page, the empty state is centered like every other screen's.
         let isBlank = stats.isEmpty && !showsCompare && stats.undatedWatches == 0
@@ -372,6 +374,7 @@ private struct Highlights: View {
 /// counts and hours don't share a scale.
 private struct CompareSection: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
     let year: Int
     /// The selected year's stats, already computed by the page.
     let current: WatchStats
@@ -382,7 +385,7 @@ private struct CompareSection: View {
 
     var body: some View {
         let other = comparedYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first { $0 < year } ?? years[0]
-        let previous = appState.cached("stats-\(other)") {
+        let previous = appState.cached("stats-\(other)", allowStale: !isActive) {
             StatsService.stats(movies: movies, shows: shows, period: .year(other))
         }
 

@@ -133,10 +133,10 @@ enum LibrarySort: String, CaseIterable, Identifiable {
     }
 
     /// Sorts once, computing each item's key once: a show's last-watched date walks all of its episodes,
-    /// which is too slow to repeat inside every comparison.
-    func sorted(_ items: [LibraryItem]) -> [LibraryItem] {
+    /// which is too slow to repeat inside every comparison. `lastWatched` can supply precomputed dates.
+    func sorted(_ items: [LibraryItem], lastWatched: (LibraryItem) -> Date? = \.lastWatched) -> [LibraryItem] {
         guard self == .lastWatched else { return items.sorted(by: areInOrder) }
-        let keyed: [(item: LibraryItem, date: Date)] = items.map { ($0, $0.lastWatched ?? .distantPast) }
+        let keyed: [(item: LibraryItem, date: Date)] = items.map { ($0, lastWatched($0) ?? .distantPast) }
         let ordered = keyed.sorted { lhs, rhs in
             if lhs.date != rhs.date { return lhs.date > rhs.date }
             return lhs.item.title.localizedStandardCompare(rhs.item.title) == .orderedAscending

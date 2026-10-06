@@ -5,14 +5,19 @@ import ToWatchCore
 /// Movies and episodes in your library releasing today or later, grouped by day.
 struct UpcomingView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
     var body: some View {
         let now = Date.now
-        let items = UpcomingService.upcoming(movies: movies, shows: shows, now: now)
-        let days = Dictionary(grouping: items) { $0.date.map { UpcomingService.startOfToday($0) } ?? .distantFuture }
-            .sorted { $0.key < $1.key }
+        // Walks every episode in the library, so it's cached per save and day; a hidden page keeps the last list.
+        let (items, days) = appState.cached("upcoming-\(UpcomingService.startOfToday(now))", allowStale: !isActive) {
+            let items = UpcomingService.upcoming(movies: movies, shows: shows, now: now)
+            let days = Dictionary(grouping: items) { $0.date.map { UpcomingService.startOfToday($0) } ?? .distantFuture }
+                .sorted { $0.key < $1.key }
+            return (items, days)
+        }
 
         Group {
             if items.isEmpty {

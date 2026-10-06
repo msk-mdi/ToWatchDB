@@ -13,6 +13,10 @@ struct TVShowDetailView: View {
     @State private var notesEpisode: Episode?
 
     var body: some View {
+        // One pass over the episodes for the whole page: each of these walks every episode, and the page
+        // redraws on every episode toggle.
+        let progress = show.progressSummary()
+        let seasons = show.sortedSeasons
         DetailLayout(
             title: show.name,
             subtitle: subtitle,
@@ -25,9 +29,9 @@ struct TVShowDetailView: View {
             cast: show.cast
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                progressSummary
+                progressSummary(progress)
                 ActionBar {
-                    watchedMenu
+                    watchedMenu(progress)
                 } toggles: {
                     Toggle(isOn: Binding(get: { show.isInBacklog }, set: { appState.library.setBacklog(show, $0) })) {
                         Label("Backlog", systemImage: "tray.full")
@@ -45,7 +49,7 @@ struct TVShowDetailView: View {
             }
         } extra: {
             WhereToWatchSection(kind: .tv, tmdbID: show.tmdbID)
-            seasonsSection
+            seasonsSection(seasons)
             CollectionsSection(title: .show(show))
             NotesSection(notes: show.notes ?? []) { appState.library.addNote($0, to: show) }
         }
@@ -81,8 +85,8 @@ struct TVShowDetailView: View {
 
     /// Clicking marks the next episode watched (the common case); the menu covers the whole show.
     @ViewBuilder
-    private var watchedMenu: some View {
-        let next = show.nextEpisodeToWatch()
+    private func watchedMenu(_ progress: ShowProgress) -> some View {
+        let next = progress.nextEpisode
         let menu = Group {
             Button("Mark All Aired Episodes Watched") { appState.library.setWatched(show, true) }
             Button("Mark All as Not Watched", role: .destructive) { appState.library.setWatched(show, false) }
@@ -99,7 +103,7 @@ struct TVShowDetailView: View {
             Menu {
                 menu
             } label: {
-                Label(show.watchStatus() == .watched ? "All Caught Up" : "Watched", systemImage: "checkmark.circle.fill")
+                Label(progress.status == .watched ? "All Caught Up" : "Watched", systemImage: "checkmark.circle.fill")
             }
             .tint(.green)
         }
@@ -107,20 +111,18 @@ struct TVShowDetailView: View {
 
     // MARK: Progress
 
-    private var progressSummary: some View {
-        let aired = show.airedEpisodes().count
-        let watched = show.airedEpisodes().count { $0.isWatched }
-        let status = show.watchStatus()
+    private func progressSummary(_ progress: ShowProgress) -> some View {
+        let status = progress.status
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Label(status.label, systemImage: status.symbol).foregroundStyle(status.tint)
-                Text("\(watched) of \(aired) aired episodes watched").foregroundStyle(.secondary)
+                Text("\(progress.watchedAiredCount) of \(progress.airedCount) aired episodes watched").foregroundStyle(.secondary)
             }
             .font(.callout)
-            ProgressView(value: show.progress())
+            ProgressView(value: progress.fraction)
                 .frame(maxWidth: 420)
                 .tint(status.tint)
-            if let next = show.nextEpisodeToWatch() {
+            if let next = progress.nextEpisode {
                 Text("Up next: \(next.code) · \(next.name ?? "")").font(.callout)
             } else if let upcoming = show.nextEpisodeToAir(), let date = upcoming.airDate {
                 Text("Next episode \(upcoming.code) airs \(date.tmdbDayString)").font(.callout)
@@ -131,25 +133,29 @@ struct TVShowDetailView: View {
     // MARK: Seasons
 
     @ViewBuilder
-    private var seasonsSection: some View {
-        let seasons = show.sortedSeasons
+    private func seasonsSection(_ seasons: [Season]) -> some View {
+        let season = seasons.first { $0.seasonNumber == selectedSeason }
+        // Sorted once: the controls (built twice by ViewThatFits) and the list share it.
+        let episodes = season?.sortedEpisodes ?? []
+        let aired = episodes.filter { $0.hasAired() }
+        let isFullyWatched = !aired.isEmpty && aired.allSatisfy(\.isWatched)
         if !seasons.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 ViewThatFits(in: .horizontal) {
                     HStack {
                         Text("Episodes").font(.title3.bold())
                         Spacer()
-                        seasonControls(seasons)
+                        seasonControls(seasons, season: season, hasAired: !aired.isEmpty, isFullyWatched: isFullyWatched)
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Episodes").font(.title3.bold())
-                        HStack { seasonControls(seasons) }
+                        HStack { seasonControls(seasons, season: season, hasAired: !aired.isEmpty, isFullyWatched: isFullyWatched) }
                     }
                 }
 
-                if let season = currentSeason {
+                if season != nil {
                     LazyVStack(spacing: 0) {
-                        ForEach(season.sortedEpisodes) { episode in
+                        ForEach(episodes) { episode in
                             EpisodeRow(episode: episode, onNotes: { notesEpisode = episode })
                             Divider()
                         }
@@ -161,23 +167,19 @@ struct TVShowDetailView: View {
     }
 
     @ViewBuilder
-    private func seasonControls(_ seasons: [Season]) -> some View {
+    private func seasonControls(_ seasons: [Season], season: Season?, hasAired: Bool, isFullyWatched: Bool) -> some View {
         Picker("Season", selection: $selectedSeason) {
             ForEach(seasons) { season in
                 Text(season.displayName).tag(Optional(season.seasonNumber))
             }
         }
         .fixedSize()
-        if let season = currentSeason {
-            Button(season.isFullyWatched ? "Mark Season Unwatched" : "Mark Season Watched") {
-                appState.library.setWatched(season, !season.isFullyWatched)
+        if let season {
+            Button(isFullyWatched ? "Mark Season Unwatched" : "Mark Season Watched") {
+                appState.library.setWatched(season, !isFullyWatched)
             }
-            .disabled(season.airedEpisodes().isEmpty && !season.isFullyWatched)
+            .disabled(!hasAired && !isFullyWatched)
         }
-    }
-
-    private var currentSeason: Season? {
-        show.sortedSeasons.first { $0.seasonNumber == selectedSeason }
     }
 
     private var subtitle: String {

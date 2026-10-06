@@ -111,9 +111,10 @@ private struct RemotePreview: View {
 
     private func load() async {
         guard let client = appState.client else { return }
+        let id = summary.tmdbID
         switch summary.kind {
-        case .movie: movie = try? await client.movie(id: summary.tmdbID)
-        case .tv: show = try? await client.tvShow(id: summary.tmdbID)
+        case .movie: movie = try? await appState.cachedResponse("movie-\(id)") { try await client.movie(id: id) }
+        case .tv: show = try? await appState.cachedResponse("tv-\(id)") { try await client.tvShow(id: id) }
         }
     }
 

@@ -22,10 +22,14 @@ public enum UpcomingItem: Identifiable {
 public enum UpcomingService {
     /// Start of the current UTC day. TMDB dates are UTC midnights, so an item dated today counts as upcoming.
     public static func startOfToday(_ now: Date = .now) -> Date {
+        utcCalendar.startOfDay(for: now)
+    }
+
+    private static let utcCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .gmt
-        return calendar.startOfDay(for: now)
-    }
+        return calendar
+    }()
 
     /// Movies releasing today or later, soonest first.
     public static func upcomingMovies(_ movies: [Movie], now: Date = .now) -> [Movie] {
@@ -38,10 +42,13 @@ public enum UpcomingService {
     /// Unwatched episodes airing today or later, soonest first. Abandoned shows are excluded.
     public static func upcomingEpisodes(_ shows: [TVShow], now: Date = .now) -> [Episode] {
         let today = startOfToday(now)
-        return shows
-            .filter { !$0.isAbandoned }
-            .flatMap(\.regularEpisodes)
-            .filter { episode in !episode.isWatched && (episode.airDate.map { $0 >= today } ?? false) }
+        var episodes: [Episode] = []
+        for show in shows where !show.isAbandoned {
+            show.forEachRegularEpisode { episode in
+                if !episode.isWatched, let airDate = episode.airDate, airDate >= today { episodes.append(episode) }
+            }
+        }
+        return episodes
             .sorted { ($0.airDate!, $0.seasonNumber, $0.episodeNumber) < ($1.airDate!, $1.seasonNumber, $1.episodeNumber) }
     }
 
@@ -54,8 +61,6 @@ public enum UpcomingService {
 
     /// Whole days from today until `date` (0 = today).
     public static func daysUntil(_ date: Date, now: Date = .now) -> Int {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .gmt
-        return calendar.dateComponents([.day], from: startOfToday(now), to: calendar.startOfDay(for: date)).day ?? 0
+        utcCalendar.dateComponents([.day], from: startOfToday(now), to: utcCalendar.startOfDay(for: date)).day ?? 0
     }
 }

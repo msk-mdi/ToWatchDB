@@ -7,14 +7,14 @@ public extension TVShow {
     }
 
     func watchedEpisodeCount() -> Int {
-        regularEpisodes.count { $0.isWatched }
+        var count = 0
+        forEachRegularEpisode { if $0.isWatched { count += 1 } }
+        return count
     }
 
     /// Fraction of aired regular episodes that are watched (0...1).
     func progress(asOf now: Date = .now) -> Double {
-        let aired = airedEpisodes(asOf: now)
-        guard !aired.isEmpty else { return 0 }
-        return Double(aired.count { $0.isWatched }) / Double(aired.count)
+        progressSummary(asOf: now).fraction
     }
 
     /// - Abandoned wins over everything.
@@ -24,16 +24,23 @@ public extension TVShow {
         progressSummary(asOf: now).status
     }
 
-    /// Status, progress, and next episode from a single pass over the episodes. Building the sorted episode
-    /// list touches every season and episode, so screens that need several of these should call this once.
+    /// Status, progress, next episode, and last watch date from a single pass over the episodes, without
+    /// sorting them. It still touches every season and episode, so screens that need several of these
+    /// should call this once.
     func progressSummary(asOf now: Date = .now) -> ShowProgress {
         var aired = 0, watchedAired = 0, watchedAny = 0
         var next: Episode?
-        for episode in regularEpisodes {
+        var lastWatched: Date?
+        forEachRegularEpisode { episode in
             if episode.isWatched { watchedAny += 1 }
-            guard episode.hasAired(asOf: now) else { continue }
+            if let date = episode.watchedDate, date > lastWatched ?? .distantPast { lastWatched = date }
+            guard episode.hasAired(asOf: now) else { return }
             aired += 1
-            if episode.isWatched { watchedAired += 1 } else if next == nil { next = episode }
+            if episode.isWatched {
+                watchedAired += 1
+            } else if next.map({ episode.airsBefore($0) }) ?? true {
+                next = episode
+            }
         }
         let status: WatchStatus = if isAbandoned {
             .abandoned
@@ -43,22 +50,50 @@ public extension TVShow {
             watchedAired == aired ? .watched : .watching
         }
         return ShowProgress(status: status, fraction: aired == 0 ? 0 : Double(watchedAired) / Double(aired),
-                            nextEpisode: next, airedCount: aired, watchedAiredCount: watchedAired)
+                            nextEpisode: next, airedCount: aired, watchedAiredCount: watchedAired,
+                            lastWatched: lastWatched)
     }
 
     /// The first aired, unwatched regular episode, in airing order.
     func nextEpisodeToWatch(asOf now: Date = .now) -> Episode? {
-        regularEpisodes.first { !$0.isWatched && $0.hasAired(asOf: now) }
+        var next: Episode?
+        forEachRegularEpisode { episode in
+            guard !episode.isWatched, episode.hasAired(asOf: now) else { return }
+            if next.map({ episode.airsBefore($0) }) ?? true { next = episode }
+        }
+        return next
     }
 
     /// The next episode that hasn't aired yet.
     func nextEpisodeToAir(asOf now: Date = .now) -> Episode? {
-        regularEpisodes.first { ep in ep.airDate.map { $0 > now } ?? false }
+        var next: Episode?
+        forEachRegularEpisode { episode in
+            guard let airDate = episode.airDate, airDate > now else { return }
+            if next.map({ episode.airsBefore($0) }) ?? true { next = episode }
+        }
+        return next
     }
 
     /// Most recent date any episode was marked watched, used to order "Next to Watch".
     var lastWatchedDate: Date? {
-        regularEpisodes.compactMap(\.watchedDate).max()
+        var latest: Date?
+        forEachRegularEpisode { if let date = $0.watchedDate, date > latest ?? .distantPast { latest = date } }
+        return latest
+    }
+
+    /// Visits every regular episode (specials excluded) in no particular order. Cheaper than `regularEpisodes`,
+    /// which sorts the seasons and each season's episodes and builds a new array.
+    func forEachRegularEpisode(_ body: (Episode) -> Void) {
+        for season in seasons ?? [] where season.seasonNumber > 0 {
+            for episode in season.episodes ?? [] { body(episode) }
+        }
+    }
+}
+
+extension Episode {
+    /// Airing order: season, then episode number.
+    func airsBefore(_ other: Episode) -> Bool {
+        (seasonNumber, episodeNumber) < (other.seasonNumber, other.episodeNumber)
     }
 }
 
@@ -71,6 +106,11 @@ public struct ShowProgress {
     public let nextEpisode: Episode?
     public let airedCount: Int
     public let watchedAiredCount: Int
+    /// Most recent date any regular episode was marked watched.
+    public let lastWatched: Date?
+
+    /// Aired regular episodes not watched yet.
+    public var remainingCount: Int { airedCount - watchedAiredCount }
 }
 
 public extension Season {

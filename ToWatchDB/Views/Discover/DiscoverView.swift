@@ -17,7 +17,7 @@ struct DiscoverView: View {
     private var trendingShows: [MediaSummary] { appState.trending?.shows ?? [] }
 
     var body: some View {
-        let ids = LibraryIDs(movies: movies, shows: shows)
+        let ids = appState.cached("library-ids") { LibraryIDs(movies: movies, shows: shows) }
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if appState.client != nil && loadError == nil {

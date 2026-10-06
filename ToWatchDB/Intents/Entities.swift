@@ -33,8 +33,9 @@ struct MovieQuery: EntityStringQuery {
 
     func entities(matching string: String) async throws -> [MovieEntity] {
         await MainActor.run {
-            let movies = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<Movie>())) ?? []
-            return movies.filter { $0.title.localizedStandardContains(string) }.map(MovieEntity.init)
+            // Matched in the store instead of loading every movie.
+            let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.title.localizedStandardContains(string) })
+            return ((try? SharedLibrary.container.mainContext.fetch(descriptor)) ?? []).map(MovieEntity.init)
         }
     }
 
@@ -61,23 +62,29 @@ struct ShowEntity: AppEntity {
 
     @MainActor
     init(_ show: TVShow) {
+        self.init(show, next: show.nextEpisodeToWatch())
+    }
+
+    /// `next`: the show's next episode to watch, when the caller already found it.
+    @MainActor
+    init(_ show: TVShow, next: Episode?) {
         id = show.tmdbID
         name = show.name
-        detail = show.nextEpisodeToWatch().map { "Next: \($0.code)" } ?? show.firstAirDate?.yearString
+        detail = next.map { "Next: \($0.code)" } ?? show.firstAirDate?.yearString
     }
 }
 
 struct ShowQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [ShowEntity] {
         await MainActor.run {
-            identifiers.compactMap { SharedLibrary.service.show(tmdbID: $0).map(ShowEntity.init) }
+            identifiers.compactMap { SharedLibrary.service.show(tmdbID: $0).map { ShowEntity($0) } }
         }
     }
 
     func entities(matching string: String) async throws -> [ShowEntity] {
         await MainActor.run {
-            let shows = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
-            return shows.filter { $0.name.localizedStandardContains(string) }.map(ShowEntity.init)
+            let descriptor = FetchDescriptor<TVShow>(predicate: #Predicate { $0.name.localizedStandardContains(string) })
+            return ((try? SharedLibrary.container.mainContext.fetch(descriptor)) ?? []).map { ShowEntity($0) }
         }
     }
 
@@ -85,10 +92,12 @@ struct ShowQuery: EntityStringQuery {
     func suggestedEntities() async throws -> [ShowEntity] {
         await MainActor.run {
             let shows = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
+            // Each show's next episode found once, not twice per comparison.
             return shows
-                .sorted { ($0.nextEpisodeToWatch() != nil ? 0 : 1, $0.name) < ($1.nextEpisodeToWatch() != nil ? 0 : 1, $1.name) }
+                .map { (show: $0, next: $0.nextEpisodeToWatch()) }
+                .sorted { ($0.next != nil ? 0 : 1, $0.show.name) < ($1.next != nil ? 0 : 1, $1.show.name) }
                 .prefix(30)
-                .map(ShowEntity.init)
+                .map { ShowEntity($0.show, next: $0.next) }
         }
     }
 }

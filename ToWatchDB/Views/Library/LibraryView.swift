@@ -5,6 +5,7 @@ import ToWatchCore
 /// Poster grid of library items for a scope, with status filter, sort, and local search.
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
     @Query private var spaces: [Space]
@@ -29,7 +30,8 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        let items = filteredItems
+        let progress = appState.progress(of: shows, allowStale: !isActive)
+        let items = filteredItems(progress)
         ScrollView {
             #if os(macOS)
             if allowsScopeChange {
@@ -58,7 +60,8 @@ struct LibraryView: View {
                 let menuTags = tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 PosterGrid {
                     ForEach(items) { item in
-                        LibraryPosterCard(item: item, spaces: menuSpaces, tags: menuTags)
+                        LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
+                                          spaces: menuSpaces, tags: menuTags)
                     }
                 }
                 .padding()
@@ -236,8 +239,25 @@ struct LibraryView: View {
         scope == .movies ? [.notWatched, .watched] : WatchStatus.allCases
     }
 
-    private var filteredItems: [LibraryItem] {
-        let now = Date.now
+    /// Scoped, filtered, and sorted items, cached per library version: a show's status and last-watched date
+    /// walk its episodes, so they come from the shared progress map. The text filter runs on the cached
+    /// result, so typing only matches titles. A hidden page keeps its last list.
+    private func filteredItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
+        let key = "library-\(scope)-\(sort)-\(String(describing: statusFilter))"
+        let items = appState.cached(key, allowStale: !isActive) { scopedItems(progress) }
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        return query.isEmpty ? items : items.filter { $0.title.localizedStandardContains(query) }
+    }
+
+    private func showProgress(for item: LibraryItem, in progress: [PersistentIdentifier: ShowProgress]) -> ShowProgress? {
+        guard case let .show(show) = item else { return nil }
+        return progress[show.persistentModelID] ?? show.progressSummary()
+    }
+
+    private func scopedItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
+        func status(_ item: LibraryItem) -> WatchStatus {
+            self.showProgress(for: item, in: progress)?.status ?? item.watchStatus()
+        }
         var items: [LibraryItem] = switch scope {
         case .movies: movies.map(LibraryItem.movie)
         case .shows: shows.map(LibraryItem.show)
@@ -245,7 +265,7 @@ struct LibraryView: View {
         }
         switch scope {
         case .backlog: items = items.filter(\.isInBacklog)
-        case .watched: items = items.filter { $0.watchStatus(asOf: now) == .watched }
+        case .watched: items = items.filter { status($0) == .watched }
         case let .space(id): items = items.filter { $0.spaces.contains { $0.uuid == id } }
         case let .tag(id): items = items.filter { $0.tags.contains { $0.uuid == id } }
         case let .smartList(id):
@@ -253,19 +273,15 @@ struct LibraryView: View {
             items = items.filter { item in
                 switch item {
                 case let .movie(movie): rules.matches(movie)
-                case let .show(show): rules.matches(show, now: now)
+                case let .show(show): rules.matches(show, status: progress[show.persistentModelID]?.status)
                 }
             }
         default: break
         }
         if let statusFilter {
-            items = items.filter { $0.watchStatus(asOf: now) == statusFilter }
+            items = items.filter { status($0) == statusFilter }
         }
-        let query = searchText.trimmingCharacters(in: .whitespaces)
-        if !query.isEmpty {
-            items = items.filter { $0.title.localizedStandardContains(query) }
-        }
-        return sort.sorted(items)
+        return sort.sorted(items) { self.showProgress(for: $0, in: progress)?.lastWatched ?? $0.lastWatched }
     }
 
     @ViewBuilder
@@ -304,13 +320,13 @@ struct LibraryView: View {
 struct LibraryPosterCard: View {
     @Environment(AppState.self) private var appState
     let item: LibraryItem
+    /// A show's progress, computed by the grid (it walks the show's episodes).
+    let progress: ShowProgress?
     let spaces: [Space]
     let tags: [MediaTag]
     @State private var confirmDelete = false
 
     var body: some View {
-        // One pass over a show's episodes for the badge, progress bar, caption, and menu.
-        let progress: ShowProgress? = if case let .show(show) = item { show.progressSummary() } else { nil }
         let status = progress?.status ?? item.watchStatus()
         Group {
             switch item {

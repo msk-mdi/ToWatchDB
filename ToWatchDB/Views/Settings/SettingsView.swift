@@ -7,8 +7,7 @@ struct SettingsView: View {
     @AppStorage(NavigationLayout.storageKey) private var layout: NavigationLayout = .sidebar
     @AppStorage(ThemeColor.accentKey) private var accent: ThemeColor = .coral
     @AppStorage(ThemeColor.appIconKey) private var appIcon: ThemeColor = .coral
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
+    @Environment(\.modelContext) private var context
 
     @State private var tokenDraft = ""
     /// Settings runs its own panels: on macOS it's a separate window from the one handling File menu requests.
@@ -80,8 +79,13 @@ struct SettingsView: View {
             }
 
             Section("Library") {
-                LabeledContent("Movies", value: movies.count.formatted())
-                LabeledContent("TV Shows", value: shows.count.formatted())
+                // Counted in the store instead of loading every title; recounted after each save.
+                let counts = appState.cached("library-counts") {
+                    ((try? context.fetchCount(FetchDescriptor<Movie>())) ?? 0,
+                     (try? context.fetchCount(FetchDescriptor<TVShow>())) ?? 0)
+                }
+                LabeledContent("Movies", value: counts.0.formatted())
+                LabeledContent("TV Shows", value: counts.1.formatted())
                 HStack {
                     Button("Refresh All Titles") { Task { await appState.refreshLibrary(force: true) } }
                         .disabled(appState.isRefreshing || appState.client == nil)

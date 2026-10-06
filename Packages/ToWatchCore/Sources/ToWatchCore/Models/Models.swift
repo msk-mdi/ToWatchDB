@@ -241,10 +241,13 @@ public enum ToWatchSchema {
 extension PersonCredit {
     static func decode(_ data: Data?) -> [PersonCredit] {
         guard let data else { return [] }
-        return (try? JSONDecoder().decode([PersonCredit].self, from: data)) ?? []
+        return (try? decoder.decode([PersonCredit].self, from: data)) ?? []
     }
 
     static func encode(_ people: [PersonCredit]) -> Data? {
-        people.isEmpty ? nil : try? JSONEncoder().encode(people)
+        people.isEmpty ? nil : try? encoder.encode(people)
     }
+
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
 }

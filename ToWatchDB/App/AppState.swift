@@ -54,30 +54,79 @@ final class AppState {
         didSet { UserDefaults.standard.set(watchRegion, forKey: "watchRegion") }
     }
 
-    /// Bumped on every save, so caches of derived data (stats) know when the library changed.
-    @ObservationIgnored private var libraryVersion = 0
+    /// Bumped on every save, so caches of derived data (stats) know when the library changed. Observed: a view
+    /// that reads a cached value redraws after every save even when its last body didn't touch the models.
+    private(set) var libraryVersion = 0
+    /// The version of the last save that deleted something. Stale values from before it may hold deleted
+    /// models, which crash when read, so `allowStale` doesn't serve them.
+    @ObservationIgnored private var lastDeletionVersion = 0
     @ObservationIgnored private var derivedCache: [String: (version: Int, value: Any)] = [:]
     @ObservationIgnored private var saveObserver: (any NSObjectProtocol)?
 
     init(inMemory: Bool = false) {
         container = inMemory ? SharedLibrary.makeContainer(inMemory: true) : SharedLibrary.container
         saveObserver = NotificationCenter.default.addObserver(
-            forName: ModelContext.didSave, object: container.mainContext, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.libraryVersion += 1 }
+            // No queue: the version must change synchronously with the save, before any view redraws with the
+            // new data, or a redraw could store a value computed from stale data under the new version.
+            forName: ModelContext.didSave, object: container.mainContext, queue: nil
+        ) { [weak self] notification in
+            let deleted = notification.userInfo?[ModelContext.NotificationKey.deletedIdentifiers.rawValue]
+                as? [PersistentIdentifier]
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.libraryVersion += 1
+                if deleted?.isEmpty == false { self.lastDeletionVersion = self.libraryVersion }
+            }
         }
     }
 
     /// Computes a value derived from the library once per library version. Stats walk every episode,
     /// which made opening the Stats page stall; until something is saved, the result can't change.
-    /// Not observed, so it's safe to call from a view's body.
-    func cached<T>(_ key: String, _ compute: () -> T) -> T {
-        if let entry = derivedCache[key], entry.version == libraryVersion, let value = entry.value as? T {
+    /// Reading it makes the calling view depend on `libraryVersion`; the cache itself isn't observed, so
+    /// filling it from a view's body is safe.
+    ///
+    /// `allowStale` returns the last value even if the library changed since. Pages kept alive offscreen pass
+    /// it so a save doesn't make every hidden page recompute; they catch up when they're shown again.
+    func cached<T>(_ key: String, allowStale: Bool = false, _ compute: () -> T) -> T {
+        let libraryVersion = libraryVersion
+        if let entry = derivedCache[key],
+           entry.version == libraryVersion || (allowStale && entry.version >= lastDeletionVersion),
+           let value = entry.value as? T {
             return value
         }
         let value = compute()
         derivedCache[key] = (libraryVersion, value)
         return value
+    }
+
+    /// Every show's progress, computed once per library version and shared by the pages that need it
+    /// (library grids, Next to Watch): a show's progress walks all of its episodes.
+    func progress(of shows: [TVShow], allowStale: Bool = false) -> [PersistentIdentifier: ShowProgress] {
+        let day = Calendar.current.startOfDay(for: .now)
+        return cached("show-progress-\(day)", allowStale: allowStale) {
+            Dictionary(shows.map { ($0.persistentModelID, $0.progressSummary()) }) { first, _ in first }
+        }
+    }
+
+    /// TMDB responses for detail pages (where to watch, previews), kept for an hour so reopening a title shows
+    /// them at once instead of a spinner and a round trip.
+    @ObservationIgnored private var responseCache: [String: (value: any Sendable, loadedAt: Date)] = [:]
+
+    func cachedResponse<T: Sendable>(_ key: String, maxAge: TimeInterval = 3600,
+                                     _ fetch: () async throws -> T) async throws -> T {
+        let key = "\(key)-\(language)"
+        if let entry = responseCache[key], Date.now.timeIntervalSince(entry.loadedAt) < maxAge, let value = entry.value as? T {
+            return value
+        }
+        let value = try await fetch()
+        responseCache[key] = (value, .now)
+        return value
+    }
+
+    /// The cached response, if there's a fresh one, without fetching.
+    func cachedResponse<T: Sendable>(_ key: String, maxAge: TimeInterval = 3600) -> T? {
+        guard let entry = responseCache["\(key)-\(language)"], Date.now.timeIntervalSince(entry.loadedAt) < maxAge else { return nil }
+        return entry.value as? T
     }
 
     var token: String? { tokenOverride ?? TokenStore.bundledToken }

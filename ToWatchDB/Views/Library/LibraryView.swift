@@ -32,21 +32,20 @@ struct LibraryView: View {
         let items = filteredItems
         ScrollView {
             #if os(macOS)
-            // Mac: filters live in the page, not the toolbar. The top bar's section picker never shifts, and a
-            // page kept alive offscreen can't leave its search field in the window.
-            HStack(spacing: 12) {
-                if allowsScopeChange { scopePicker.fixedSize() }
-                Spacer()
-                statusPicker.pickerStyle(.menu).fixedSize()
-                sortPicker.pickerStyle(.menu).fixedSize()
-                TextField("Filter", text: $searchText, prompt: Text("Filter \(scope.title.lowercased())"))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
+            if allowsScopeChange {
+                // Mac top bar: filters live in the page so the section picker in the toolbar never shifts.
+                HStack(spacing: 12) {
+                    scopePicker.fixedSize()
+                    Spacer()
+                    statusPicker.pickerStyle(.menu).fixedSize()
+                    sortPicker.pickerStyle(.menu).fixedSize()
+                    filterField.textFieldStyle(.roundedBorder).frame(width: 180)
+                }
+                .labelsHidden()
+                .padding(.horizontal)
+                .padding(.top, 8)
+                CollectionShortcuts(showsStats: !AppTab.hasStatsTab)
             }
-            .labelsHidden()
-            .padding(.horizontal)
-            .padding(.top, 8)
-            if allowsScopeChange { CollectionShortcuts(showsStats: !AppTab.hasStatsTab) }
             #else
             if allowsScopeChange {
                 scopePicker.padding(.horizontal)
@@ -68,7 +67,9 @@ struct LibraryView: View {
         .centeredEmptyState(items.isEmpty) { emptyState }
         .pageTitle(allowsScopeChange ? "Library" : title)
         .navigationSubtitleIfAvailable("\(items.count) title\(items.count == 1 ? "" : "s")")
-        .librarySearch(isEnabled: !hasInlineFilters, text: $searchText, prompt: "Filter \(scope.title.lowercased())")
+        #if os(iOS)
+        .searchable(text: $searchText, placement: .adaptiveToolbar, prompt: "Filter \(scope.title.lowercased())")
+        #endif
         .pageToolbar {
             if let editTarget {
                 ToolbarItem {
@@ -101,6 +102,22 @@ struct LibraryView: View {
                         Text(sort.label)
                     }
                     .help("Sort")
+                }
+                // A plain field rather than `.searchable`: only the visible page adds it (see PageHost), and
+                // the toolbar never ends up empty, which made macOS collapse it and shift the whole window.
+                ToolbarItem {
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        filterField.textFieldStyle(.plain)
+                        if !searchText.isEmpty {
+                            Button("Clear", systemImage: "xmark.circle.fill") { searchText = "" }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(width: 220)
                 }
             }
             #endif
@@ -137,12 +154,19 @@ struct LibraryView: View {
     }
 
     /// Mac top bar: the filters sit in the page header instead of the toolbar.
+    /// Mac: the filters are in the toolbar in the sidebar layout, in the page in the top bar layout.
+    /// Either way they're not `.searchable`, which a page kept alive offscreen couldn't switch off.
     private var hasInlineFilters: Bool {
         #if os(macOS)
-        true
+        allowsScopeChange
         #else
         false
         #endif
+    }
+
+    private var filterField: some View {
+        TextField("Filter", text: $searchText, prompt: Text("Filter \(scope.title.lowercased())"))
+            .labelsHidden()
     }
 
     private var scopePicker: some View {
@@ -391,14 +415,3 @@ private struct PageSubtitle: ViewModifier {
     }
 }
 #endif
-
-private extension View {
-    @ViewBuilder
-    func librarySearch(isEnabled: Bool, text: Binding<String>, prompt: String) -> some View {
-        if isEnabled {
-            searchable(text: text, placement: .adaptiveToolbar, prompt: prompt)
-        } else {
-            self
-        }
-    }
-}

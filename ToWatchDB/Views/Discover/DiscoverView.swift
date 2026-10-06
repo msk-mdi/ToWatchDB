@@ -40,7 +40,7 @@ struct DiscoverView: View {
                 }
             }
         }
-        .navigationTitle("Discover")
+        .pageTitle("Discover")
         .settingsToolbarButton(appState)
         .task(id: appState.token) { await load() }
     }

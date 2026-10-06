@@ -31,40 +31,45 @@ struct LibraryView: View {
     var body: some View {
         let items = filteredItems
         ScrollView {
+            #if os(macOS)
+            // Mac: filters live in the page, not the toolbar. The top bar's section picker never shifts, and a
+            // page kept alive offscreen can't leave its search field in the window.
+            HStack(spacing: 12) {
+                if allowsScopeChange { scopePicker.fixedSize() }
+                Spacer()
+                statusPicker.pickerStyle(.menu).fixedSize()
+                sortPicker.pickerStyle(.menu).fixedSize()
+                TextField("Filter", text: $searchText, prompt: Text("Filter \(scope.title.lowercased())"))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+            }
+            .labelsHidden()
+            .padding(.horizontal)
+            .padding(.top, 8)
+            if allowsScopeChange { CollectionShortcuts(showsStats: !AppTab.hasStatsTab) }
+            #else
             if allowsScopeChange {
-                #if os(macOS)
-                // Mac top bar: filters live here, so the toolbar (and the section picker in it) never shifts.
-                HStack(spacing: 12) {
-                    scopePicker.fixedSize()
-                    Spacer()
-                    statusPicker.pickerStyle(.menu).fixedSize()
-                    sortPicker.pickerStyle(.menu).fixedSize()
-                    TextField("Filter", text: $searchText, prompt: Text("Filter \(scope.title.lowercased())"))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
-                }
-                .labelsHidden()
-                .padding(.horizontal)
-                .padding(.top, 8)
-                #else
                 scopePicker.padding(.horizontal)
-                #endif
                 CollectionShortcuts(showsStats: !AppTab.hasStatsTab)
             }
+            #endif
             if !items.isEmpty {
+                // Fetched once here for every card's context menu, instead of two queries per card.
+                let menuSpaces = spaces.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                let menuTags = tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 PosterGrid {
                     ForEach(items) { item in
-                        LibraryPosterCard(item: item)
+                        LibraryPosterCard(item: item, spaces: menuSpaces, tags: menuTags)
                     }
                 }
                 .padding()
             }
         }
         .centeredEmptyState(items.isEmpty) { emptyState }
-        .navigationTitle(allowsScopeChange ? "Library" : title)
+        .pageTitle(allowsScopeChange ? "Library" : title)
         .navigationSubtitleIfAvailable("\(items.count) title\(items.count == 1 ? "" : "s")")
         .librarySearch(isEnabled: !hasInlineFilters, text: $searchText, prompt: "Filter \(scope.title.lowercased())")
-        .toolbar {
+        .pageToolbar {
             if let editTarget {
                 ToolbarItem {
                     Button("Edit", systemImage: "pencil") { appState.collectionEditor = editTarget }
@@ -134,7 +139,7 @@ struct LibraryView: View {
     /// Mac top bar: the filters sit in the page header instead of the toolbar.
     private var hasInlineFilters: Bool {
         #if os(macOS)
-        allowsScopeChange
+        true
         #else
         false
         #endif
@@ -233,7 +238,7 @@ struct LibraryView: View {
         if !query.isEmpty {
             items = items.filter { $0.title.localizedStandardContains(query) }
         }
-        return items.sorted(by: sort.areInOrder)
+        return sort.sorted(items)
     }
 
     @ViewBuilder
@@ -272,19 +277,23 @@ struct LibraryView: View {
 struct LibraryPosterCard: View {
     @Environment(AppState.self) private var appState
     let item: LibraryItem
+    let spaces: [Space]
+    let tags: [MediaTag]
     @State private var confirmDelete = false
 
     var body: some View {
-        let status = item.watchStatus()
+        // One pass over a show's episodes for the badge, progress bar, caption, and menu.
+        let progress: ShowProgress? = if case let .show(show) = item { show.progressSummary() } else { nil }
+        let status = progress?.status ?? item.watchStatus()
         Group {
             switch item {
-            case let .movie(movie): NavigationLink(value: movie) { card(status: status) }
-            case let .show(show): NavigationLink(value: show) { card(status: status) }
+            case let .movie(movie): NavigationLink(value: movie) { card(status: status, progress: progress) }
+            case let .show(show): NavigationLink(value: show) { card(status: status, progress: progress) }
             }
         }
         .buttonStyle(.plain)
         .titleInteractions(item.reference)
-        .contextMenu { menu(status: status) }
+        .contextMenu { menu(next: progress?.nextEpisode) }
         .confirmationDialog("Remove “\(item.title)” from your library?", isPresented: $confirmDelete) {
             Button("Remove", role: .destructive) {
                 switch item {
@@ -295,13 +304,13 @@ struct LibraryPosterCard: View {
         }
     }
 
-    private func card(status: WatchStatus) -> some View {
+    private func card(status: WatchStatus, progress: ShowProgress?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             PosterImage(path: item.posterPath)
                 .overlay(alignment: .topTrailing) { StatusBadge(status: status).padding(6) }
                 .overlay(alignment: .bottom) {
-                    if case let .show(show) = item, status == .watching {
-                        ProgressView(value: show.progress())
+                    if let progress, status == .watching {
+                        ProgressView(value: progress.fraction)
                             .tint(.orange)
                             .padding(8)
                     }
@@ -309,7 +318,7 @@ struct LibraryPosterCard: View {
             Text(item.title)
                 .font(.callout.weight(.medium))
                 .lineLimit(2, reservesSpace: true)
-            Text(caption)
+            Text(caption(next: progress?.nextEpisode))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -317,18 +326,18 @@ struct LibraryPosterCard: View {
         .contentShape(.rect)
     }
 
-    private var caption: String {
+    private func caption(next: Episode?) -> String {
         switch item {
         case let .movie(movie):
             return movie.releaseDate?.yearString ?? "Movie"
         case let .show(show):
-            if let next = show.nextEpisodeToWatch() { return "Next: \(next.code)" }
+            if let next { return "Next: \(next.code)" }
             return show.firstAirDate?.yearString ?? "TV Show"
         }
     }
 
     @ViewBuilder
-    private func menu(status: WatchStatus) -> some View {
+    private func menu(next: Episode?) -> some View {
         let library = appState.library
         switch item {
         case let .movie(movie):
@@ -341,7 +350,7 @@ struct LibraryPosterCard: View {
                 library.setBacklog(movie, !movie.isInBacklog)
             }
         case let .show(show):
-            if let next = show.nextEpisodeToWatch() {
+            if let next {
                 Button("Mark \(next.code) as Watched", systemImage: "checkmark.circle") { library.setWatched(next, true) }
             }
             Button(show.isInBacklog ? "Remove from Backlog" : "Move to Backlog", systemImage: "tray.full") {
@@ -352,22 +361,36 @@ struct LibraryPosterCard: View {
             }
         }
         Divider()
-        CollectionMenus(title: item.libraryTitle)
+        CollectionMenus(title: item.libraryTitle, spaces: spaces, tags: tags)
         OpenInNewWindowButton(reference: item.reference)
         Button("Remove from Library…", systemImage: "trash", role: .destructive) { confirmDelete = true }
     }
 }
 
 extension View {
+    /// macOS window subtitle, set by the visible page only (see `PageHost`).
     @ViewBuilder
     func navigationSubtitleIfAvailable(_ subtitle: String) -> some View {
         #if os(macOS)
-        navigationSubtitle(subtitle)
+        modifier(PageSubtitle(subtitle: subtitle))
         #else
         self
         #endif
     }
 }
+
+#if os(macOS)
+private struct PageSubtitle: ViewModifier {
+    @Environment(\.isActivePage) private var isActive
+    let subtitle: String
+
+    func body(content: Content) -> some View {
+        content.background {
+            if isActive { Color.clear.navigationSubtitle(subtitle) }
+        }
+    }
+}
+#endif
 
 private extension View {
     @ViewBuilder

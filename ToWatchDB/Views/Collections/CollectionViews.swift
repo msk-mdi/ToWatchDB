@@ -3,11 +3,13 @@ import SwiftUI
 import ToWatchCore
 
 /// "Spaces" and "Tags" submenus with a checkmark per membership, for poster context menus.
+/// Takes the spaces and tags from its parent: on macOS, SwiftUI builds every poster's context menu up front,
+/// so a query here ran two database fetches per poster whenever a grid was drawn.
 struct CollectionMenus: View {
     @Environment(AppState.self) private var appState
-    @Query(sort: \Space.name) private var spaces: [Space]
-    @Query(sort: \MediaTag.name) private var tags: [MediaTag]
     let title: LibraryTitle
+    let spaces: [Space]
+    let tags: [MediaTag]
 
     var body: some View {
         let library = appState.library
@@ -33,6 +35,8 @@ struct CollectionMenus: View {
 /// Spaces and tags section on a detail page.
 struct CollectionsSection: View {
     @Environment(AppState.self) private var appState
+    @Query(sort: \Space.name) private var allSpaces: [Space]
+    @Query(sort: \MediaTag.name) private var allTags: [MediaTag]
     let title: LibraryTitle
 
     var body: some View {
@@ -43,7 +47,7 @@ struct CollectionsSection: View {
                 Text("Spaces & Tags").font(.title3.bold())
                 Spacer()
                 Menu {
-                    CollectionMenus(title: title)
+                    CollectionMenus(title: title, spaces: allSpaces, tags: allTags)
                 } label: {
                     Label("Organize", systemImage: "square.stack.3d.up")
                 }
@@ -225,7 +229,7 @@ struct OrganizeView: View {
                 header("Tags", add: .newTag())
             }
         }
-        .navigationTitle("Organize")
+        .pageTitle("Organize")
         .confirmationDialog("Delete “\(pendingDeletion?.name ?? "")”?", isPresented: Binding(
             get: { pendingDeletion != nil },
             set: { if !$0 { pendingDeletion = nil } }

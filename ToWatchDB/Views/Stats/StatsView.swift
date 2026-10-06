@@ -14,8 +14,12 @@ struct StatsView: View {
     @State private var isShowingReview = false
 
     var body: some View {
-        let stats = StatsService.stats(movies: movies, shows: shows, period: period)
-        let years = StatsService.watchYears(movies: movies, shows: shows)
+        // Cached until the library changes, so coming back to Stats doesn't recompute everything.
+        let day = Calendar.current.startOfDay(for: .now)
+        let stats = appState.cached("stats-\(period.label)-\(day)") {
+            StatsService.stats(movies: movies, shows: shows, period: period)
+        }
+        let years = appState.cached("watch-years") { StatsService.watchYears(movies: movies, shows: shows) }
         let showsCompare = if case let .year(year) = period { years.contains { $0 != year } } else { false }
         // With nothing else on the page, the empty state is centered like every other screen's.
         let isBlank = stats.isEmpty && !showsCompare && stats.undatedWatches == 0
@@ -44,8 +48,8 @@ struct StatsView: View {
                 }
 
                 if showsCompare, case let .year(year) = period {
-                    CompareSection(year: year, years: years.filter { $0 != year }, comparedYear: $comparedYear,
-                                   movies: movies, shows: shows)
+                    CompareSection(year: year, current: stats, years: years.filter { $0 != year },
+                                   comparedYear: $comparedYear, movies: movies, shows: shows)
                 }
 
                 if stats.undatedWatches > 0, period != .allTime {
@@ -60,8 +64,8 @@ struct StatsView: View {
             .frame(maxWidth: .infinity)
         }
         .centeredEmptyState(isBlank) { emptyMessage }
-        .navigationTitle("Stats")
-        .toolbar {
+        .pageTitle("Stats")
+        .pageToolbar {
             ToolbarItem {
                 Menu {
                     Picker("Period", selection: $period) {
@@ -367,7 +371,10 @@ private struct Highlights: View {
 /// Two years side by side as tiles with differences. Separate numbers, not a dual-axis chart:
 /// counts and hours don't share a scale.
 private struct CompareSection: View {
+    @Environment(AppState.self) private var appState
     let year: Int
+    /// The selected year's stats, already computed by the page.
+    let current: WatchStats
     let years: [Int]
     @Binding var comparedYear: Int?
     let movies: [Movie]
@@ -375,8 +382,9 @@ private struct CompareSection: View {
 
     var body: some View {
         let other = comparedYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first { $0 < year } ?? years[0]
-        let current = StatsService.stats(movies: movies, shows: shows, period: .year(year))
-        let previous = StatsService.stats(movies: movies, shows: shows, period: .year(other))
+        let previous = appState.cached("stats-\(other)") {
+            StatsService.stats(movies: movies, shows: shows, period: .year(other))
+        }
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {

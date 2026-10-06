@@ -4,6 +4,7 @@ import ToWatchCore
 struct MovieDetailView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.isActivePage) private var isActivePage
     let movie: Movie
 
     @State private var showDatePicker = false
@@ -25,17 +26,15 @@ struct MovieDetailView: View {
             VStack(alignment: .leading, spacing: 14) {
                 ActionBar {
                     watchedButton
+                } toggles: {
                     Toggle(isOn: Binding(get: { movie.isInBacklog }, set: { appState.library.setBacklog(movie, $0) })) {
                         Label("Backlog", systemImage: "tray.full")
                     }
-                    .toggleStyle(.button)
                     Toggle(isOn: Binding(get: { movie.isFavorite }, set: { appState.library.setFavorite(movie, $0) })) {
                         Label("Favorite", systemImage: movie.isFavorite ? "heart.fill" : "heart")
                     }
-                    .toggleStyle(.button)
+                } trailing: {
                     RatingView(rating: movie.userRating) { appState.library.setRating(movie, $0) }
-                        .font(.title3)
-                        .padding(.leading, 8)
                 }
                 ExternalLinks(kind: .movie, tmdbID: movie.tmdbID, trailerKey: movie.trailerKey,
                               imdbID: movie.imdbID, homepage: movie.homepage)
@@ -45,9 +44,9 @@ struct MovieDetailView: View {
             CollectionsSection(title: .movie(movie))
             NotesSection(notes: movie.notes ?? []) { appState.library.addNote($0, to: movie) }
         }
-        .navigationTitle(movie.title)
-        .focusedSceneValue(\.focusedTitle, .movie(movie))
-        .toolbar {
+        .pageTitle(movie.title)
+        .focusedSceneValue(\.focusedTitle, isActivePage ? .movie(movie) : nil)
+        .pageToolbar {
             ToolbarItemGroup {
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh() }
                     .disabled(isRefreshing)
@@ -79,7 +78,6 @@ struct MovieDetailView: View {
             } primaryAction: {
                 appState.library.setWatched(movie, false)
             }
-            .fixedSize()
             .tint(.green)
         } else {
             Menu {
@@ -89,7 +87,6 @@ struct MovieDetailView: View {
             } primaryAction: {
                 appState.library.setWatched(movie, true)
             }
-            .fixedSize()
             .disabled(!movie.isReleased())
             .help(movie.isReleased() ? "Mark as watched today" : "Not released yet")
         }

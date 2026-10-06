@@ -54,8 +54,30 @@ final class AppState {
         didSet { UserDefaults.standard.set(watchRegion, forKey: "watchRegion") }
     }
 
+    /// Bumped on every save, so caches of derived data (stats) know when the library changed.
+    @ObservationIgnored private var libraryVersion = 0
+    @ObservationIgnored private var derivedCache: [String: (version: Int, value: Any)] = [:]
+    @ObservationIgnored private var saveObserver: (any NSObjectProtocol)?
+
     init(inMemory: Bool = false) {
         container = inMemory ? SharedLibrary.makeContainer(inMemory: true) : SharedLibrary.container
+        saveObserver = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave, object: container.mainContext, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.libraryVersion += 1 }
+        }
+    }
+
+    /// Computes a value derived from the library once per library version. Stats walk every episode,
+    /// which made opening the Stats page stall; until something is saved, the result can't change.
+    /// Not observed, so it's safe to call from a view's body.
+    func cached<T>(_ key: String, _ compute: () -> T) -> T {
+        if let entry = derivedCache[key], entry.version == libraryVersion, let value = entry.value as? T {
+            return value
+        }
+        let value = compute()
+        derivedCache[key] = (libraryVersion, value)
+        return value
     }
 
     var token: String? { tokenOverride ?? TokenStore.bundledToken }

@@ -96,27 +96,70 @@ struct DetailLayout<Actions: View, Extra: View>: View {
     private var horizontalPadding: CGFloat { isCompact ? 16 : 24 }
 }
 
-/// A row of detail actions: scrolls sideways on iPhone instead of overflowing.
-struct ActionBar<Content: View>: View {
+/// Detail actions. Mac and iPad: one row. iPhone: a full-width primary button, equal-width toggles with the
+/// icon above the label, and the rating on its own line, like Apple's own apps (instead of a squeezed row).
+struct ActionBar<Primary: View, Toggles: View, Trailing: View>: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    @ViewBuilder let content: Content
+    @ViewBuilder let primary: Primary
+    @ViewBuilder let toggles: Toggles
+    @ViewBuilder let trailing: Trailing
 
     var body: some View {
         #if os(iOS)
         if sizeClass == .compact {
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) { content }.padding(.vertical, 2)
+            VStack(spacing: 12) {
+                primary
+                    .labelStyle(WideLabelStyle())
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                HStack(spacing: 10) { toggles }
+                    .labelStyle(StackedLabelStyle())
+                    .toggleStyle(.button)
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                trailing.font(.title2)
             }
-            .scrollIndicators(.hidden)
-            .buttonStyle(.bordered)
         } else {
-            HStack(spacing: 12) { content }.buttonStyle(.bordered)
+            HStack(spacing: 12) {
+                primary.fixedSize()
+                toggles.toggleStyle(.button)
+                trailing.font(.title3).padding(.leading, 8)
+            }
+            .buttonStyle(.bordered)
         }
         #else
-        HStack(spacing: 12) { content }
+        HStack(spacing: 12) {
+            primary.fixedSize()
+            toggles.toggleStyle(.button)
+            trailing.font(.title3).padding(.leading, 8)
+        }
         #endif
+    }
+}
+
+/// Icon beside the title, centered across the full width (iPhone primary buttons).
+struct WideLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon
+            configuration.title.lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .fontWeight(.semibold)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Icon above a small title, filling an equal share of the row (iPhone toggles).
+struct StackedLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 4) {
+            configuration.icon.font(.title3)
+            configuration.title.font(.caption.weight(.medium)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 }
 

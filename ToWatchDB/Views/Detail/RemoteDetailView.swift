@@ -27,6 +27,9 @@ struct RemoteDetailView: View {
 
 private struct RemotePreview: View {
     @Environment(AppState.self) private var appState
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     let summary: MediaSummary
 
     @State private var movie: TMDBMovieDetail?
@@ -45,25 +48,57 @@ private struct RemotePreview: View {
             genres: (movie?.genres ?? show?.genres ?? []).map(\.name),
             cast: PersonCredit.cast(from: movie?.credits ?? show?.credits)
         ) {
-            HStack(spacing: 12) {
-                Button { add(backlog: false) } label: {
-                    Label("Add to Library", systemImage: "plus")
+            if isCompact {
+                // iPhone: two full-width buttons, then the links, instead of everything squeezed on one line.
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 10) {
+                        Button { add(backlog: false) } label: {
+                            Label("Add to Library", systemImage: isAdding ? "hourglass" : "plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button { add(backlog: true) } label: {
+                            Label("Backlog", systemImage: "tray.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .labelStyle(WideLabelStyle())
+                    .controlSize(.large)
+                    .disabled(isAdding)
+                    links
                 }
-                .buttonStyle(.borderedProminent)
-                Button { add(backlog: true) } label: {
-                    Label("Add to Backlog", systemImage: "tray.and.arrow.down")
+            } else {
+                HStack(spacing: 12) {
+                    Button { add(backlog: false) } label: {
+                        Label("Add to Library", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button { add(backlog: true) } label: {
+                        Label("Add to Backlog", systemImage: "tray.and.arrow.down")
+                    }
+                    if isAdding { ProgressView().controlSize(.small) }
+                    Spacer()
+                    links
                 }
-                if isAdding { ProgressView().controlSize(.small) }
-                Spacer()
-                ExternalLinks(kind: summary.kind, tmdbID: summary.tmdbID,
-                              trailerKey: (movie?.videos ?? show?.videos)?.bestTrailerKey, imdbID: movie?.imdbId)
+                .disabled(isAdding)
             }
-            .disabled(isAdding)
         } extra: {
             WhereToWatchSection(kind: summary.kind, tmdbID: summary.tmdbID)
         }
-        .navigationTitle(summary.title)
+        .pageTitle(summary.title)
         .task { await load() }
+    }
+
+    private var links: some View {
+        ExternalLinks(kind: summary.kind, tmdbID: summary.tmdbID,
+                      trailerKey: (movie?.videos ?? show?.videos)?.bestTrailerKey, imdbID: movie?.imdbId)
+    }
+
+    private var isCompact: Bool {
+        #if os(iOS)
+        sizeClass == .compact
+        #else
+        false
+        #endif
     }
 
     private var subtitle: String {

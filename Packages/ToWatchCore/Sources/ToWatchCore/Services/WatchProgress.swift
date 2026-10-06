@@ -21,11 +21,29 @@ public extension TVShow {
     /// - Watched: every aired regular episode is watched (a returning show you're caught up on counts as watched).
     /// - Watching: at least one episode watched but some aired ones aren't.
     func watchStatus(asOf now: Date = .now) -> WatchStatus {
-        if isAbandoned { return .abandoned }
-        let aired = airedEpisodes(asOf: now)
-        let watched = aired.count { $0.isWatched }
-        if watched == 0 { return regularEpisodes.contains(where: \.isWatched) ? .watching : .notWatched }
-        return watched == aired.count ? .watched : .watching
+        progressSummary(asOf: now).status
+    }
+
+    /// Status, progress, and next episode from a single pass over the episodes. Building the sorted episode
+    /// list touches every season and episode, so screens that need several of these should call this once.
+    func progressSummary(asOf now: Date = .now) -> ShowProgress {
+        var aired = 0, watchedAired = 0, watchedAny = 0
+        var next: Episode?
+        for episode in regularEpisodes {
+            if episode.isWatched { watchedAny += 1 }
+            guard episode.hasAired(asOf: now) else { continue }
+            aired += 1
+            if episode.isWatched { watchedAired += 1 } else if next == nil { next = episode }
+        }
+        let status: WatchStatus = if isAbandoned {
+            .abandoned
+        } else if watchedAired == 0 {
+            watchedAny > 0 ? .watching : .notWatched
+        } else {
+            watchedAired == aired ? .watched : .watching
+        }
+        return ShowProgress(status: status, fraction: aired == 0 ? 0 : Double(watchedAired) / Double(aired),
+                            nextEpisode: next, airedCount: aired, watchedAiredCount: watchedAired)
     }
 
     /// The first aired, unwatched regular episode, in airing order.
@@ -42,6 +60,17 @@ public extension TVShow {
     var lastWatchedDate: Date? {
         regularEpisodes.compactMap(\.watchedDate).max()
     }
+}
+
+/// See `TVShow.progressSummary(asOf:)`.
+public struct ShowProgress {
+    public let status: WatchStatus
+    /// Fraction of aired regular episodes watched (0...1).
+    public let fraction: Double
+    /// The first aired, unwatched regular episode.
+    public let nextEpisode: Episode?
+    public let airedCount: Int
+    public let watchedAiredCount: Int
 }
 
 public extension Season {

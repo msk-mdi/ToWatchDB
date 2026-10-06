@@ -150,9 +150,13 @@ struct RootView: View {
                 .frame(minWidth: 220)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
+            #if os(macOS)
+            PageHost(selected: appState.selectedTab) { tab in screen(for: tab).appDestinations() }
+            #else
             // A fresh stack per list, so going back to a list doesn't land on a stale detail page.
             NavigationStack { screen(for: appState.selectedTab).appDestinations() }
                 .id(appState.selectedTab)
+            #endif
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -237,8 +241,7 @@ struct RootView: View {
         #if os(macOS)
         // A segmented control in the toolbar's center: unlike TabView's tab bar, it stays in place
         // whatever toolbar items the current screen adds.
-        NavigationStack { screen(for: appState.selectedTab, inTabBar: true).appDestinations() }
-            .id(appState.selectedTab)
+        PageHost(selected: appState.selectedTab) { tab in screen(for: tab, inTabBar: true).appDestinations() }
             .toolbar {
                 ToolbarItem(placement: .principal) { TopBarPicker(tabs: tabBarTabs) }
             }
@@ -310,10 +313,13 @@ private struct SidebarRow: View {
         )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         #else
+        // The native selection fills the row with the accent color and turns the text white; the icon has its
+        // own color, so it has to turn white too or it vanishes into the highlight (as on Mac).
+        let isSelected = appState.selectedTab == tab
         Label {
             Text(title)
         } icon: {
-            Image(systemName: symbol).foregroundStyle(iconColor ?? themeColor)
+            Image(systemName: symbol).foregroundStyle(isSelected ? Color.white : iconColor ?? themeColor)
         }
         .tag(tab)
         #endif

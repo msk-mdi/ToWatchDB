@@ -4,6 +4,7 @@ import ToWatchCore
 struct TVShowDetailView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.isActivePage) private var isActivePage
     let show: TVShow
 
     @State private var selectedSeason: Int?
@@ -26,28 +27,19 @@ struct TVShowDetailView: View {
             VStack(alignment: .leading, spacing: 14) {
                 progressSummary
                 ActionBar {
-                    Menu {
-                        Button("Mark All Aired Episodes Watched") { appState.library.setWatched(show, true) }
-                        Button("Mark All as Not Watched", role: .destructive) { appState.library.setWatched(show, false) }
-                    } label: {
-                        Label("Watched", systemImage: "checkmark.circle")
-                    }
-                    .fixedSize()
+                    watchedMenu
+                } toggles: {
                     Toggle(isOn: Binding(get: { show.isInBacklog }, set: { appState.library.setBacklog(show, $0) })) {
                         Label("Backlog", systemImage: "tray.full")
                     }
-                    .toggleStyle(.button)
                     Toggle(isOn: Binding(get: { show.isFavorite }, set: { appState.library.setFavorite(show, $0) })) {
                         Label("Favorite", systemImage: show.isFavorite ? "heart.fill" : "heart")
                     }
-                    .toggleStyle(.button)
                     Toggle(isOn: Binding(get: { show.isAbandoned }, set: { appState.library.setAbandoned(show, $0) })) {
                         Label("Abandoned", systemImage: "xmark.circle")
                     }
-                    .toggleStyle(.button)
+                } trailing: {
                     RatingView(rating: show.userRating) { appState.library.setRating(show, $0) }
-                        .font(.title3)
-                        .padding(.leading, 8)
                 }
                 ExternalLinks(kind: .tv, tmdbID: show.tmdbID, trailerKey: show.trailerKey, homepage: show.homepage)
             }
@@ -57,9 +49,9 @@ struct TVShowDetailView: View {
             CollectionsSection(title: .show(show))
             NotesSection(notes: show.notes ?? []) { appState.library.addNote($0, to: show) }
         }
-        .navigationTitle(show.name)
-        .focusedSceneValue(\.focusedTitle, .show(show))
-        .toolbar {
+        .pageTitle(show.name)
+        .focusedSceneValue(\.focusedTitle, isActivePage ? .show(show) : nil)
+        .pageToolbar {
             ToolbarItemGroup {
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh() }
                     .disabled(isRefreshing)
@@ -84,6 +76,32 @@ struct TVShowDetailView: View {
                     ?? show.sortedSeasons.first { $0.seasonNumber > 0 }?.seasonNumber
                     ?? show.sortedSeasons.first?.seasonNumber
             }
+        }
+    }
+
+    /// Clicking marks the next episode watched (the common case); the menu covers the whole show.
+    @ViewBuilder
+    private var watchedMenu: some View {
+        let next = show.nextEpisodeToWatch()
+        let menu = Group {
+            Button("Mark All Aired Episodes Watched") { appState.library.setWatched(show, true) }
+            Button("Mark All as Not Watched", role: .destructive) { appState.library.setWatched(show, false) }
+        }
+        if let next {
+            Menu {
+                menu
+            } label: {
+                Label("Mark \(next.code) Watched", systemImage: "checkmark.circle")
+            } primaryAction: {
+                appState.library.setWatched(next, true)
+            }
+        } else {
+            Menu {
+                menu
+            } label: {
+                Label(show.watchStatus() == .watched ? "All Caught Up" : "Watched", systemImage: "checkmark.circle.fill")
+            }
+            .tint(.green)
         }
     }
 

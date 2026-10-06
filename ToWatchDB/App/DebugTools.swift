@@ -4,6 +4,9 @@ import SwiftUI
 import ToWatchCore
 #if os(macOS)
 import AppKit
+import os
+
+private let pageLog = OSLog(subsystem: "com.mehdi.towatchdb", category: .pointsOfInterest)
 #endif
 
 /// Debug-only helpers for checking the UI with real TMDB data in a throwaway in-memory library.
@@ -77,6 +80,18 @@ enum DebugTools {
         let library = appState.library
         if let space = try? library.context.fetch(FetchDescriptor<Space>()).first { tabs.append((.space(space.uuid), "space")) }
         if let list = try? library.context.fetch(FetchDescriptor<SmartList>()).first { tabs.append((.smartList(list.uuid), "smartlist")) }
+        // `-UISnapshotSwitchOnly YES`: only switch pages (three rounds over six), for profiling page changes without
+        // the cost of capturing windows.
+        if UserDefaults.standard.bool(forKey: "UISnapshotSwitchOnly") {
+            let working = Array(tabs.prefix(6))
+            for (tab, name) in working + working + working {
+                os_signpost(.event, log: pageLog, name: "Switch", "%{public}s", name)
+                appState.selectedTab = tab
+                try? await Task.sleep(for: .seconds(1.5))
+            }
+            NSApp.terminate(nil)
+            return
+        }
         for (tab, name) in tabs {
             appState.selectedTab = tab
             try? await Task.sleep(for: .seconds(4))

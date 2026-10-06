@@ -33,8 +33,8 @@ struct NextToWatchView: View {
                 }
             }
         }
-        .navigationTitle("Next to Watch")
-        .toolbar {
+        .pageTitle("Next to Watch")
+        .pageToolbar {
             ToolbarItem {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await appState.refreshLibrary(force: true) }

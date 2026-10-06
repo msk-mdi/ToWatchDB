@@ -114,7 +114,8 @@ public enum StatsService {
 
         // Episodes, grouped by show
         for show in shows {
-            let episodes = show.sortedSeasons.flatMap(\.sortedEpisodes).filter(\.isWatched)
+            // Order doesn't matter for counting, so skip sorting seasons and episodes.
+            let episodes = (show.seasons ?? []).flatMap { $0.episodes ?? [] }.filter(\.isWatched)
             stats.undatedWatches += episodes.count { $0.watchedDate == nil }
             let watched = episodes.filter { inPeriod($0.watchedDate) }
             guard !watched.isEmpty else { continue }
@@ -154,7 +155,7 @@ public enum StatsService {
     @MainActor
     public static func watchYears(movies: [Movie], shows: [TVShow], calendar: Calendar = .current) -> [Int] {
         let dates = movies.compactMap(\.watchedDate)
-            + shows.flatMap { $0.sortedSeasons.flatMap(\.sortedEpisodes) }.compactMap(\.watchedDate)
+            + shows.flatMap { ($0.seasons ?? []).flatMap { $0.episodes ?? [] } }.compactMap(\.watchedDate)
         return Set(dates.map { calendar.component(.year, from: $0) }).sorted(by: >)
     }
 

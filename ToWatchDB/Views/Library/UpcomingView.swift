@@ -34,8 +34,8 @@ struct UpcomingView: View {
                 }
             }
         }
-        .navigationTitle("Upcoming")
-        .toolbar {
+        .pageTitle("Upcoming")
+        .pageToolbar {
             // Also keeps the Mac toolbar from collapsing: a List page with an empty toolbar
             // made the whole window shift up when you switched to it.
             ToolbarItem {

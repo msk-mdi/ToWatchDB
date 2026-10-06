@@ -132,6 +132,18 @@ enum LibrarySort: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Sorts once, computing each item's key once: a show's last-watched date walks all of its episodes,
+    /// which is too slow to repeat inside every comparison.
+    func sorted(_ items: [LibraryItem]) -> [LibraryItem] {
+        guard self == .lastWatched else { return items.sorted(by: areInOrder) }
+        let keyed: [(item: LibraryItem, date: Date)] = items.map { ($0, $0.lastWatched ?? .distantPast) }
+        let ordered = keyed.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.item.title.localizedStandardCompare(rhs.item.title) == .orderedAscending
+        }
+        return ordered.map(\.item)
+    }
+
     /// Ties (same rating, no release date, never watched…) fall back to title order, so the grid doesn't
     /// reshuffle those titles every time it redraws: @Query results come back in no particular order.
     func areInOrder(_ lhs: LibraryItem, _ rhs: LibraryItem) -> Bool {

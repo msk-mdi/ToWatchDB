@@ -13,6 +13,7 @@ struct SearchView: View {
     @State private var results: [MediaSummary] = []
     @State private var isSearching = false
     @State private var searchError: String?
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         let ids = LibraryIDs(movies: movies, shows: shows)
@@ -33,9 +34,19 @@ struct SearchView: View {
             }
         }
         .centeredEmptyState(showsPlaceholder) { placeholder }
-        .navigationTitle("Search")
-        .searchable(text: $query, placement: .adaptiveToolbar, prompt: kind == .movie ? "Search movies" : "Search TV shows")
-        .toolbar {
+        .pageTitle("Search")
+        .modifier(PageSearch(text: $query, prompt: kind == .movie ? "Search movies" : "Search TV shows",
+                             isFocused: $isSearchFocused))
+        .onChange(of: appState.selectedTab, initial: true) { _, tab in
+            // Opening Search (tab, sidebar, or ⌘N) goes straight to typing, keyboard up on iPhone.
+            guard tab == .search else { return }
+            Task {
+                // Let the tab switch settle first, or the focus request can be dropped mid-transition.
+                try? await Task.sleep(for: .milliseconds(100))
+                isSearchFocused = true
+            }
+        }
+        .pageToolbar {
             if isSearching {
                 ToolbarItem { ProgressView().controlSize(.small) }
             }
@@ -92,6 +103,24 @@ struct SearchView: View {
         } catch let error as URLError where error.code == .cancelled {
         } catch {
             searchError = error.localizedDescription
+        }
+    }
+}
+
+/// The search field, on the visible page only: a page kept alive offscreen would otherwise add its own.
+private struct PageSearch: ViewModifier {
+    @Environment(\.isActivePage) private var isActive
+    @Binding var text: String
+    let prompt: String
+    var isFocused: FocusState<Bool>.Binding
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content
+                .searchable(text: $text, placement: .adaptiveToolbar, prompt: prompt)
+                .searchFocused(isFocused)
+        } else {
+            content
         }
     }
 }

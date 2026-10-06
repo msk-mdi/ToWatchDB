@@ -43,6 +43,10 @@ The Xcode project is generated from `project.yml` — edit that, not the `.xcode
 - `Packages/ToWatchCore` — TMDB client, SwiftData models, library/watch-state/upcoming logic. Tested with `swift test`.
 - `ToWatchDB/` — SwiftUI app (sidebar or tab bar layouts, detail views, settings).
 - `Scripts/generate-icons.swift` — redraws the themed app icons and their Settings previews.
+- `Scripts/snapshot-mac.sh` — debug visual pass: captures each screen's window on macOS.
+
+**[docs/CODEBASE.md](docs/CODEBASE.md)** explains the whole codebase: architecture, data model, every screen,
+navigation and layouts, performance choices, rules to follow, debugging tools, and how-tos.
 
 ## Checks
 
@@ -52,8 +56,8 @@ xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'platform
 xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'platform=iOS Simulator,name=iPhone 17' build
 # Debug builds: seed sample titles into a throwaway in-memory store (any platform)
 xcrun simctl launch booted com.mehdi.towatchdb -UISeedSampleData YES
-# macOS: also visit each screen, write a PNG per screen, and quit
-ToWatchDB.app/Contents/MacOS/ToWatchDB -UISnapshotDir ~/Library/Containers/com.mehdi.towatchdb/Data/tmp/snap
+# macOS: visit each screen and capture its window (needs Screen Recording permission for the terminal)
+Scripts/snapshot-mac.sh -navigationLayout sidebar
 ```
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.

@@ -358,6 +358,10 @@ from intents to `RootView`.
 visited pages alive in a `ZStack` and flips their opacity, the way a native tab view does. It cut revisits to
 about 30–110 ms.
 
+Only the root of each page is kept: a page that's hidden is popped back to its root. Every stack with a
+pushed detail adds a Back button to the window's single toolbar, and AppKit crashes on a second one
+(`NSToolbar already contains an item with the identifier com.apple.SwiftUI.navigationStack.back`).
+
 A hidden page is still in the view tree, so it must not contribute window chrome. Each page reads
 `@Environment(\.isActivePage)` and uses:
 

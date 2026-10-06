@@ -6,14 +6,13 @@ import ToWatchCore
 struct UpcomingView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
 
     var body: some View {
         let now = Date.now
-        // Walks every episode in the library, so it's cached per save and day; a hidden page keeps the last list.
+        // The store returns only future titles and episodes. Cached per save and day (reading the cache redraws
+        // the page after each save); a hidden page keeps the last list.
         let (items, days) = appState.cached("upcoming-\(UpcomingService.startOfToday(now))", allowStale: !isActive) {
-            let items = UpcomingService.upcoming(movies: movies, shows: shows, now: now)
+            let items = UpcomingService.upcoming(in: appState.container.mainContext, now: now)
             let days = Dictionary(grouping: items) { $0.date.map { UpcomingService.startOfToday($0) } ?? .distantFuture }
                 .sorted { $0.key < $1.key }
             return (items, days)

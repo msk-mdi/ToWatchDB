@@ -28,7 +28,9 @@ struct DetailLayout<Actions: View, Extra: View>: View {
                 BackdropImage(path: backdropPath, height: isCompact ? 220 : 320)
 
                 HStack(alignment: .bottom, spacing: isCompact ? 14 : 20) {
-                    PosterImage(path: posterPath, size: .posterLarge, cornerRadius: 10)
+                    // The grid's size (w342 is about 170 pt on Retina): the image is usually cached already,
+                    // so the poster appears with the page instead of downloading a larger copy.
+                    PosterImage(path: posterPath, size: .poster, cornerRadius: 10)
                         .frame(width: isCompact ? 110 : 170)
                         .shadow(radius: 12, y: 6)
                     VStack(alignment: .leading, spacing: 8) {

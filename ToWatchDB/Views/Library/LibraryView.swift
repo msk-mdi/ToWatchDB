@@ -27,10 +27,23 @@ struct LibraryView: View {
         self.allowsScopeChange = allowsScopeChange
         self.showsSettingsButton = showsSettingsButton
         _sort = State(initialValue: scope.defaultSort)
+        // A list with a fixed scope loads only the titles it can show. With a scope picker the scope can change,
+        // so everything is loaded.
+        if !allowsScopeChange {
+            switch scope {
+            case .movies: _shows = Query(filter: #Predicate { _ in false })
+            case .shows: _movies = Query(filter: #Predicate { _ in false })
+            case .backlog:
+                _movies = Query(filter: #Predicate { $0.isInBacklog })
+                _shows = Query(filter: #Predicate { $0.isInBacklog })
+            case .watched: _movies = Query(filter: #Predicate { $0.isWatched })
+            default: break
+            }
+        }
     }
 
     var body: some View {
-        let progress = appState.progress(of: shows, allowStale: !isActive)
+        let progress = appState.showProgress(allowStale: !isActive)
         let items = filteredItems(progress)
         ScrollView {
             #if os(macOS)

@@ -49,6 +49,14 @@ public struct LibraryService {
         return insertShow(detail, seasons: seasons)
     }
 
+    /// Adds a show whose detail was already fetched (a preview page): only its seasons are downloaded.
+    @discardableResult
+    public func addShow(_ detail: TMDBTVDetail) async throws -> TVShow {
+        if let existing = show(tmdbID: detail.id) { return existing }
+        let seasons = try await requireClient().seasons(of: detail)
+        return insertShow(detail, seasons: seasons)
+    }
+
     /// Inserts (or updates) a movie from an already-fetched TMDB payload.
     @discardableResult
     public func insertMovie(_ detail: TMDBMovieDetail) -> Movie {

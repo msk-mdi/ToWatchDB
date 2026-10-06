@@ -41,9 +41,7 @@ struct GetUpcomingIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let context = SharedLibrary.container.mainContext
-        let items = UpcomingService.upcoming(movies: (try? context.fetch(FetchDescriptor<Movie>())) ?? [],
-                                             shows: (try? context.fetch(FetchDescriptor<TVShow>())) ?? [])
+        let items = UpcomingService.upcoming(in: SharedLibrary.container.mainContext)
         let summary = SpokenSummaries.upcoming(items, limit: limit)
         return .result(value: summary, dialog: "\(summary)")
     }

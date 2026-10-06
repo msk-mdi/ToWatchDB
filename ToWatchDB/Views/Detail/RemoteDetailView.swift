@@ -122,13 +122,13 @@ private struct RemotePreview: View {
         isAdding = true
         Task {
             await appState.perform { library in
+                // Reuse the detail this page already fetched: a movie needs nothing more, a show only its seasons.
                 switch summary.kind {
                 case .movie:
-                    // Reuse the payload we already have instead of fetching it again.
                     let added = if let movie { library.insertMovie(movie) } else { try await library.addMovie(tmdbID: summary.tmdbID) }
                     if backlog { library.setBacklog(added, true) }
                 case .tv:
-                    let added = try await library.addShow(tmdbID: summary.tmdbID)
+                    let added = if let show { try await library.addShow(show) } else { try await library.addShow(tmdbID: summary.tmdbID) }
                     if backlog { library.setBacklog(added, true) }
                 }
             }

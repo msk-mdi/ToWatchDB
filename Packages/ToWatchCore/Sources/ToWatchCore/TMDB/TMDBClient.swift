@@ -77,6 +77,12 @@ public struct TMDBClient: Sendable {
     /// Show detail plus every season's episode list, fetched concurrently.
     public func tvShowWithSeasons(id: Int) async throws -> (TMDBTVDetail, [TMDBSeasonDetail]) {
         let detail = try await tvShow(id: id)
+        return (detail, try await seasons(of: detail))
+    }
+
+    /// Every season's episode list for an already-fetched show, fetched concurrently.
+    public func seasons(of detail: TMDBTVDetail) async throws -> [TMDBSeasonDetail] {
+        let id = detail.id
         let numbers = (detail.seasons ?? []).map(\.seasonNumber)
         let seasons = try await withThrowingTaskGroup(of: TMDBSeasonDetail.self) { group in
             for number in numbers {
@@ -84,7 +90,7 @@ public struct TMDBClient: Sendable {
             }
             return try await group.reduce(into: []) { $0.append($1) }
         }
-        return (detail, seasons.sorted { $0.seasonNumber < $1.seasonNumber })
+        return seasons.sorted { $0.seasonNumber < $1.seasonNumber }
     }
 
     // MARK: Transport
@@ -118,7 +124,6 @@ public struct TMDBClient: Sendable {
 public enum TMDBImageSize: String, Sendable {
     case small = "w185"
     case poster = "w342"
-    case posterLarge = "w500"
     case backdrop = "w1280"
     case still = "w300"
     case logo = "w92"

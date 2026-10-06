@@ -192,9 +192,14 @@ private let now = date("2026-09-23")
 
     let merged = UpcomingService.upcoming(movies: [unreleased], shows: [show], now: now)
     #expect(merged.map(\.id).first == "movie-1")
+    // The store-side version gives the same list.
+    #expect(UpcomingService.upcoming(in: library.context, now: now).map(\.id)
+        == UpcomingService.upcoming(movies: [released, unreleased], shows: [show], now: now).map(\.id))
+    #expect(UpcomingService.upcoming(in: library.context, now: now).map(\.id) == merged.map(\.id))
 
     library.setAbandoned(show, true)
     #expect(UpcomingService.upcomingEpisodes([show], now: now).isEmpty)
+    #expect(UpcomingService.upcoming(in: library.context, now: now).map(\.id) == ["movie-1"])
     #expect(UpcomingService.daysUntil(date("2026-09-30"), now: now) == 7)
 }
 

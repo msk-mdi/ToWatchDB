@@ -11,7 +11,7 @@ struct NextToWatchView: View {
     var body: some View {
         // Hidden (kept alive on Mac): show the last queue instead of recomputing after every save.
         let queue = appState.cached("next-to-watch", allowStale: !isActive) {
-            Self.queue(shows, progress: appState.progress(of: shows))
+            Self.queue(shows, progress: appState.showProgress())
         }
 
         Group {

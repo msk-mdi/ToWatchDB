@@ -122,16 +122,13 @@ struct YearInReviewCard: View {
 }
 
 enum PosterLoader {
-    /// Downloads posters in order, skipping any that fail. Uses the shared URL cache, so recently seen posters are instant.
+    /// Downloads posters in order, skipping any that fail. Goes through `ImageCache`, so posters already shown
+    /// in the library are used as they are.
     static func load(_ paths: some Sequence<String>) async -> [CGImage] {
         let urls = paths.compactMap { TMDBImage.url($0, size: .poster) }
         return await withTaskGroup(of: (Int, CGImage?).self) { group in
             for (index, url) in urls.enumerated() {
-                group.addTask {
-                    guard let (data, _) = try? await URLSession.shared.data(from: url),
-                          let source = CGImageSourceCreateWithData(data as CFData, nil) else { return (index, nil) }
-                    return (index, CGImageSourceCreateImageAtIndex(source, 0, nil))
-                }
+                group.addTask { (index, try? await ImageCache.shared.load(url).image) }
             }
             var images: [(Int, CGImage)] = []
             for await (index, image) in group {

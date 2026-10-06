@@ -208,8 +208,8 @@ header on the **v3 API**. The `language` parameter is sent with every request.
 - **Trailers:** TMDB filters videos by `language`, and most trailers exist only in English, so
   `videoLanguages` asks for the user's language, then English, then language-neutral videos.
   `TMDBVideoList.bestTrailerKey` picks an official YouTube trailer, then any trailer, then a teaser.
-- **Images:** `TMDBImage.url(_:size:)` builds image URLs (`TMDBImageSize`: w185, w342, w500, w1280, w300,
-  w92).
+- **Images:** `TMDBImage.url(_:size:)` builds image URLs (`TMDBImageSize`: w185, w342, w1280, w300, w92).
+  Detail pages use the grid's w342 poster so it's usually already in `ImageCache`.
 - **Errors:** `TMDBError` is `.missingToken`, `.http(status:message:)`, or `.decoding`.
 
 ### 4.3 LibraryService

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 public enum UpcomingItem: Identifiable {
     case movie(Movie)
@@ -56,6 +57,24 @@ public enum UpcomingService {
     public static func upcoming(movies: [Movie], shows: [TVShow], now: Date = .now) -> [UpcomingItem] {
         let items = upcomingMovies(movies, now: now).map(UpcomingItem.movie)
             + upcomingEpisodes(shows, now: now).map(UpcomingItem.episode)
+        return items.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
+    }
+
+    /// Same as `upcoming(movies:shows:now:)`, but the store does the filtering: only the few future titles and
+    /// unwatched episodes are loaded, instead of every movie and every episode in the library.
+    @MainActor
+    public static func upcoming(in context: ModelContext, now: Date = .now) -> [UpcomingItem] {
+        let today = startOfToday(now)
+        let movies = FetchDescriptor<Movie>(
+            predicate: #Predicate { $0.releaseDate != nil && $0.releaseDate! >= today },
+            sortBy: [SortDescriptor(\.releaseDate)]
+        )
+        let episodes = FetchDescriptor<Episode>(
+            predicate: #Predicate { !$0.isWatched && $0.seasonNumber > 0 && $0.airDate != nil && $0.airDate! >= today },
+            sortBy: [SortDescriptor(\.airDate), SortDescriptor(\.seasonNumber), SortDescriptor(\.episodeNumber)]
+        )
+        let items = ((try? context.fetch(movies)) ?? []).map(UpcomingItem.movie)
+            + ((try? context.fetch(episodes)) ?? []).filter { $0.show?.isAbandoned == false }.map(UpcomingItem.episode)
         return items.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
     }
 

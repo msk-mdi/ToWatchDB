@@ -100,11 +100,13 @@ final class AppState {
     }
 
     /// Every show's progress, computed once per library version and shared by the pages that need it
-    /// (library grids, Next to Watch): a show's progress walks all of its episodes.
-    func progress(of shows: [TVShow], allowStale: Bool = false) -> [PersistentIdentifier: ShowProgress] {
+    /// (library grids, Next to Watch): a show's progress walks all of its episodes. It fetches every show
+    /// itself, so a page whose query is narrower can't cache a partial map.
+    func showProgress(allowStale: Bool = false) -> [PersistentIdentifier: ShowProgress] {
         let day = Calendar.current.startOfDay(for: .now)
         return cached("show-progress-\(day)", allowStale: allowStale) {
-            Dictionary(shows.map { ($0.persistentModelID, $0.progressSummary()) }) { first, _ in first }
+            let shows = (try? container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
+            return Dictionary(shows.map { ($0.persistentModelID, $0.progressSummary()) }) { first, _ in first }
         }
     }
 

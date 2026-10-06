@@ -47,11 +47,6 @@ struct SearchView: View {
                 isSearchFocused = true
             }
         }
-        .pageToolbar {
-            if isSearching {
-                ToolbarItem { ProgressView().controlSize(.small) }
-            }
-        }
         .task(id: "\(kind.rawValue):\(trimmedQuery)") { await search() }
     }
 

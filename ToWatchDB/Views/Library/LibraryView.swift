@@ -87,13 +87,16 @@ struct LibraryView: View {
             if !hasInlineFilters {
                 // Menus rather than menu-style pickers: a picker draws its own bezel inside the toolbar's
                 // glass capsule, and the two shapes don't line up on hover.
-                ToolbarItem {
-                    Menu {
-                        statusPicker.pickerStyle(.inline)
-                    } label: {
-                        Text(statusFilter?.label ?? "Any Status")
+                // Everything in Watched is watched, so there's no status to filter by there.
+                if scope != .watched {
+                    ToolbarItem {
+                        Menu {
+                            statusPicker.pickerStyle(.inline)
+                        } label: {
+                            Text(statusFilter?.label ?? "Any Status")
+                        }
+                        .help("Filter by status")
                     }
-                    .help("Filter by status")
                 }
                 ToolbarItem {
                     Menu {

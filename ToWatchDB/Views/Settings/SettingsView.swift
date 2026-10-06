@@ -42,11 +42,11 @@ struct SettingsView: View {
                 #endif
             }
 
-            Section("TMDB") {
+            Section {
                 LabeledContent("Access Token") {
                     Text(tokenStatus).foregroundStyle(appState.token == nil ? .red : .secondary)
                 }
-                SecureField("Custom read access token", text: $tokenDraft, prompt: Text("Paste a v4 read access token"))
+                SecureField("Read access token", text: $tokenDraft, prompt: Text("Paste your API Read Access Token"))
                 HStack {
                     Button("Save Token") {
                         appState.setTokenOverride(tokenDraft)
@@ -54,7 +54,7 @@ struct SettingsView: View {
                     }
                     .disabled(tokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                     if appState.tokenOverride != nil {
-                        Button("Remove Custom Token", role: .destructive) { appState.setTokenOverride(nil) }
+                        Button("Remove Token", role: .destructive) { appState.setTokenOverride(nil) }
                     }
                     Spacer()
                     if isTesting { ProgressView().controlSize(.small) }
@@ -76,6 +76,11 @@ struct SettingsView: View {
                         Text(Locale.current.localizedString(forRegionCode: code) ?? code).tag(code)
                     }
                 }
+            } header: {
+                Text("TMDB")
+            } footer: {
+                // Release builds ship without a token, so this is where every new user starts.
+                Link("Get a free API Read Access Token at themoviedb.org", destination: TMDBLinks.apiSettings)
             }
 
             Section("Library") {
@@ -163,7 +168,7 @@ struct SettingsView: View {
     }
 
     private var tokenStatus: String {
-        if appState.tokenOverride != nil { return "Custom token (Keychain)" }
+        if appState.tokenOverride != nil { return "Saved in Keychain" }
         if appState.hasBundledToken { return "Built-in token" }
         return "Missing"
     }

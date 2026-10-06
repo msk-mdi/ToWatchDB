@@ -7,11 +7,11 @@ options:
     iOS: "18.0"
 configFiles:
   Debug: Config/App.xcconfig
-  Release: Config/App.xcconfig
+  Release: Config/Release.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
   ToWatchCore:
@@ -28,6 +28,8 @@ targets:
       path: ToWatchDB/Info.plist
       properties:
         CFBundleDisplayName: ToWatchDB
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.entertainment
         TMDBReadToken: $(TMDB_READ_TOKEN)
         UILaunchScreen: {}

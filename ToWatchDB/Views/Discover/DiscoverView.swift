@@ -99,6 +99,11 @@ struct DiscoverView: View {
     }
 }
 
+enum TMDBLinks {
+    /// Where a TMDB account's API Read Access Token is shown (sign-in required).
+    static let apiSettings = URL(string: "https://www.themoviedb.org/settings/api")!
+}
+
 struct MissingTokenView: View {
     @Environment(AppState.self) private var appState
 
@@ -106,8 +111,9 @@ struct MissingTokenView: View {
         ContentUnavailableView {
             Label("TMDB Token Needed", systemImage: "key")
         } description: {
-            Text("Add your TMDB read access token in Settings to search and discover titles.")
+            Text("ToWatchDB gets movies and shows from TMDB. Create a free account, copy your API Read Access Token, and paste it in Settings.")
         } actions: {
+            Link("Get a Token", destination: TMDBLinks.apiSettings)
             #if os(macOS)
             SettingsLink { Text("Open Settings") }
             #else

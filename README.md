@@ -33,10 +33,28 @@ On iPad and Mac, any title can open in its own window, posters drag into the lib
 1. `brew install xcodegen`
 2. `cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig` and paste your TMDB v4 read access token
    (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain).
+   Only Debug builds use it: Release builds ship without a token.
    Optionally add your signing team there too, so Siri & Shortcuts actions run.
 3. `xcodegen generate && open ToWatchDB.xcodeproj`
 
 The Xcode project is generated from `project.yml` — edit that, not the `.xcodeproj`.
+
+## Release builds
+
+No paid Apple Developer account needed; these are for your own devices. Release builds have no built-in
+TMDB token: on first launch, paste your API Read Access Token (themoviedb.org ▸ Settings ▸ API) in Settings.
+
+- **Mac:** `Scripts/build-mac.sh` builds `dist/ToWatchDB.app` (and a zip); drag it into Applications. It's signed
+  ad hoc, so it runs on the Mac that built it; on another Mac, right-click ▸ Open the first time.
+- **iPhone / iPad:** add a free Apple ID in Xcode ▸ Settings ▸ Accounts, put its team ID in
+  `Config/Secrets.xcconfig` (`DEVELOPMENT_TEAM = …`), connect the device (Developer Mode on), and run
+  `Scripts/install-ios.sh`. Free-account installs expire after 7 days; run the script again to renew.
+  Your library is kept.
+
+- **`.ipa` (iPhone + iPad):** `Scripts/build-ipa.sh` builds an unsigned `dist/ToWatchDB.ipa`. Install it with a
+  sideloading tool such as AltStore or Sideloadly, which signs it with your free Apple ID (renewed every 7 days).
+
+The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml`.
 
 ## Layout
 

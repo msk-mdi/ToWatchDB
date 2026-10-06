@@ -124,7 +124,8 @@ About 9,500 lines of Swift in total.
 | What | Where | Notes |
 |---|---|---|
 | Project | `project.yml` | Run `xcodegen generate` after adding or removing files. Never edit the `.xcodeproj`. |
-| TMDB token | `Config/Secrets.xcconfig` → `TMDB_READ_TOKEN` | Gitignored. Copied into Info.plist as `TMDBReadToken`. Never commit it. |
+| TMDB token | `Config/Secrets.xcconfig` → `TMDB_READ_TOKEN` | Gitignored. Copied into Info.plist as `TMDBReadToken` in Debug only: `Config/Release.xcconfig` clears it, so Release users paste their own. Never commit it. |
+| Release builds | `Scripts/build-mac.sh`, `Scripts/install-ios.sh` | Mac: ad-hoc signed `dist/ToWatchDB.app`. iOS: free Apple ID team from Secrets, installed on a connected device. No `get-task-allow` in Release. |
 | Token override | Settings ▸ TMDB | Stored in the Keychain by `TokenStore`. It takes priority over the built-in token. |
 | Signing | `Config/App.xcconfig` | Ad-hoc by default (`CODE_SIGN_IDENTITY = -`). Set `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY = Apple Development` in Secrets so App Intents run. |
 | Entitlements | `project.yml` | macOS sandbox: network client and user-selected file read/write. Not used on iOS (`CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` is empty). |

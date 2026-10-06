@@ -1,0 +1,8 @@
+// Release builds: everything from App.xcconfig, but no built-in TMDB token. Users paste their own
+// in Settings, where it's kept in the Keychain. Debug builds still use the token from Secrets.xcconfig.
+#include "App.xcconfig"
+
+TMDB_READ_TOKEN =
+
+// No debugger-attach entitlement (get-task-allow) in builds people actually run.
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO

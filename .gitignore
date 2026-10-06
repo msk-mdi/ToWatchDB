@@ -2,8 +2,10 @@
 xcuserdata/
 DerivedData/
 .build/
+dist/
 .swiftpm/
 build/
+dist/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 # Secrets: never commit
 Config/Secrets.xcconfig

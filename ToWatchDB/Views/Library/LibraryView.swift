@@ -18,6 +18,8 @@ struct LibraryView: View {
     /// Pushed collection lists leave Settings to the root screen.
     let showsSettingsButton: Bool
     @State private var statusFilter: WatchStatus?
+    /// Only titles with this genre. Applied after the cached list, like the text filter.
+    @State private var genreFilter: String?
     @State private var sort: LibrarySort
     @State private var searchText = ""
     @State private var isDropTargeted = false
@@ -44,7 +46,9 @@ struct LibraryView: View {
 
     var body: some View {
         let progress = appState.showProgress(allowStale: !isActive)
-        let items = filteredItems(progress)
+        let scoped = scopedSortedItems(progress)
+        let genres = genreCounts(scoped)
+        let items = filtered(scoped)
         ScrollView {
             #if os(macOS)
             if allowsScopeChange {
@@ -53,6 +57,7 @@ struct LibraryView: View {
                     scopePicker.fixedSize()
                     Spacer()
                     statusPicker.pickerStyle(.menu).fixedSize()
+                    genrePicker(genres).pickerStyle(.menu).fixedSize()
                     sortPicker.pickerStyle(.menu).fixedSize()
                     filterField.textFieldStyle(.roundedBorder).frame(width: 180)
                 }
@@ -72,9 +77,23 @@ struct LibraryView: View {
                 let menuSpaces = spaces.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 let menuTags = tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 PosterGrid {
-                    ForEach(items) { item in
-                        LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
-                                          spaces: menuSpaces, tags: menuTags)
+                    if sort == .genre {
+                        // A section per genre; each title appears once, under its main genre.
+                        ForEach(genreSections(items), id: \.genre) { section in
+                            Section {
+                                ForEach(section.items) { item in
+                                    LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
+                                                      spaces: menuSpaces, tags: menuTags)
+                                }
+                            } header: {
+                                GenreHeader(title: section.genre ?? "No Genre", count: section.items.count)
+                            }
+                        }
+                    } else {
+                        ForEach(items) { item in
+                            LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
+                                              spaces: menuSpaces, tags: menuTags)
+                        }
                     }
                 }
                 .padding()
@@ -94,8 +113,14 @@ struct LibraryView: View {
             }
             #if os(iOS)
             ToolbarItem(placement: .topBarTrailing) {
-                Menu("Filter and Sort", systemImage: statusFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") {
+                Menu("Filter and Sort", systemImage: statusFilter == nil && genreFilter == nil
+                     ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") {
                     statusPicker
+                    Menu {
+                        genrePicker(genres).pickerStyle(.inline)
+                    } label: {
+                        Label(genreFilter ?? "Any Genre", systemImage: "theatermasks")
+                    }
                     sortPicker
                 }
             }
@@ -113,6 +138,14 @@ struct LibraryView: View {
                         }
                         .help("Filter by status")
                     }
+                }
+                ToolbarItem {
+                    Menu {
+                        genrePicker(genres).pickerStyle(.inline)
+                    } label: {
+                        Text(genreFilter ?? "Any Genre")
+                    }
+                    .help("Filter by genre")
                 }
                 ToolbarItem {
                     Menu {
@@ -161,6 +194,7 @@ struct LibraryView: View {
         }
         .onChange(of: scope) { _, newScope in
             statusFilter = nil
+            genreFilter = nil
             sort = newScope.defaultSort
         }
         .onChange(of: appState.requestedLibraryScope, initial: true) { _, requested in
@@ -208,6 +242,42 @@ struct LibraryView: View {
         }
     }
 
+    /// Genres in the current list with how many titles have each, plus the selected one even if it's gone.
+    private func genrePicker(_ genres: [(name: String, count: Int)]) -> some View {
+        Picker("Genre", selection: $genreFilter) {
+            Text("Any Genre").tag(String?.none)
+            Divider()
+            if let genreFilter, !genres.contains(where: { $0.name == genreFilter }) {
+                Text(genreFilter).tag(Optional(genreFilter))
+            }
+            ForEach(genres, id: \.name) { genre in
+                Text("\(genre.name) (\(genre.count))").tag(Optional(genre.name))
+            }
+        }
+    }
+
+    private func genreCounts(_ items: [LibraryItem]) -> [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for item in items {
+            for genre in Set(item.genres) { counts[genre, default: 0] += 1 }
+        }
+        return counts.map { (name: $0.key, count: $0.value) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Consecutive runs of the same main genre; the list is already sorted by genre.
+    private func genreSections(_ items: [LibraryItem]) -> [(genre: String?, items: [LibraryItem])] {
+        var sections: [(genre: String?, items: [LibraryItem])] = []
+        for item in items {
+            if let last = sections.indices.last, sections[last].genre == item.primaryGenre {
+                sections[last].items.append(item)
+            } else {
+                sections.append((item.primaryGenre, [item]))
+            }
+        }
+        return sections
+    }
+
     private var sortPicker: some View {
         Picker("Sort", selection: $sort) {
             ForEach(LibrarySort.allCases) { Text($0.label).tag($0) }
@@ -252,14 +322,20 @@ struct LibraryView: View {
         scope == .movies ? [.notWatched, .watched] : WatchStatus.allCases
     }
 
-    /// Scoped, filtered, and sorted items, cached per library version: a show's status and last-watched date
-    /// walk its episodes, so they come from the shared progress map. The text filter runs on the cached
-    /// result, so typing only matches titles. A hidden page keeps its last list.
-    private func filteredItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
+    /// Scoped, status-filtered, and sorted items, cached per library version: a show's status and last-watched
+    /// date walk its episodes, so they come from the shared progress map. A hidden page keeps its last list.
+    private func scopedSortedItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
         let key = "library-\(scope)-\(sort)-\(String(describing: statusFilter))"
-        let items = appState.cached(key, allowStale: !isActive) { scopedItems(progress) }
+        return appState.cached(key, allowStale: !isActive) { scopedItems(progress) }
+    }
+
+    /// The genre and text filters run on the cached list, so they only match genres and titles.
+    private func filtered(_ items: [LibraryItem]) -> [LibraryItem] {
+        var items = items
+        if let genreFilter { items = items.filter { $0.genres.contains(genreFilter) } }
         let query = searchText.trimmingCharacters(in: .whitespaces)
-        return query.isEmpty ? items : items.filter { $0.title.localizedStandardContains(query) }
+        if !query.isEmpty { items = items.filter { $0.title.localizedStandardContains(query) } }
+        return items
     }
 
     private func showProgress(for item: LibraryItem, in progress: [PersistentIdentifier: ShowProgress]) -> ShowProgress? {
@@ -299,7 +375,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if !searchText.isEmpty || statusFilter != nil {
+        if !searchText.isEmpty || statusFilter != nil || genreFilter != nil {
             ContentUnavailableView("No Matches", systemImage: "line.3.horizontal.decrease.circle",
                                    description: Text("Try a different filter."))
         } else {
@@ -326,6 +402,21 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+}
+
+/// Section title when the grid is sorted by genre.
+private struct GenreHeader: View {
+    let title: String
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.title3.bold())
+            Text(count.formatted()).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.top, 8)
     }
 }
 

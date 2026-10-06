@@ -49,6 +49,17 @@ enum LibraryItem: Identifiable, Hashable {
         }
     }
 
+    /// TMDB genres, most relevant first.
+    var genres: [String] {
+        switch self {
+        case let .movie(movie): movie.genres
+        case let .show(show): show.genres
+        }
+    }
+
+    /// The section a title is grouped under when sorting by genre.
+    var primaryGenre: String? { genres.first }
+
     var userRating: Double? {
         switch self {
         case let .movie(movie): movie.userRating
@@ -119,7 +130,7 @@ enum LibraryScope: Hashable {
 }
 
 enum LibrarySort: String, CaseIterable, Identifiable {
-    case added, title, release, rating, lastWatched
+    case added, title, release, rating, lastWatched, genre
     var id: Self { self }
 
     var label: String {
@@ -129,6 +140,7 @@ enum LibrarySort: String, CaseIterable, Identifiable {
         case .release: "Release Date"
         case .rating: "Your Rating"
         case .lastWatched: "Last Watched"
+        case .genre: "Genre"
         }
     }
 
@@ -156,6 +168,14 @@ enum LibrarySort: String, CaseIterable, Identifiable {
         case .release: return ordered(lhs.releaseDate ?? .distantPast, rhs.releaseDate ?? .distantPast)
         case .rating: return ordered(lhs.userRating ?? -1, rhs.userRating ?? -1)
         case .lastWatched: return ordered(lhs.lastWatched ?? .distantPast, rhs.lastWatched ?? .distantPast)
+        case .genre:
+            // Grouped by genre A–Z (titles without one last), then by title within a genre.
+            switch (lhs.primaryGenre, rhs.primaryGenre) {
+            case let (l?, r?) where l != r: return l.localizedStandardCompare(r) == .orderedAscending
+            case (.some, nil): return true
+            case (nil, .some): return false
+            default: return byTitle()
+            }
         }
     }
 }

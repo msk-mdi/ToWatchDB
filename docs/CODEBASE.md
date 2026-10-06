@@ -389,7 +389,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 | `Discover/SearchView.swift` | Searches TMDB (300 ms debounce) with a Movies/TV picker. The field gets focus when the page opens. |
 | `Discover/RemotePosterCard.swift` | A result card with a quick "+" add button, plus `PosterGrid` (an adaptive `LazyVGrid`) |
 | `Discover/MediaSummary.swift` | `MediaSummary`, a TMDB result that may not be in the library yet, and `LibraryIDs` |
-| `Library/LibraryView.swift` | Poster grid for a `LibraryScope`, with status filter, sort, text filter, drop target, and empty states. Also defines `LibraryPosterCard`, with status badge, progress bar, and context menu. |
+| `Library/LibraryView.swift` | Poster grid for a `LibraryScope`, with status and genre filters, sort (Genre groups the grid into a section per main genre), text filter, drop target, and empty states. Also defines `LibraryPosterCard`, with status badge, progress bar, and context menu. |
 | `Library/LibraryItem.swift` | `LibraryItem` (a movie or a show), `LibraryScope`, and `LibrarySort` (sorting with title tie-breaks) |
 | `Library/NextToWatchView.swift` | The next aired episode of every show you're following, most recently watched first. Swipe or click to mark it watched. |
 | `Library/UpcomingView.swift` | Upcoming items grouped by day, with Today / Tomorrow / In N days labels |

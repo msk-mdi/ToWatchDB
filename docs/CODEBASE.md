@@ -104,7 +104,7 @@ Packages/ToWatchCore/
     Services/SpokenSummaries.swift             Sentences for Siri results
   Tests/ToWatchCoreTests/       Swift Testing suite + recorded TMDB JSON fixtures
 ToWatchDB/
-  App/                          Entry point, AppState, appearance, debug tools, Keychain token store
+  App/                          Entry point, AppState, appearance, debug tools, secret store (Keychain / Secure Enclave file)
   Views/                        All SwiftUI screens and components (see §5.5 and §5.6)
   Intents/                      App Intents: entities, queries, actions, App Shortcuts
   Resources/Assets.xcassets     AppIcon (coral), 9 alternate icons, 10 icon previews, AccentColor
@@ -127,7 +127,8 @@ About 9,500 lines of Swift in total.
 | TMDB token | `Config/Secrets.xcconfig` → `TMDB_READ_TOKEN` | Gitignored. Copied into Info.plist as `TMDBReadToken` in Debug only: `Config/Release.xcconfig` clears it, so Release users paste their own. Never commit it. |
 | Release builds | `Scripts/build-mac.sh`, `Scripts/install-ios.sh` | Mac: ad-hoc signed `dist/ToWatchDB.app`. iOS: free Apple ID team from Secrets, installed on a connected device. No `get-task-allow` in Release. |
 | Dropbox app key | `Config/Secrets.xcconfig` → `DROPBOX_APP_KEY` | Copied into Info.plist as `DropboxAppKey` in every configuration (it isn't a secret). Without it, Settings ▸ Dropbox Sync says sync is unavailable. |
-| Token override | Settings ▸ TMDB | Stored in the Keychain by `TokenStore`. It takes priority over the built-in token. |
+| Token override | Settings ▸ TMDB | Stored by `TokenStore` through `SecretStore`. It takes priority over the built-in token. |
+| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support, AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read. Macs without a Secure Enclave keep the Keychain. |
 | Signing | `Config/App.xcconfig` | Ad-hoc by default (`CODE_SIGN_IDENTITY = -`). Set `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY = Apple Development` in Secrets so App Intents run. |
 | Entitlements | `project.yml` | macOS sandbox: network client and user-selected file read/write. Not used on iOS (`CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` is empty). |
 | Alternate icons | `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=iphone*]` | iOS only. macOS swaps the Dock icon at runtime instead. |
@@ -325,7 +326,7 @@ parameters whenever it becomes active.
 | `mainWindowCount` | Lets menu commands reopen the main window on macOS when it's closed |
 | `trending` | Discover's lists, cached for 30 minutes per token and language |
 | `language`, `watchRegion` | Persisted in `UserDefaults` |
-| `token`, `client`, `library` | The TMDB token (Keychain override, else built-in), a client, and a `LibraryService` |
+| `token`, `client`, `library` | The TMDB token (saved override, else built-in), a client, and a `LibraryService` |
 | `perform(_:)` | Runs a throwing library operation and shows errors in the root alert |
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
 | `cached(_:_:)` | Memoizes derived data (stats) until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
@@ -488,7 +489,7 @@ the local date.
   `applySyncedBackup` then makes the store match the merge exactly, writing only real changes.
 - **App (`Sync/`):** `DropboxClient` does OAuth with PKCE (redirect `db-<app key>://2/token`, caught by
   `WebAuthenticationSession`), download, and upload with the file's `rev`, so a concurrent write from another
-  device comes back as a conflict and the sync re-merges. `DropboxSync` keeps the refresh token in the Keychain
+  device comes back as a conflict and the sync re-merges. `DropboxSync` keeps the refresh token in `SecretStore`
   and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`.
 - **When:** `AppState.syncWithDropbox` runs when the app becomes active (at most once a minute), when it goes to
   the background with unsynced changes, 5 s after the last save, and from Settings or Library ▸ Sync with

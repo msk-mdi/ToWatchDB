@@ -229,7 +229,13 @@ struct SettingsView: View {
     }
 
     private var tokenStatus: String {
-        if appState.tokenOverride != nil { return "Saved in Keychain" }
+        if appState.tokenOverride != nil {
+            #if os(macOS)
+            return "Saved, encrypted"
+            #else
+            return "Saved in Keychain"
+            #endif
+        }
         if appState.hasBundledToken { return "Built-in token" }
         return "Missing"
     }

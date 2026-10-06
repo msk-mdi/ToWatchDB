@@ -13,7 +13,7 @@ final class DropboxSync {
 
     let client: DropboxClient? = DropboxClient.bundledAppKey.map(DropboxClient.init)
 
-    private(set) var isConnected = Keychain.load(refreshTokenAccount) != nil
+    private(set) var isConnected = SecretStore.load(refreshTokenAccount) != nil
     private(set) var isSyncing = false
     private(set) var lastError: String?
 
@@ -47,7 +47,7 @@ final class DropboxSync {
             guard let refreshToken = tokens.refreshToken else {
                 throw DropboxError.signInFailed("Dropbox didn't grant offline access.")
             }
-            Keychain.save(refreshToken, account: Self.refreshTokenAccount)
+            SecretStore.save(refreshToken, account: Self.refreshTokenAccount)
             accessToken = (tokens.accessToken, .now.addingTimeInterval(tokens.expiresIn - 60))
             // A different account's file has nothing to do with the last one's.
             try? FileManager.default.removeItem(at: Self.baseURL)
@@ -68,7 +68,7 @@ final class DropboxSync {
         if let client, let token = accessToken?.value {
             Task { await client.revoke(accessToken: token) }
         }
-        Keychain.delete(Self.refreshTokenAccount)
+        SecretStore.delete(Self.refreshTokenAccount)
         try? FileManager.default.removeItem(at: Self.baseURL)
         accessToken = nil
         accountEmail = nil
@@ -150,7 +150,7 @@ final class DropboxSync {
 
     private func validAccessToken() async throws -> String {
         if let accessToken, accessToken.expires > .now { return accessToken.value }
-        guard let client, let refreshToken = Keychain.load(Self.refreshTokenAccount) else { throw DropboxError.signedOut }
+        guard let client, let refreshToken = SecretStore.load(Self.refreshTokenAccount) else { throw DropboxError.signedOut }
         let tokens = try await client.refresh(refreshToken)
         accessToken = (tokens.accessToken, .now.addingTimeInterval(tokens.expiresIn - 60))
         return tokens.accessToken

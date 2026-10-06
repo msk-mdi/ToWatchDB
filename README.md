@@ -36,7 +36,7 @@ On iPad and Mac, any title can open in its own window, posters drag into the lib
 
 1. `brew install xcodegen`
 2. `cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig` and paste your TMDB v4 read access token
-   (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain).
+   (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain on iPhone and iPad, and in a file encrypted by the Secure Enclave on Mac).
    Only Debug builds use it: Release builds ship without a token.
    Optionally add your signing team there too, so Siri & Shortcuts actions run.
    For Dropbox Sync, create an app at <https://www.dropbox.com/developers/apps> (Scoped access, **App folder**,

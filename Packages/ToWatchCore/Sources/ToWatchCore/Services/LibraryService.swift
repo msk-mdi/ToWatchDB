@@ -166,13 +166,17 @@ public struct LibraryService {
     // MARK: IMDb ratings
 
     /// Fetches IMDb ratings for library titles whose rating is older than `maxAge` (or was never fetched).
-    /// Ratings change slowly, so this runs far less often than `refreshStale`.
+    /// Ratings change slowly, so this runs far less often than `refreshStale`. A rating that came from a backup
+    /// or the sync file is kept until it's `importedMaxAge` old, so restoring or syncing doesn't ask IMDb again.
     @discardableResult
-    public func refreshStaleIMDbRatings(maxAge: TimeInterval = 3 * 86400, now: Date = .now) async -> Int {
-        let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
+    public func refreshStaleIMDbRatings(maxAge: TimeInterval = 3 * 86400, importedMaxAge: TimeInterval = 7 * 86400,
+                                        now: Date = .now) async -> Int {
+        let isStale: (any IMDbRated) -> Bool = { title in
+            title.imdbRatingDate.map { now.timeIntervalSince($0) > (title.imdbRatingIsImported ? importedMaxAge : maxAge) } ?? true
+        }
         let movies = ((try? context.fetch(FetchDescriptor<Movie>())) ?? [])
-            .filter { $0.imdbID != nil && isStale($0.imdbRatingDate) }
-        let allShows = ((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).filter { isStale($0.imdbRatingDate) }
+            .filter { $0.imdbID != nil && isStale($0) }
+        let allShows = ((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).filter(isStale)
         await lookUpIMDbIDs(allShows.filter { $0.imdbID == nil }, now: now)
         let shows = allShows.filter { $0.isLive && $0.imdbID != nil }
         return await refreshIMDbRatings(movies: movies, shows: shows, now: now)
@@ -447,22 +451,6 @@ extension TVShow {
             (detail.createdBy ?? []).map { PersonCredit(id: $0.id, name: $0.name, role: "Creator", profilePath: $0.profilePath) }
         )
         lastRefreshed = .now
-    }
-}
-
-extension Movie {
-    func applyIMDbRating(_ rating: IMDbRating?, on date: Date) {
-        imdbRating = rating?.value
-        imdbVoteCount = rating?.votes
-        imdbRatingDate = date
-    }
-}
-
-extension TVShow {
-    func applyIMDbRating(_ rating: IMDbRating?, on date: Date) {
-        imdbRating = rating?.value
-        imdbVoteCount = rating?.votes
-        imdbRatingDate = date
     }
 }
 

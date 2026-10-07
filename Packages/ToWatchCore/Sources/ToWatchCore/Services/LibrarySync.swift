@@ -11,6 +11,7 @@ import SwiftData
 //
 // Only what the user owns is merged: watch state, ratings, flags, notes, and collections. TMDB metadata is
 // kept from this device (it refreshes from TMDB anyway); titles new to this device take the file's metadata.
+// IMDb ratings are the exception: the more recently fetched one wins, so devices don't each ask IMDb.
 
 public enum LibrarySync {
     /// The merged library: apply it here with `applySyncedBackup`, then upload what results.
@@ -65,6 +66,7 @@ public enum LibrarySync {
             movie.notes = notes(m.base?.notes, m.local.notes, m.remote.notes)
             movie.spaceIDs = m.set(\.spaceIDs)
             movie.tagIDs = m.set(\.tagIDs)
+            movie.takeNewerIMDbRating(from: m.remote)
             return movie
         }.map { movie in
             var movie = movie
@@ -84,6 +86,7 @@ public enum LibrarySync {
             show.spaceIDs = m.set(\.spaceIDs)
             show.tagIDs = m.set(\.tagIDs)
             show.seasons = seasons(m)
+            show.takeNewerIMDbRating(from: m.remote)
             return show
         }.map { show in
             var show = show
@@ -320,7 +323,7 @@ public enum LibrarySync {
 public extension LibraryService {
     /// Makes the library match a merged snapshot: user state is set exactly, titles and collections missing
     /// from it are deleted, and titles new to this device are created from its metadata. Existing metadata is
-    /// left alone. Returns whether anything changed.
+    /// left alone, except for IMDb ratings newer than this device's. Returns whether anything changed.
     @discardableResult
     func applySyncedBackup(_ backup: LibraryBackup) throws -> Bool {
         let episodeNotes = notesByEpisode()
@@ -371,6 +374,7 @@ public extension LibraryService {
             assign(movie, \.isInBacklog, record.isInBacklog)
             assign(movie, \.isFavorite, record.isFavorite)
             assign(movie, \.addedDate, record.addedDate)
+            movie.adoptIMDbRating(from: record)
             setNotes(record.notes, on: movie.notes) { $0.movie = movie }
             if Set((movie.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { movie.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((movie.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { movie.tags = record.tagIDs.compactMap { tags[$0] } }
@@ -383,6 +387,7 @@ public extension LibraryService {
             assign(show, \.isFavorite, record.isFavorite)
             assign(show, \.isAbandoned, record.isAbandoned)
             assign(show, \.addedDate, record.addedDate)
+            show.adoptIMDbRating(from: record)
             setNotes(record.notes, on: show.notes) { $0.show = show }
             if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }

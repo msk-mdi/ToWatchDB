@@ -294,7 +294,7 @@ final class AppState {
         isRefreshing = true
         defer { isRefreshing = false }
         await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
-        await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400)
+        await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400, importedMaxAge: force ? 0 : 7 * 86400)
     }
 }
 

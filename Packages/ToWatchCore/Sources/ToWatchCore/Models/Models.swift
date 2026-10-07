@@ -53,6 +53,9 @@ public final class Movie {
     public var imdbRating: Double?
     public var imdbVoteCount: Int?
     public var imdbRatingDate: Date?
+    /// Whether the rating came from a backup or the sync file rather than this device's own IMDb request.
+    /// Such ratings are refreshed less often (see `LibraryService.refreshStaleIMDbRatings`).
+    public var imdbRatingIsImported: Bool = false
     public var homepage: String?
     public var trailerKey: String?
     public var castData: Data?
@@ -112,6 +115,9 @@ public final class TVShow {
     public var imdbRating: Double?
     public var imdbVoteCount: Int?
     public var imdbRatingDate: Date?
+    /// Whether the rating came from a backup or the sync file rather than this device's own IMDb request.
+    /// Such ratings are refreshed less often (see `LibraryService.refreshStaleIMDbRatings`).
+    public var imdbRatingIsImported: Bool = false
     public var homepage: String?
     public var trailerKey: String?
     public var castData: Data?

@@ -37,6 +37,8 @@ public struct LibraryBackup: Codable, Sendable {
         public var imdbID: String?
         public var imdbRating: Double?
         public var imdbVoteCount: Int?
+        /// When the rating was fetched from IMDb, so an import or sync can reuse it instead of asking again.
+        public var imdbRatingDate: Date?
         public var homepage: String?
         public var trailerKey: String?
         public var cast: [PersonCredit]
@@ -96,6 +98,8 @@ public struct LibraryBackup: Codable, Sendable {
         public var imdbID: String?
         public var imdbRating: Double?
         public var imdbVoteCount: Int?
+        /// When the rating was fetched from IMDb, so an import or sync can reuse it instead of asking again.
+        public var imdbRatingDate: Date?
         public var homepage: String?
         public var trailerKey: String?
         public var cast: [PersonCredit]
@@ -245,7 +249,7 @@ public extension LibraryService {
               tagline: movie.tagline, posterPath: movie.posterPath, backdropPath: movie.backdropPath,
               releaseDate: movie.releaseDate, runtime: movie.runtime, genres: movie.genres,
               releaseStatus: movie.releaseStatus, voteAverage: movie.voteAverage, imdbID: movie.imdbID,
-              imdbRating: movie.imdbRating, imdbVoteCount: movie.imdbVoteCount,
+              imdbRating: movie.imdbRating, imdbVoteCount: movie.imdbVoteCount, imdbRatingDate: movie.imdbRatingDate,
               homepage: movie.homepage, trailerKey: movie.trailerKey, cast: movie.cast, directors: movie.directors,
               addedDate: movie.addedDate, isWatched: movie.isWatched, watchedDate: movie.watchedDate,
               userRating: movie.userRating, isInBacklog: movie.isInBacklog, isFavorite: movie.isFavorite,
@@ -259,7 +263,7 @@ public extension LibraryService {
               genres: show.genres, networks: show.networks, numberOfSeasons: show.numberOfSeasons,
               numberOfEpisodes: show.numberOfEpisodes, episodeRuntime: show.episodeRuntime,
               voteAverage: show.voteAverage, imdbID: show.imdbID, imdbRating: show.imdbRating,
-              imdbVoteCount: show.imdbVoteCount, homepage: show.homepage, trailerKey: show.trailerKey,
+              imdbVoteCount: show.imdbVoteCount, imdbRatingDate: show.imdbRatingDate, homepage: show.homepage, trailerKey: show.trailerKey,
               cast: show.cast, creators: show.creators, addedDate: show.addedDate, userRating: show.userRating,
               isInBacklog: show.isInBacklog, isFavorite: show.isFavorite, isAbandoned: show.isAbandoned,
               notes: notes(show.notes), spaceIDs: sortedIDs((show.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((show.tags ?? []).map(\.uuid)),
@@ -277,6 +281,70 @@ public extension LibraryService {
     }
 }
 
+// MARK: - IMDb ratings in files
+
+/// A title record's IMDb fields. Files carry the rating with the date it was fetched, so importing or syncing
+/// reuses it instead of asking IMDb again.
+public protocol IMDbRatedRecord {
+    var imdbID: String? { get set }
+    var imdbRating: Double? { get set }
+    var imdbVoteCount: Int? { get set }
+    var imdbRatingDate: Date? { get set }
+}
+
+extension LibraryBackup.MovieRecord: IMDbRatedRecord {}
+extension LibraryBackup.ShowRecord: IMDbRatedRecord {}
+
+extension IMDbRatedRecord {
+    /// Whether this record's rating is for the title with `imdbID` (or one without an ID yet) and was fetched
+    /// after `date`. Dates compare to the whole second, as they read back from a file.
+    func hasNewerIMDbRating(than date: Date?, imdbID: String?) -> Bool {
+        guard let fetched = imdbRatingDate, let id = self.imdbID, imdbID == nil || imdbID == id else { return false }
+        return date.map { LibrarySync.noteKey(fetched) > LibrarySync.noteKey($0) } ?? true
+    }
+
+    /// Takes `other`'s rating when it's newer.
+    mutating func takeNewerIMDbRating(from other: Self) {
+        guard other.hasNewerIMDbRating(than: imdbRatingDate, imdbID: imdbID) else { return }
+        imdbID = other.imdbID
+        imdbRating = other.imdbRating
+        imdbVoteCount = other.imdbVoteCount
+        imdbRatingDate = other.imdbRatingDate
+    }
+}
+
+/// A library title's IMDb fields.
+protocol IMDbRated: AnyObject {
+    var imdbID: String? { get set }
+    var imdbRating: Double? { get set }
+    var imdbVoteCount: Int? { get set }
+    var imdbRatingDate: Date? { get set }
+    var imdbRatingIsImported: Bool { get set }
+}
+
+extension Movie: IMDbRated {}
+extension TVShow: IMDbRated {}
+
+extension IMDbRated {
+    /// Stores a rating this device just fetched from IMDb.
+    func applyIMDbRating(_ rating: IMDbRating?, on date: Date) {
+        imdbRating = rating?.value
+        imdbVoteCount = rating?.votes
+        imdbRatingDate = date
+        imdbRatingIsImported = false
+    }
+
+    /// Takes a backup's or the sync file's rating when it was fetched after this title's.
+    func adoptIMDbRating(from record: some IMDbRatedRecord) {
+        guard record.hasNewerIMDbRating(than: imdbRatingDate, imdbID: imdbID) else { return }
+        imdbID = record.imdbID
+        imdbRating = record.imdbRating
+        imdbVoteCount = record.imdbVoteCount
+        imdbRatingDate = record.imdbRatingDate
+        imdbRatingIsImported = true
+    }
+}
+
 // MARK: - Import (merge)
 
 public extension LibraryService {
@@ -284,6 +352,7 @@ public extension LibraryService {
     /// - Titles match by TMDB ID. New ones are created from the backup's metadata.
     /// - Watched, backlog, favorite, and abandoned are kept if set on either side; local dates and ratings win,
     ///   the backup fills in what's missing.
+    /// - An IMDb rating fetched more recently than this device's replaces it, so it isn't asked for again.
     /// - Notes are added unless the same text with the same creation date already exists.
     /// - Spaces, tags, and smart lists match by ID (tags also by name); memberships are unioned.
     @discardableResult
@@ -350,6 +419,7 @@ public extension LibraryService {
             movie.isInBacklog = (movie.isInBacklog || record.isInBacklog) && !movie.isWatched
             movie.isFavorite = movie.isFavorite || record.isFavorite
             movie.addedDate = min(movie.addedDate, record.addedDate)
+            movie.adoptIMDbRating(from: record)
             mergeNotes(record.notes, into: movie.notes) { $0.movie = movie }
             movie.spaces = union(movie.spaces, record.spaceIDs.compactMap { spaces[$0] })
             movie.tags = union(movie.tags, record.tagIDs.compactMap { tags[$0] })
@@ -366,6 +436,7 @@ public extension LibraryService {
             show.isFavorite = show.isFavorite || record.isFavorite
             show.isAbandoned = show.isAbandoned || record.isAbandoned
             show.addedDate = min(show.addedDate, record.addedDate)
+            show.adoptIMDbRating(from: record)
             mergeNotes(record.notes, into: show.notes) { $0.show = show }
             show.spaces = union(show.spaces, record.spaceIDs.compactMap { spaces[$0] })
             show.tags = union(show.tags, record.tagIDs.compactMap { tags[$0] })
@@ -395,6 +466,8 @@ public extension LibraryService {
         movie.imdbID = record.imdbID
         movie.imdbRating = record.imdbRating
         movie.imdbVoteCount = record.imdbVoteCount
+        movie.imdbRatingDate = record.imdbRatingDate
+        movie.imdbRatingIsImported = record.imdbRatingDate != nil
         movie.homepage = record.homepage
         movie.trailerKey = record.trailerKey
         movie.castData = PersonCredit.encode(record.cast)
@@ -423,6 +496,8 @@ public extension LibraryService {
         show.imdbID = record.imdbID
         show.imdbRating = record.imdbRating
         show.imdbVoteCount = record.imdbVoteCount
+        show.imdbRatingDate = record.imdbRatingDate
+        show.imdbRatingIsImported = record.imdbRatingDate != nil
         show.homepage = record.homepage
         show.trailerKey = record.trailerKey
         show.castData = PersonCredit.encode(record.cast)

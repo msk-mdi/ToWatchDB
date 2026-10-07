@@ -765,6 +765,40 @@ private final class SyncDevice {
     #expect(!LibrarySync.sameContent(a, b))
 }
 
+@MainActor @Test func importAndSyncReuseNewerIMDbRatings() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    movie.applyIMDbRating(IMDbRating(value: 8.7, votes: 100), on: date("2026-01-01"))
+    try mac.sync(&file)
+    try phone.sync(&file)
+
+    // A title new to the phone arrives with the rating and its date, marked as imported.
+    let phoneMovie = try #require(phone.library.movie(tmdbID: movie.tmdbID))
+    #expect(phoneMovie.imdbRating == 8.7 && phoneMovie.imdbVoteCount == 100)
+    #expect(phoneMovie.imdbRatingDate == date("2026-01-01") && phoneMovie.imdbRatingIsImported)
+
+    // A rating the mac fetched later replaces the phone's older one on the next sync; an older one doesn't.
+    movie.applyIMDbRating(IMDbRating(value: 8.8, votes: 200), on: date("2026-01-09"))
+    try mac.sync(&file)
+    try phone.sync(&file)
+    #expect(phoneMovie.imdbRating == 8.8 && phoneMovie.imdbRatingDate == date("2026-01-09"))
+    #expect(!movie.imdbRatingIsImported)
+    phoneMovie.applyIMDbRating(IMDbRating(value: 9.0, votes: 300), on: date("2026-01-12"))
+    var stale = try #require(file)
+    stale.movies[0].imdbRating = 1
+    stale.movies[0].imdbRatingDate = date("2026-01-02")
+    phone.library.importBackup(stale)
+    #expect(phoneMovie.imdbRating == 9.0 && !phoneMovie.imdbRatingIsImported)
+
+    // Importing a backup takes a newer rating too.
+    let restored = try makeLibrary()
+    restored.insertMovie(try fixture("movie_inception"))
+    restored.importBackup(try phone.library.makeBackup())
+    let restoredMovie = try #require(restored.movie(tmdbID: movie.tmdbID))
+    #expect(restoredMovie.imdbRating == 9.0 && restoredMovie.imdbRatingIsImported)
+}
+
 @MainActor @Test func deletedModelsAreNotLive() throws {
     let library = try makeLibrary()
     let movie = library.insertMovie(try fixture("movie_inception"))

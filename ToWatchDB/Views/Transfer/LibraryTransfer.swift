@@ -40,7 +40,9 @@ private struct LibraryFileTransfers: ViewModifier {
     /// What the open panel is for: a backup (JSON) or a list of titles (text).
     @State private var importKind: LibraryFileRequest = .importBackup
     @State private var listDraft: ListImportDraft?
-    @State private var resultMessage: String?
+    /// Shown here, not through `appState.errorMessage`: that alert is on the main window, which is behind the
+    /// Settings window on Mac (or missing), so a failed import from Settings showed nothing.
+    @State private var message: (title: String, text: String)?
     #if os(macOS)
     @Environment(\.appearsActive) private var appearsActive
     #endif
@@ -53,7 +55,7 @@ private struct LibraryFileTransfers: ViewModifier {
             #endif
             .fileExporter(isPresented: $isExporting, document: document, contentType: contentType,
                           defaultFilename: filename) { result in
-                if case let .failure(error) = result { appState.errorMessage = error.localizedDescription }
+                if case let .failure(error) = result { showError(error.localizedDescription) }
                 document = nil
             }
             // One open panel for both imports: a second fileImporter on the same view doesn't present.
@@ -61,17 +63,17 @@ private struct LibraryFileTransfers: ViewModifier {
                           allowedContentTypes: importKind == .importList ? [.plainText, .text] : [.json]) { result in
                 switch result {
                 case let .success(url): importKind == .importList ? readList(from: url) : importBackup(from: url)
-                case let .failure(error): appState.errorMessage = error.localizedDescription
+                case let .failure(error): showError(error.localizedDescription)
                 }
             }
             .sheet(item: $listDraft) { ListImportSheet(draft: $0) }
-            .alert("Import Complete", isPresented: Binding(
-                get: { resultMessage != nil },
-                set: { if !$0 { resultMessage = nil } }
+            .alert(message?.title ?? "", isPresented: Binding(
+                get: { message != nil },
+                set: { if !$0 { message = nil } }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(resultMessage ?? "")
+                Text(message?.text ?? "")
             }
     }
 
@@ -102,15 +104,19 @@ private struct LibraryFileTransfers: ViewModifier {
                 isExporting = true
             case .importBackup, .importList:
                 if request == .importList, appState.client == nil {
-                    appState.errorMessage = "Add your TMDB token in Settings first: titles in the list are looked up on TMDB."
+                    showError("Add your TMDB token in Settings first: titles in the list are looked up on TMDB.")
                     return
                 }
                 importKind = request
                 isImporting = true
             }
         } catch {
-            appState.errorMessage = error.localizedDescription
+            showError(error.localizedDescription)
         }
+    }
+
+    private func showError(_ text: String) {
+        message = ("Something went wrong", text)
     }
 
     private func readList(from url: URL) {
@@ -118,15 +124,15 @@ private struct LibraryFileTransfers: ViewModifier {
         defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
-            let text = String(decoding: data, as: UTF8.self)
+            let text = ListImport.decodeText(data)
             let entries = ListImport.parse(text)
             guard !entries.isEmpty else {
-                appState.errorMessage = "No titles found in “\(url.lastPathComponent)”. Put one title per line, like “Arrival (2016)”."
+                showError("No titles found in “\(url.lastPathComponent)”. Put one title per line, like “Arrival (2016)”.")
                 return
             }
             listDraft = ListImportDraft(fileName: url.lastPathComponent, entries: entries)
         } catch {
-            appState.errorMessage = error.localizedDescription
+            showError(error.localizedDescription)
         }
     }
 
@@ -136,9 +142,9 @@ private struct LibraryFileTransfers: ViewModifier {
         defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
-            resultMessage = try appState.library.importBackup(data: data).description
+            message = ("Import Complete", try appState.library.importBackup(data: data).description)
         } catch {
-            appState.errorMessage = error.localizedDescription
+            showError(error.localizedDescription)
         }
     }
 }

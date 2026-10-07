@@ -89,7 +89,7 @@ struct YearInReviewCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 if let genre = stats.topGenres.first { fact("Top genre", genre.name) }
                 if let actor = stats.topActors.first { fact("Most watched actor", actor.name) }
-                if let show = stats.mostWatchedShow { fact("Most watched show", "\(show.name) · \(show.count) episodes") }
+                if let show = stats.mostWatchedShow { fact("Most watched show", "\(show.name) · \(show.count) episode\(show.count == 1 ? "" : "s")") }
             }
 
         }

@@ -49,6 +49,10 @@ public final class Movie {
     public var releaseStatus: String?
     public var voteAverage: Double?
     public var imdbID: String?
+    /// IMDb's 1–10 user rating, cached from `IMDbClient` and refreshed every few days.
+    public var imdbRating: Double?
+    public var imdbVoteCount: Int?
+    public var imdbRatingDate: Date?
     public var homepage: String?
     public var trailerKey: String?
     public var castData: Data?
@@ -81,7 +85,7 @@ public final class Movie {
 
     public func isReleased(asOf now: Date = .now) -> Bool {
         guard let releaseDate else { return false }
-        return releaseDate <= now
+        return releaseDate <= TMDBDate.today(now)
     }
 }
 
@@ -103,6 +107,11 @@ public final class TVShow {
     public var numberOfEpisodes: Int?
     public var episodeRuntime: Int?
     public var voteAverage: Double?
+    public var imdbID: String?
+    /// IMDb's 1–10 user rating, cached from `IMDbClient` and refreshed every few days.
+    public var imdbRating: Double?
+    public var imdbVoteCount: Int?
+    public var imdbRatingDate: Date?
     public var homepage: String?
     public var trailerKey: String?
     public var castData: Data?
@@ -212,7 +221,7 @@ public final class Episode {
 
     public func hasAired(asOf now: Date = .now) -> Bool {
         guard let airDate else { return false }
-        return airDate <= now
+        return airDate <= TMDBDate.today(now)
     }
 }
 
@@ -250,4 +259,11 @@ extension PersonCredit {
 
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
+}
+
+extension PersistentModel {
+    /// False once the model has been deleted, whether or not the deletion is saved yet. Code that holds a model
+    /// across an `await` checks this before writing: the user or a sync may have deleted it meanwhile, and
+    /// SwiftData can trap on a write to a deleted model.
+    public var isLive: Bool { modelContext != nil && !isDeleted }
 }

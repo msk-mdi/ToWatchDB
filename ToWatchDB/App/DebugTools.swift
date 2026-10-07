@@ -29,6 +29,7 @@ enum DebugTools {
         if !UserDefaults.standard.bool(forKey: "UISkipSeed") { await seed(appState) }
         #if os(macOS)
         if let snapshotDir { await snapshot(appState, to: URL(fileURLWithPath: snapshotDir, isDirectory: true)) }
+        if ClickBench.isRequested { ClickBench.appState = appState; await ClickBench.run() }
         #endif
     }
 

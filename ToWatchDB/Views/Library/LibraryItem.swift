@@ -67,6 +67,14 @@ enum LibraryItem: Identifiable, Hashable {
         }
     }
 
+    /// IMDb's 1–10 user rating, if fetched.
+    var imdbRating: Double? {
+        switch self {
+        case let .movie(movie): movie.imdbRating
+        case let .show(show): show.imdbRating
+        }
+    }
+
     /// When the item was last watched: a movie's watch date, or a show's most recent episode.
     var lastWatched: Date? {
         switch self {
@@ -130,7 +138,7 @@ enum LibraryScope: Hashable {
 }
 
 enum LibrarySort: String, CaseIterable, Identifiable {
-    case added, title, release, rating, lastWatched, genre
+    case added, title, release, rating, imdbRating, lastWatched, genre
     var id: Self { self }
 
     var label: String {
@@ -139,6 +147,7 @@ enum LibrarySort: String, CaseIterable, Identifiable {
         case .title: "Title"
         case .release: "Release Date"
         case .rating: "Your Rating"
+        case .imdbRating: "IMDb Rating"
         case .lastWatched: "Last Watched"
         case .genre: "Genre"
         }
@@ -167,6 +176,7 @@ enum LibrarySort: String, CaseIterable, Identifiable {
         case .title: return byTitle()
         case .release: return ordered(lhs.releaseDate ?? .distantPast, rhs.releaseDate ?? .distantPast)
         case .rating: return ordered(lhs.userRating ?? -1, rhs.userRating ?? -1)
+        case .imdbRating: return ordered(lhs.imdbRating ?? -1, rhs.imdbRating ?? -1)
         case .lastWatched: return ordered(lhs.lastWatched ?? .distantPast, rhs.lastWatched ?? .distantPast)
         case .genre:
             // Grouped by genre A–Z (titles without one last), then by title within a genre.

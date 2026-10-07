@@ -38,15 +38,18 @@ public enum ListImport {
     public static func parse(_ text: String) -> [ListEntry] {
         var kind = ListEntry.Kind.movie
         var entries: [ListEntry] = []
-        for (index, rawLine) in text.components(separatedBy: .newlines).enumerated() {
-            var line = rawLine.trimmingCharacters(in: .whitespaces)
+        // `isNewline` takes "\r\n" as one character, so Windows files keep their line numbers. A byte-order mark
+        // at the start would otherwise stick to the first line and hide a heading there.
+        for (index, rawLine) in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated() {
+            var line = rawLine.trimmingCharacters(in: .whitespaces.union(["\u{FEFF}"]))
             guard !line.isEmpty, !line.allSatisfy({ "=-_#*~".contains($0) }) else { continue }
             if let heading = heading(line) {
                 kind = heading
                 continue
             }
             line = line.replacing(/^(?:[-*•·]|\d+[.)])\s+/, with: "")
-            if let match = line.firstMatch(of: /^(.+?)\s*\((\d{4})\)\s*(?:[-–—,|:].*)?$/) {
+            // After the year: a separated detail ("- drama"), a bracketed note ("(Director's Cut)"), or plain words.
+            if let match = line.firstMatch(of: /^(.+?)\s*\((\d{4})\)(?:\s*[-–—,|:(\[].*|\s+\S.*)?$/) {
                 entries.append(ListEntry(kind: kind, title: String(match.1), year: Int(match.2), line: index + 1))
             } else {
                 // No year: the title is everything before a " - " detail.
@@ -55,6 +58,15 @@ public enum ListImport {
             }
         }
         return entries
+    }
+
+    /// A text file's contents: UTF-16 when it starts with that byte-order mark (Windows Notepad's "Unicode"),
+    /// otherwise UTF-8, with anything invalid replaced rather than failing.
+    public static func decodeText(_ data: Data) -> String {
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]), let text = String(data: data, encoding: .utf16) {
+            return text
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func heading(_ line: String) -> ListEntry.Kind? {
@@ -136,7 +148,13 @@ public struct ListImportResult: Sendable {
     public var added = 0
     /// Already in the library; still marked watched or backlog if asked.
     public var alreadyInLibrary = 0
+    /// Lines naming a title an earlier line already matched.
+    public var duplicates = 0
     public var notFound: [ListEntry] = []
+    /// Entries TMDB couldn't be asked about (offline, an invalid token, rate limiting): not the same as not found.
+    public var failed: [ListEntry] = []
+    /// Why the first failed entry failed.
+    public var failureReason: String?
 }
 
 extension LibraryService {
@@ -156,34 +174,48 @@ extension LibraryService {
         } apply: { index, payload in
             handled += 1
             defer { progress(handled) }
+            // Every entry lands in exactly one count, so they add up to the number of titles in the list.
+            func isFirst(_ key: String) -> Bool {
+                if seen.insert(key).inserted { return true }
+                result.duplicates += 1
+                return false
+            }
             switch payload {
             case .notFound:
                 result.notFound.append(entries[index])
+            case let .failed(reason):
+                result.failed.append(entries[index])
+                if result.failureReason == nil { result.failureReason = reason }
             case let .existingMovie(id):
-                guard seen.insert("m\(id)").inserted, let movie = movie(tmdbID: id) else { return }
+                guard isFirst("m\(id)") else { return }
+                guard let movie = movie(tmdbID: id) else { return result.notFound.append(entries[index]) }
                 result.alreadyInLibrary += 1
                 file(movie, mark)
             case let .existingShow(id):
-                guard seen.insert("s\(id)").inserted, let show = show(tmdbID: id) else { return }
+                guard isFirst("s\(id)") else { return }
+                guard let show = show(tmdbID: id) else { return result.notFound.append(entries[index]) }
                 result.alreadyInLibrary += 1
                 file(show, mark)
             case let .movie(detail):
-                guard seen.insert("m\(detail.id)").inserted else { return }
+                guard isFirst("m\(detail.id)") else { return }
                 result.added += 1
                 file(upsertMovie(detail), mark)
             case let .show(detail, seasons):
-                guard seen.insert("s\(detail.id)").inserted else { return }
+                guard isFirst("s\(detail.id)") else { return }
                 result.added += 1
                 file(upsertShow(detail, seasons: seasons), mark)
             }
         }
         result.notFound.sort { $0.line < $1.line }
+        result.failed.sort { $0.line < $1.line }
         save()
         return result
     }
 
     private enum Payload: Sendable {
         case notFound
+        /// The request failed: TMDB never said whether it has the title.
+        case failed(String)
         case existingMovie(Int), existingShow(Int)
         case movie(TMDBMovieDetail)
         case show(TMDBTVDetail, [TMDBSeasonDetail])
@@ -192,36 +224,44 @@ extension LibraryService {
     /// Off the main actor: search (with the year, then without), then download what's new.
     private static func fetch(_ entry: ListEntry, client: TMDBClient,
                               existingMovies: Set<Int>, existingShows: Set<Int>) async -> Payload {
+        do {
+            return try await match(entry, client: client, existingMovies: existingMovies, existingShows: existingShows)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private static func match(_ entry: ListEntry, client: TMDBClient,
+                              existingMovies: Set<Int>, existingShows: Set<Int>) async throws -> Payload {
         switch entry.kind {
         case .movie:
-            func search(_ year: Int?) async -> Int? {
-                let results = (try? await client.searchMovies(entry.title, year: year).results) ?? []
+            func search(_ year: Int?) async throws -> Int? {
+                let results = try await client.searchMovies(entry.title, year: year).results
                 let candidates = results.map {
                     ListImport.Candidate(id: $0.id, titles: [$0.title, $0.originalTitle].compactMap { $0 },
                                          year: TMDBDate.year($0.releaseDate))
                 }
                 return ListImport.bestMatch(candidates, title: entry.title, year: entry.year)
             }
-            var id = await search(entry.year)
-            if id == nil, entry.year != nil { id = await search(nil) }
+            var id = try await search(entry.year)
+            if id == nil, entry.year != nil { id = try await search(nil) }
             guard let id else { return .notFound }
             if existingMovies.contains(id) { return .existingMovie(id) }
-            guard let detail = try? await client.movie(id: id) else { return .notFound }
-            return .movie(detail)
+            return .movie(try await client.movie(id: id))
         case .show:
-            func search(_ year: Int?) async -> Int? {
-                let results = (try? await client.searchTVShows(entry.title, year: year).results) ?? []
+            func search(_ year: Int?) async throws -> Int? {
+                let results = try await client.searchTVShows(entry.title, year: year).results
                 let candidates = results.map {
                     ListImport.Candidate(id: $0.id, titles: [$0.name, $0.originalName].compactMap { $0 },
                                          year: TMDBDate.year($0.firstAirDate))
                 }
                 return ListImport.bestMatch(candidates, title: entry.title, year: entry.year)
             }
-            var id = await search(entry.year)
-            if id == nil, entry.year != nil { id = await search(nil) }
+            var id = try await search(entry.year)
+            if id == nil, entry.year != nil { id = try await search(nil) }
             guard let id else { return .notFound }
             if existingShows.contains(id) { return .existingShow(id) }
-            guard let (detail, seasons) = try? await client.tvShowWithSeasons(id: id) else { return .notFound }
+            let (detail, seasons) = try await client.tvShowWithSeasons(id: id)
             return .show(detail, seasons)
         }
     }

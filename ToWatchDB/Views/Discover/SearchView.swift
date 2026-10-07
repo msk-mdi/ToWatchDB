@@ -82,6 +82,7 @@ struct SearchView: View {
         let text = trimmedQuery
         guard let client = appState.client, !text.isEmpty else {
             results = []
+            searchError = nil
             return
         }
         // Debounce: a newer keystroke cancels this task during the sleep.

@@ -6,10 +6,13 @@ import SwiftData
 public struct LibraryService {
     public let context: ModelContext
     public let client: TMDBClient?
+    /// Where IMDb ratings come from; `nil` leaves them alone (tests, which mustn't reach the network).
+    public let imdb: IMDbClient?
 
-    public init(context: ModelContext, client: TMDBClient?) {
+    public init(context: ModelContext, client: TMDBClient?, imdb: IMDbClient? = nil) {
         self.context = context
         self.client = client
+        self.imdb = imdb
     }
 
     func requireClient() throws -> TMDBClient {
@@ -38,7 +41,9 @@ public struct LibraryService {
     public func addMovie(tmdbID: Int) async throws -> Movie {
         if let existing = movie(tmdbID: tmdbID) { return existing }
         let detail = try await requireClient().movie(id: tmdbID)
-        return insertMovie(detail)
+        let movie = insertMovie(detail)
+        refreshIMDbRatingsLater(movies: [movie])
+        return movie
     }
 
     /// Adds a TV show with all of its seasons and episodes, or returns the existing one.
@@ -46,7 +51,9 @@ public struct LibraryService {
     public func addShow(tmdbID: Int) async throws -> TVShow {
         if let existing = show(tmdbID: tmdbID) { return existing }
         let (detail, seasons) = try await requireClient().tvShowWithSeasons(id: tmdbID)
-        return insertShow(detail, seasons: seasons)
+        let show = insertShow(detail, seasons: seasons)
+        refreshIMDbRatingsLater(shows: [show])
+        return show
     }
 
     /// Adds a show whose detail was already fetched (a preview page): only its seasons are downloaded.
@@ -54,7 +61,9 @@ public struct LibraryService {
     public func addShow(_ detail: TMDBTVDetail) async throws -> TVShow {
         if let existing = show(tmdbID: detail.id) { return existing }
         let seasons = try await requireClient().seasons(of: detail)
-        return insertShow(detail, seasons: seasons)
+        let show = insertShow(detail, seasons: seasons)
+        refreshIMDbRatingsLater(shows: [show])
+        return show
     }
 
     /// Inserts (or updates) a movie from an already-fetched TMDB payload.
@@ -101,15 +110,19 @@ public struct LibraryService {
 
     public func refresh(_ movie: Movie) async throws {
         let detail = try await requireClient().movie(id: movie.tmdbID)
+        guard movie.isLive else { return }
         movie.apply(detail)
         save()
+        refreshIMDbRatingsLater(movies: [movie])
     }
 
     public func refresh(_ show: TVShow) async throws {
         let (detail, seasons) = try await requireClient().tvShowWithSeasons(id: show.tmdbID)
+        guard show.isLive else { return }
         show.apply(detail)
         merge(seasons, into: show)
         save()
+        refreshIMDbRatingsLater(shows: [show])
     }
 
     /// Refreshes ongoing shows and unreleased movies that haven't been refreshed within `maxAge`.
@@ -133,7 +146,8 @@ public struct LibraryService {
         await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) {
             try? await client.tvShowWithSeasons(id: $0)
         } apply: { id, payload in
-            guard let (detail, seasons) = payload, let show = showsByID[id] else { return }
+            // A title deleted while downloading (by the user or a sync) is skipped: writing to it can trap.
+            guard let (detail, seasons) = payload, let show = showsByID[id], show.isLive else { return }
             show.apply(detail)
             merge(seasons, into: show)
             count += 1
@@ -141,12 +155,77 @@ public struct LibraryService {
         await Self.forEachConcurrently(Array(moviesByID.keys), limit: 4) {
             try? await client.movie(id: $0)
         } apply: { id, detail in
-            guard let detail, let movie = moviesByID[id] else { return }
+            guard let detail, let movie = moviesByID[id], movie.isLive else { return }
             movie.apply(detail)
             count += 1
         }
         if count > 0 { save() }
         return count
+    }
+
+    // MARK: IMDb ratings
+
+    /// Fetches IMDb ratings for library titles whose rating is older than `maxAge` (or was never fetched).
+    /// Ratings change slowly, so this runs far less often than `refreshStale`.
+    @discardableResult
+    public func refreshStaleIMDbRatings(maxAge: TimeInterval = 3 * 86400, now: Date = .now) async -> Int {
+        let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
+        let movies = ((try? context.fetch(FetchDescriptor<Movie>())) ?? [])
+            .filter { $0.imdbID != nil && isStale($0.imdbRatingDate) }
+        let allShows = ((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).filter { isStale($0.imdbRatingDate) }
+        await lookUpIMDbIDs(allShows.filter { $0.imdbID == nil }, now: now)
+        let shows = allShows.filter { $0.isLive && $0.imdbID != nil }
+        return await refreshIMDbRatings(movies: movies, shows: shows, now: now)
+    }
+
+    /// A show gets its IMDb ID from a full refresh, and only ongoing shows are refreshed on their own, so
+    /// shows that had ended when they were added (or came from an older backup) look theirs up here.
+    private func lookUpIMDbIDs(_ shows: [TVShow], now: Date) async {
+        guard let client, !shows.isEmpty else { return }
+        let showsByID = Dictionary(shows.map { ($0.tmdbID, $0) }) { first, _ in first }
+        var changed = false
+        await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) {
+            try? await client.tvExternalIDs(id: $0)
+        } apply: { id, ids in
+            guard let ids, let show = showsByID[id], show.isLive else { return }
+            if let imdbID = ids.imdbId, !imdbID.isEmpty {
+                show.imdbID = imdbID
+            } else {
+                show.imdbRatingDate = now // TMDB has none: don't ask again until the ratings are due.
+            }
+            changed = true
+        }
+        if changed { save() }
+    }
+
+    /// Fetches the IMDb ratings of these titles (several per request) and saves once. A failed request leaves
+    /// the ratings as they were; returns how many titles were updated.
+    @discardableResult
+    public func refreshIMDbRatings(movies: [Movie] = [], shows: [TVShow] = [], now: Date = .now) async -> Int {
+        let ids = movies.compactMap(\.imdbID) + shows.compactMap(\.imdbID)
+        guard let imdb, !ids.isEmpty, let ratings = try? await imdb.ratings(for: ids) else { return 0 }
+        var count = 0
+        // Titles deleted while the request ran (by the user or a sync) are skipped: writing to them can trap.
+        // Titles IMDb didn't answer for keep their rating and date, so they're asked for again next time.
+        for movie in movies where movie.isLive {
+            guard let id = movie.imdbID, let rating = ratings[id] else { continue }
+            movie.applyIMDbRating(rating, on: now)
+            count += 1
+        }
+        for show in shows where show.isLive {
+            guard let id = show.imdbID, let rating = ratings[id] else { continue }
+            show.applyIMDbRating(rating, on: now)
+            count += 1
+        }
+        if count > 0 { save() }
+        return count
+    }
+
+    /// `refreshIMDbRatings` without waiting for it. Adding or refreshing a title used to wait on IMDb, an
+    /// undocumented endpoint, so a slow answer kept the Add button spinning after the title was already saved.
+    public func refreshIMDbRatingsLater(movies: [Movie] = [], shows: [TVShow] = []) {
+        guard imdb != nil else { return }
+        Task { await refreshIMDbRatings(movies: movies, shows: shows) }
     }
 
     /// Runs `fetch` for each ID with at most `limit` running at once, and hands each result to `apply` on the
@@ -170,8 +249,12 @@ public struct LibraryService {
         }
     }
 
-    /// Upserts seasons and episodes by number, keeping the user's watch data.
+    /// Upserts seasons and episodes by number, keeping the user's watch data. `seasonDetails` is the show's full
+    /// list (`TMDBClient.seasons` fails as a whole), so episodes and seasons TMDB no longer lists are removed:
+    /// a dropped placeholder kept a show on Watching with a phantom next episode. Ones holding the user's data
+    /// (watched, rated, or with notes) stay.
     func merge(_ seasonDetails: [TMDBSeasonDetail], into show: TVShow) {
+        removeEpisodes(missingFrom: seasonDetails, in: show)
         var existingSeasons = Dictionary((show.seasons ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
         for detail in seasonDetails {
             let season = existingSeasons[detail.seasonNumber] ?? {
@@ -194,6 +277,18 @@ public struct LibraryService {
                 }()
                 episode.apply(episodeDetail)
             }
+        }
+    }
+
+    private func removeEpisodes(missingFrom seasonDetails: [TMDBSeasonDetail], in show: TVShow) {
+        let listed = Dictionary(seasonDetails.map { ($0.seasonNumber, Set($0.episodes.map(\.episodeNumber))) }) { first, _ in first }
+        for season in show.seasons ?? [] {
+            let episodes = listed[season.seasonNumber]
+            for episode in season.episodes ?? [] where episodes?.contains(episode.episodeNumber) != true {
+                guard !episode.isWatched, episode.userRating == nil, episode.notes?.isEmpty ?? true else { continue }
+                context.delete(episode)
+            }
+            if episodes == nil, (season.episodes ?? []).allSatisfy(\.isDeleted) { context.delete(season) }
         }
     }
 
@@ -290,6 +385,7 @@ public struct LibraryService {
     }
 
     public func delete(_ model: some PersistentModel) {
+        guard model.isLive else { return }
         context.delete(model)
         save()
     }
@@ -343,6 +439,7 @@ extension TVShow {
         numberOfEpisodes = detail.numberOfEpisodes
         episodeRuntime = detail.episodeRunTime?.first
         voteAverage = detail.voteAverage
+        if let id = detail.externalIds?.imdbId, !id.isEmpty { imdbID = id }
         homepage = detail.homepage.flatMap { $0.isEmpty ? nil : $0 }
         trailerKey = detail.videos?.bestTrailerKey
         castData = PersonCredit.encode(PersonCredit.cast(from: detail.credits))
@@ -350,6 +447,22 @@ extension TVShow {
             (detail.createdBy ?? []).map { PersonCredit(id: $0.id, name: $0.name, role: "Creator", profilePath: $0.profilePath) }
         )
         lastRefreshed = .now
+    }
+}
+
+extension Movie {
+    func applyIMDbRating(_ rating: IMDbRating?, on date: Date) {
+        imdbRating = rating?.value
+        imdbVoteCount = rating?.votes
+        imdbRatingDate = date
+    }
+}
+
+extension TVShow {
+    func applyIMDbRating(_ rating: IMDbRating?, on date: Date) {
+        imdbRating = rating?.value
+        imdbVoteCount = rating?.votes
+        imdbRatingDate = date
     }
 }
 

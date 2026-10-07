@@ -78,20 +78,44 @@ enum EnclaveSecrets {
     }
 
     static func all() -> [String: String] {
-        guard let data = try? Data(contentsOf: url),
-              let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+        if case let .secrets(secrets) = read() { return secrets }
+        return [:] // Unreadable, or made on another Mac: the secrets have to be entered again.
+    }
+
+    private enum Contents {
+        case secrets([String: String])
+        /// Reading the file or using the enclave failed; trying again may work.
+        case unavailable
+        /// The file can't ever be opened here: damaged, or sealed on another Mac.
+        case unusable
+    }
+
+    private static func read() -> Contents {
+        guard FileManager.default.fileExists(atPath: url.path) else { return .secrets([:]) }
+        guard let data = try? Data(contentsOf: url) else { return .unavailable }
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
               let enclaveKey = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: envelope.enclaveKey),
-              let ephemeral = try? P256.KeyAgreement.PublicKey(x963Representation: envelope.ephemeralPublicKey),
-              let secret = try? enclaveKey.sharedSecretFromKeyAgreement(with: ephemeral),
-              let box = try? AES.GCM.SealedBox(combined: envelope.sealed),
-              let plain = try? AES.GCM.open(box, using: symmetricKey(secret, ephemeral: ephemeral, enclave: enclaveKey.publicKey))
-        else { return [:] } // Missing, or made on another Mac: the secrets have to be entered again.
-        return (try? JSONDecoder().decode([String: String].self, from: plain)) ?? [:]
+              let ephemeral = try? P256.KeyAgreement.PublicKey(x963Representation: envelope.ephemeralPublicKey)
+        else { return .unusable }
+        guard let secret = try? enclaveKey.sharedSecretFromKeyAgreement(with: ephemeral) else { return .unavailable }
+        guard let box = try? AES.GCM.SealedBox(combined: envelope.sealed),
+              let plain = try? AES.GCM.open(box, using: symmetricKey(secret, ephemeral: ephemeral, enclave: enclaveKey.publicKey)),
+              let secrets = try? JSONDecoder().decode([String: String].self, from: plain)
+        else { return .unusable }
+        return .secrets(secrets)
     }
 
     @discardableResult
     static func set(_ value: String?, for account: String) -> Bool {
-        var secrets = all()
+        // Saving rewrites the whole file, so it must start from what's in it: starting from nothing after a
+        // failed read dropped every other secret (saving the TMDB token signed Dropbox out). Only a file that
+        // can never be opened here is replaced.
+        var secrets: [String: String]
+        switch read() {
+        case let .secrets(stored): secrets = stored
+        case .unusable: secrets = [:]
+        case .unavailable: return false
+        }
         secrets[account] = value
         do {
             let enclaveKey = try existingEnclaveKey() ?? SecureEnclave.P256.KeyAgreement.PrivateKey()

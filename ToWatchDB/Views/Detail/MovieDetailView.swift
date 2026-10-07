@@ -57,6 +57,7 @@ struct MovieDetailView: View {
         }
         .pageTitle(movie.title)
         .focusedSceneValue(\.focusedTitle, isActivePage ? .movie(movie) : nil)
+        .hasOwnRefreshButton()
         .pageToolbar {
             ToolbarItemGroup {
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh() }
@@ -107,7 +108,8 @@ struct MovieDetailView: View {
         var parts = ["Movie"]
         if let date = movie.releaseDate { parts.append(date.yearString) }
         if let runtime = movie.runtime { parts.append(runtime.runtimeString) }
-        if let vote = movie.voteAverage, vote > 0 { parts.append("TMDB \(vote.formatted(.number.precision(.fractionLength(1))))") }
+        if let rating = movie.imdbRating { parts.append("IMDb \(rating.ratingString)") }
+        if let vote = movie.voteAverage, vote > 0 { parts.append("TMDB \(vote.ratingString)") }
         return parts.joined(separator: " · ")
     }
 

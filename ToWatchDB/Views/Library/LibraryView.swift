@@ -8,13 +8,15 @@ struct LibraryView: View {
     @Environment(\.isActivePage) private var isActive
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
-    @Query private var spaces: [Space]
-    @Query private var tags: [MediaTag]
+    // Sorted by the store (localized standard order), not on every body pass.
+    @Query(sort: \Space.name) private var spaces: [Space]
+    @Query(sort: \MediaTag.name) private var tags: [MediaTag]
     @Query private var smartLists: [SmartList]
 
     @State private var scope: LibraryScope
     /// Tab bar layouts show one Library tab with a scope picker instead of separate sidebar entries.
     let allowsScopeChange: Bool
+    @Environment(\.showsTitleInPage) private var showsTitleInPage
     /// Pushed collection lists leave Settings to the root screen.
     let showsSettingsButton: Bool
     @State private var statusFilter: WatchStatus?
@@ -47,7 +49,10 @@ struct LibraryView: View {
     var body: some View {
         let progress = appState.showProgress(allowStale: !isActive)
         let scoped = scopedSortedItems(progress)
-        let genres = genreCounts(scoped)
+        // Cached with the list it counts: typing in the filter field redraws the page on every keystroke.
+        let genres = appState.cached("library-genres-\(scope)-\(String(describing: statusFilter))", allowStale: !isActive) {
+            genreCounts(scoped)
+        }
         let items = filtered(scoped)
         ScrollView {
             #if os(macOS)
@@ -55,16 +60,39 @@ struct LibraryView: View {
                 // Mac top bar: filters live in the page so the section picker in the toolbar never shifts.
                 HStack(spacing: 12) {
                     scopePicker.fixedSize()
+                    // The window title and subtitle stay out of the top bar (see RootView), so the count is here.
+                    Text("\(items.count) title\(items.count == 1 ? "" : "s")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                     Spacer()
-                    statusPicker.pickerStyle(.menu).fixedSize()
-                    genrePicker(genres).pickerStyle(.menu).fixedSize()
-                    sortPicker.pickerStyle(.menu).fixedSize()
+                    // Pull-down menus rather than menu-style pickers: a picker's menu opens over the button,
+                    // shifted so the checked item lines up with it, instead of dropping straight down.
+                    // Neutral like the rest of the header, rather than drawn in the accent color.
+                    Group {
+                        statusMenu
+                        genreMenu(genres)
+                        sortMenu
+                    }
+                    .fixedSize()
+                    .tint(.primary)
                     filterField.textFieldStyle(.roundedBorder).frame(width: 180)
                 }
                 .labelsHidden()
                 .padding(.horizontal)
                 .padding(.top, 8)
                 CollectionShortcuts(showsStats: !AppTab.hasStatsTab)
+            } else if showsTitleInPage {
+                // A space, tag, or smart list pushed from the top bar's chips: the window shows no title.
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(title).font(.title2.bold())
+                    Text("\(items.count) title\(items.count == 1 ? "" : "s")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Spacer()
+                }
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
             #else
             if allowsScopeChange {
@@ -74,8 +102,7 @@ struct LibraryView: View {
             #endif
             if !items.isEmpty {
                 // Fetched once here for every card's context menu, instead of two queries per card.
-                let menuSpaces = spaces.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                let menuTags = tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                let menuSpaces = spaces, menuTags = tags
                 PosterGrid {
                     if sort == .genre {
                         // A section per genre; each title appears once, under its main genre.
@@ -130,31 +157,10 @@ struct LibraryView: View {
                 // glass capsule, and the two shapes don't line up on hover.
                 // Everything in Watched is watched, so there's no status to filter by there.
                 if scope != .watched {
-                    ToolbarItem {
-                        Menu {
-                            statusPicker.pickerStyle(.inline)
-                        } label: {
-                            Text(statusFilter?.label ?? "Any Status")
-                        }
-                        .help("Filter by status")
-                    }
+                    ToolbarItem { statusMenu }
                 }
-                ToolbarItem {
-                    Menu {
-                        genrePicker(genres).pickerStyle(.inline)
-                    } label: {
-                        Text(genreFilter ?? "Any Genre")
-                    }
-                    .help("Filter by genre")
-                }
-                ToolbarItem {
-                    Menu {
-                        sortPicker.pickerStyle(.inline)
-                    } label: {
-                        Text(sort.label)
-                    }
-                    .help("Sort")
-                }
+                ToolbarItem { genreMenu(genres) }
+                ToolbarItem { sortMenu }
                 // A plain field rather than `.searchable`: only the visible page adds it (see PageHost), and
                 // the toolbar never ends up empty, which made macOS collapse it and shift the whole window.
                 ToolbarItem {
@@ -228,6 +234,38 @@ struct LibraryView: View {
         }
         .pickerStyle(.segmented)
     }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var statusMenu: some View {
+        if scope != .watched {
+            Menu {
+                statusPicker.pickerStyle(.inline)
+            } label: {
+                Text(statusFilter?.label ?? "Any Status")
+            }
+            .help("Filter by status")
+        }
+    }
+
+    private func genreMenu(_ genres: [(name: String, count: Int)]) -> some View {
+        Menu {
+            genrePicker(genres).pickerStyle(.inline)
+        } label: {
+            Text(genreFilter ?? "Any Genre")
+        }
+        .help("Filter by genre")
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            sortPicker.pickerStyle(.inline)
+        } label: {
+            Text(sort.label)
+        }
+        .help("Sort")
+    }
+    #endif
 
     @ViewBuilder
     private var statusPicker: some View {
@@ -455,6 +493,9 @@ struct LibraryPosterCard: View {
         VStack(alignment: .leading, spacing: 6) {
             PosterImage(path: item.posterPath)
                 .overlay(alignment: .topTrailing) { StatusBadge(status: status).padding(6) }
+                .overlay(alignment: .topLeading) {
+                    if let rating = item.imdbRating { IMDbBadge(rating: rating).padding(6) }
+                }
                 .overlay(alignment: .bottom) {
                     if let progress, status == .watching {
                         ProgressView(value: progress.fraction)

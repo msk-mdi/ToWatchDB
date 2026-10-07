@@ -68,7 +68,7 @@ public extension TVShow {
     func nextEpisodeToAir(asOf now: Date = .now) -> Episode? {
         var next: Episode?
         forEachRegularEpisode { episode in
-            guard let airDate = episode.airDate, airDate > now else { return }
+            guard episode.airDate != nil, !episode.hasAired(asOf: now) else { return }
             if next.map({ episode.airsBefore($0) }) ?? true { next = episode }
         }
         return next

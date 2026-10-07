@@ -16,6 +16,8 @@ struct ListImportSheet: View {
 
     @State private var mark: ListImportMark = .none
     @State private var phase: Phase = .ready
+    /// Shown by this sheet: the app's error alert is on the main window, which may be behind Settings.
+    @State private var errorMessage: String?
 
     private enum Phase {
         case ready
@@ -35,6 +37,11 @@ struct ListImportSheet: View {
             .formStyle(.grouped)
             .navigationTitle("Import List")
             .toolbar { toolbar }
+        }
+        .alert("Couldn't Import the List", isPresented: Binding { errorMessage != nil } set: { if !$0 { errorMessage = nil } }) {
+            Button("OK") {}
+        } message: {
+            Text(errorMessage ?? "")
         }
         #if os(macOS)
         .frame(width: 480, height: 440)
@@ -95,6 +102,23 @@ struct ListImportSheet: View {
             LabeledContent("Added", value: result.added.formatted())
             LabeledContent("Already in Library", value: result.alreadyInLibrary.formatted())
             LabeledContent("Not Found", value: result.notFound.count.formatted())
+            if result.duplicates > 0 {
+                LabeledContent("Listed Twice", value: result.duplicates.formatted())
+            }
+            if !result.failed.isEmpty {
+                LabeledContent("Couldn't Reach TMDB", value: result.failed.count.formatted())
+            }
+        }
+        if !result.failed.isEmpty {
+            Section {
+                ForEach(result.failed) { entry in
+                    LabeledContent(entry.label, value: "Line \(entry.line)")
+                }
+            } header: {
+                Text("Couldn't Reach TMDB")
+            } footer: {
+                Text("\(result.failureReason.map { $0 + " " } ?? "")Import the list again later to add these: titles already added aren't duplicated.")
+            }
         }
         if !result.notFound.isEmpty {
             Section {
@@ -135,8 +159,8 @@ struct ListImportSheet: View {
                 }
                 phase = .finished(result)
             } catch {
-                appState.errorMessage = error.localizedDescription
-                dismiss()
+                phase = .ready
+                errorMessage = error.localizedDescription
             }
         }
     }

@@ -10,7 +10,8 @@ struct NextToWatchView: View {
 
     var body: some View {
         // Hidden (kept alive on Mac): show the last queue instead of recomputing after every save.
-        let queue = appState.cached("next-to-watch", allowStale: !isActive) {
+        // Keyed by day: an episode airing today joins the queue after midnight, not at the next save.
+        let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: !isActive) {
             Self.queue(shows, progress: appState.showProgress())
         }
 
@@ -19,13 +20,18 @@ struct NextToWatchView: View {
                 ContentUnavailableView("You're All Caught Up", systemImage: "checkmark.seal",
                                        description: Text("There are no episodes left to watch."))
             } else {
-                List(queue, id: \.show.persistentModelID) { entry in
-                    NextEpisodeRow(show: entry.show, episode: entry.episode, progress: entry.progress)
+                RowList {
+                    ForEach(queue, id: \.show.persistentModelID) { entry in
+                        NextEpisodeRow(show: entry.show, episode: entry.episode, progress: entry.progress)
+                            .rowListRow()
+                    }
                 }
             }
         }
         .pageTitle("Next to Watch")
-        .pageToolbar {
+        #if os(iOS)
+        // On Mac the window has the Refresh button (see RootView).
+        .toolbar {
             ToolbarItem {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await appState.refreshLibrary(force: true) }
@@ -33,6 +39,7 @@ struct NextToWatchView: View {
                 .disabled(appState.isRefreshing)
             }
         }
+        #endif
     }
 
     private struct Entry {
@@ -87,8 +94,19 @@ private struct NextEpisodeRow: View {
                             .frame(maxWidth: 240)
                     }
                 }
+                #if os(macOS)
+                // The whole highlighted row opens the show, not just its text and poster.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+                #endif
             }
+            #if os(macOS)
+            // Outside a List, a link draws as a bordered button.
+            .buttonStyle(.plain)
+            #endif
+            #if os(iOS)
             Spacer()
+            #endif
             Button {
                 markWatched()
             } label: {

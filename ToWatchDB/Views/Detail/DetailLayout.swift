@@ -92,11 +92,30 @@ struct DetailLayout<Actions: View, Extra: View>: View {
         .ignoresSafeArea(edges: .top)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        // The backdrop runs up under a bare Back button: no bar, no title (the header already shows it).
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .principal) { Text(verbatim: "").accessibilityHidden(true) }
+        }
+        .modifier(HiddenTopScrollEdge())
         #endif
     }
 
     private var horizontalPadding: CGFloat { isCompact ? 16 : 24 }
 }
+
+#if os(iOS)
+/// iOS 26 fades content under the navigation bar; the detail page's backdrop should go right to the top.
+private struct HiddenTopScrollEdge: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            content
+        }
+    }
+}
+#endif
 
 /// Detail actions. Mac and iPad: one row. iPhone: a full-width primary button, equal-width toggles with the
 /// icon above the label, and the rating on its own line, like Apple's own apps (instead of a squeezed row).

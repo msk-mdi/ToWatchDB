@@ -366,6 +366,13 @@ from intents to `RootView`.
 visited pages alive in a `ZStack` and flips their opacity, the way a native tab view does. It cut revisits to
 about 30–110 ms.
 
+What a switch still costs is mostly the window toolbar (§7, item 13): changing its items makes AppKit rebuild
+the keyboard loop of the whole window, hidden pages included. So pages that would each add a Refresh button
+share the window's one instead (`windowRefreshButton` in `RootView.swift`). A title's page has its own Refresh,
+so it marks itself with `.hasOwnRefreshButton()` and the window's hides while it shows; other pushed pages
+(lists, Stats, TMDB previews) keep the window's. In the Mac top bar the window shows no title, so pages read
+`\.showsTitleInPage` and name themselves (a pushed space, tag, or smart list shows a header).
+
 Only the root of each page is kept: a page that's hidden is popped back to its root. Every stack with a
 pushed detail adds a Back button to the window's single toolbar, and AppKit crashes on a second one
 (`NSToolbar already contains an item with the identifier com.apple.SwiftUI.navigationStack.back`).
@@ -387,7 +394,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 
 | File | Screen |
 |---|---|
-| `Discover/DiscoverView.swift` | Trending movies and shows in horizontal shelves, served from `appState.trending`. Has a Refresh button. |
+| `Discover/DiscoverView.swift` | Trending movies and shows in horizontal shelves, served from `appState.trending` (`loadTrending(force:)`). The window's Refresh button reloads them on Mac; the page has its own on iOS. |
 | `Discover/SearchView.swift` | Searches TMDB (300 ms debounce) with a Movies/TV picker. The field gets focus when the page opens. |
 | `Discover/RemotePosterCard.swift` | A result card with a quick "+" add button, plus `PosterGrid` (an adaptive `LazyVGrid`) |
 | `Discover/MediaSummary.swift` | `MediaSummary`, a TMDB result that may not be in the library yet, and `LibraryIDs` |
@@ -418,6 +425,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 | `Components/PosterImage.swift` | `PosterImage`, a 2:3 poster with a placeholder, and `BackdropImage` |
 | `Components/EmptyState.swift` | `.centeredEmptyState(isShown) { … }`. Every empty message is centered on the page, even over a scroll view with a header. |
 | `Components/PageHost.swift` | See §5.4 |
+| `Components/RowList.swift` | `RowList`, `.rowListRow()`, `RowListHeader`: rows in a `List` on iOS, a lazy stack on macOS (§7, item 14) |
 | `Components/TitleReference.swift` | `TitleReference`, a `Transferable` title pointer. Also `titleInteractions` (drag, and lift on hover), `OpenInNewWindowButton`, and `TitleWindow`. |
 | `Components/StatusBadge.swift` | Status glyphs, `Chip`, and formatting helpers (`yearString`, `tmdbDayString`, `runtimeString`) |
 | `Components/RatingView.swift` | Five-star control with accessibility actions |
@@ -486,13 +494,19 @@ the local date.
   file's value is taken. Something in the base but missing on one side was deleted there (deletion beats an
   edit). With no base (first sync) nothing is deleted and sides combine like `importBackup`. Seasons and
   episodes are metadata, so they're never deleted by a merge. Same-name tags settle on the smaller UUID.
-  `applySyncedBackup` then makes the store match the merge exactly, writing only real changes.
+  `applySyncedBackup` then makes the store match the merge exactly, writing only real changes. `sameContent`
+  decides whether to upload by comparing only what the user owns (titles, watch data, ratings, notes,
+  collections), not TMDB or IMDb details, which each device refreshes at its own times. An empty library whose
+  base had 5 or more titles merges as a first sync (`usableBase`), so a lost store can't empty the file.
 - **App (`Sync/`):** `DropboxClient` does OAuth with PKCE (redirect `db-<app key>://2/token`, caught by
   `WebAuthenticationSession`), download, and upload with the file's `rev`, so a concurrent write from another
   device comes back as a conflict and the sync re-merges. `DropboxSync` keeps the refresh token in `SecretStore`
-  and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`.
+  and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`. After applying
+  a downloaded file it saves that file as the base, so a retry after a conflict merges against it. Unsaved
+  changes from a batch (list import, refresh) are saved before applying, so the merge can't drop them.
 - **When:** `AppState.syncWithDropbox` runs when the app becomes active (at most once a minute), when it goes to
-  the background with unsynced changes, 5 s after the last save, and from Settings or Library ▸ Sync with
+  the background with unsynced changes (inside a background task on iOS), 5 s after the last save (from
+  `AppState`'s save observer, so it works with the main window closed), and from Settings or Library ▸ Sync with
   Dropbox. In-memory (sample data) runs never sync.
 - **Deleted while open:** a sync can delete the title on screen, so the detail pages check `modelContext == nil`.
 
@@ -563,6 +577,15 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     save redraws each open page. `apply` only writes episode and season fields that changed.
 11. **One download per image.** `ImageCache` shares in-flight downloads between views showing the same URL.
 12. **Detail responses are cached for an hour** (`appState.cachedResponse`): Where to Watch and TMDB previews.
+13. **Keep the Mac toolbar still across page switches.** When a switch adds or removes a toolbar item, AppKit
+    re-lays out the toolbar and recalculates the key view loop of the whole window, hidden `PageHost` pages
+    included: about 15–25 ms per switch, which froze the top bar's animation. Discover, Next to Watch,
+    Upcoming, Library, Stats, and Organize share one window-level Refresh button (`windowRefreshButton`)
+    rather than adding their own. The top bar's segmented control costs about 20 ms more when its selection
+    changes, and only on mouse-up.
+14. **No `List` for plain row pages on Mac.** A Mac `List` is an `NSTableView`; showing it (Next to Watch,
+    Upcoming) cost about 20 ms per switch, and its rows about as much again. `RowList` uses a lazy stack on
+    macOS and keeps `List` (and swipe actions) on iOS.
 
 To measure page switches, see §9.
 
@@ -571,9 +594,10 @@ To measure page switches, see §9.
 ## 8. Rules and gotchas
 
 - **Every macOS page must have at least one toolbar item.** With an empty toolbar, macOS collapses it and the
-  whole window (traffic lights, sidebar, title) jumps when you switch to that page. This is why Upcoming,
-  Discover, and Organize have Refresh or Add buttons, and why Library's filters are toolbar items in the
-  sidebar layout.
+  whole window (traffic lights, sidebar, title) jumps when you switch to that page. The window's Refresh button
+  covers every page but Search, which has its search field.
+- **Don't add per-page toolbar items on Mac without need.** Each one that comes and goes with its page makes
+  the switch stall (§7, item 13). Prefer the page itself, or a window-level item that stays put.
 - **Inside pages hosted by `PageHost`, use `pageTitle` / `pageToolbar`** (§5.4). A raw `.toolbar` or
   `.navigationTitle` on a page shows up even while the page is hidden.
 - **App-wide requests are claimed by one window.**
@@ -583,6 +607,10 @@ To measure page switches, see §9.
   - They read the binding rather than the `onChange` value, so a second window sees the request is already taken.
 - **TMDB dates are UTC days; user dates are local.** Don't format a release date with the local time zone, or
   it can show a day early. Don't write a watch date as a UTC day.
+- **"Today" is the user's local day.** Compare TMDB dates against `TMDBDate.today(now)` (the local date as a UTC
+  midnight), not against `now` or the UTC day; `hasAired`, `isReleased` and `UpcomingService` already do.
+- **Check `isLive` after an `await` before writing to a model.** The user or a Dropbox sync may have deleted it
+  meanwhile, and SwiftData can trap on a write to a deleted model.
 - **All writes go through `LibraryService`.** Writing to models directly skips the save and the side-effect
   rules.
 - **Never use `Color.accentColor` in views.** Use `.tint` or `\.themeColor`, so the user's color applies.
@@ -627,6 +655,7 @@ Tests keep their `ModelContainer`s alive (`liveContainers`). A context doesn't r
 | `-UISkipSeed YES` | With the above: keeps the library empty, to check empty states |
 | `-UISnapshotDir <dir>` | macOS: seeds, visits every page, writes `<page>.png` plus a `.wid` window number per page, then quits |
 | `-UISnapshotSwitchOnly YES` | With `-UISnapshotDir`: only switches pages (with signposts), for profiling |
+| `-UIClickBench YES` | macOS, with `-UISeedSampleData YES -navigationLayout topBar`: clicks the top bar with real mouse events, records every display frame after each click, writes the worst frame gaps to `<container>/tmp/clickbench.txt`, then quits (`App/ClickBench.swift`). Add `-UIClickBenchDirect YES` to set the tab in code instead. |
 | `-navigationLayout sidebar\|topBar`, `-accentColor <name>`, `-appIcon <name>` | Override the `@AppStorage` settings for one run |
 
 ### Scripts
@@ -642,7 +671,18 @@ Tests keep their `ModelContainer`s alive (`liveContainers`). A context doesn't r
     -UISnapshotDir ~/Library/Containers/com.mehdi.towatchdb/Data/tmp/snap -UISnapshotSwitchOnly YES
   ```
 
-  The "Switch" signposts (Points of Interest) mark each page change.
+  The "Switch" signposts (Points of Interest) mark each page change. The window must be in front, or AppKit
+  skips drawing it and the trace shows no work: launch with `open -n -a …` and attach with
+  `xctrace record --attach <pid>`.
+- **Measuring stalls as the user sees them** (worst frame gap per click; a smooth frame at 120 Hz is 8 ms):
+
+  ```bash
+  open -n -W -a "$PWD/build/DerivedData/Build/Products/Debug/ToWatchDB.app" --args \
+    -UISeedSampleData YES -navigationLayout topBar -UIClickBench YES
+  cat ~/Library/Containers/com.mehdi.towatchdb/Data/tmp/clickbench.txt
+  ```
+
+  Results vary by ±15 ms between runs: compare builds by running them alternately.
 - **iOS Simulator:**
 
   ```bash
@@ -657,8 +697,8 @@ Tests keep their `ModelContainer`s alive (`liveContainers`). A context doesn't r
 1. Add a case to `AppTab`.
 2. Add a `SidebarRow` in `RootView.sidebarRows`.
 3. Add a branch in `RootView.screen(for:)`.
-4. In the page, use `.pageTitle` and `.pageToolbar` with at least one toolbar item, and
-   `.centeredEmptyState` for its empty state.
+4. In the page, use `.pageTitle`, `.pageToolbar` only for items the page really needs (the window's Refresh
+   button already keeps the Mac toolbar from being empty), and `.centeredEmptyState` for its empty state.
 5. If it isn't a tab in tab-bar layouts, decide how `RootView.open(_:)` reaches it (sheet or Library scope).
 
 **Add a field to a model.**

@@ -37,6 +37,22 @@ struct StatusBadge: View {
     }
 }
 
+/// IMDb rating drawn over a poster corner, in IMDb's yellow.
+struct IMDbBadge: View {
+    let rating: Double
+
+    var body: some View {
+        Text(rating.ratingString)
+            .font(.caption.weight(.bold).monospacedDigit())
+            .foregroundStyle(.black)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color(red: 0.96, green: 0.77, blue: 0.09), in: .rect(cornerRadius: 4))
+            .shadow(radius: 2)
+            .accessibilityLabel("IMDb rating \(rating.ratingString)")
+    }
+}
+
 /// Chip used for genres and metadata.
 struct Chip: View {
     let text: String
@@ -56,6 +72,11 @@ extension Date {
     var tmdbDayString: String {
         formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: .gmt))
     }
+}
+
+extension Double {
+    /// 8.82 → "8.8"
+    var ratingString: String { formatted(.number.precision(.fractionLength(1))) }
 }
 
 extension Int {

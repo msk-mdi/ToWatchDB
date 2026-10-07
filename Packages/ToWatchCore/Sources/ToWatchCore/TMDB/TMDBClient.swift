@@ -25,10 +25,18 @@ public struct TMDBClient: Sendable {
     public let language: String
     private let session: URLSession
 
-    public init(token: String, language: String = Locale.current.identifier(.bcp47), session: URLSession = .shared) {
+    public init(token: String, language: String = TMDBClient.language(for: .current), session: URLSession = .shared) {
         self.token = token
         self.language = language
         self.session = session
+    }
+
+    /// TMDB's `language` for a locale: "fr-CA", or just "fr". A full BCP 47 tag can carry extensions
+    /// ("en-US-u-ca-buddhist") or a numeric region ("es-419") that TMDB doesn't take.
+    public static func language(for locale: Locale) -> String {
+        let language = locale.language.languageCode?.identifier ?? "en"
+        guard let region = locale.region?.identifier, region.count == 2, region.allSatisfy(\.isLetter) else { return language }
+        return "\(language)-\(region)"
     }
 
     public static let decoder: JSONDecoder = {
@@ -65,7 +73,12 @@ public struct TMDBClient: Sendable {
     }
 
     public func tvShow(id: Int) async throws -> TMDBTVDetail {
-        try await get("tv/\(id)", ["append_to_response": "credits,videos", "include_video_language": videoLanguages])
+        try await get("tv/\(id)", ["append_to_response": "credits,videos,external_ids", "include_video_language": videoLanguages])
+    }
+
+    /// A show's IDs on other sites, such as IMDb.
+    public func tvExternalIDs(id: Int) async throws -> TMDBExternalIDs {
+        try await get("tv/\(id)/external_ids")
     }
 
     /// Videos are filtered by `language`, and most trailers exist only in English: without a fallback,
@@ -89,11 +102,22 @@ public struct TMDBClient: Sendable {
     public func seasons(of detail: TMDBTVDetail) async throws -> [TMDBSeasonDetail] {
         let id = detail.id
         let numbers = (detail.seasons ?? []).map(\.seasonNumber)
+        // At most 6 at a time: a long-running show has dozens of seasons, and a burst of requests that size
+        // (times the titles refreshed together) can hit TMDB's rate limit, which fails the whole show.
         let seasons = try await withThrowingTaskGroup(of: TMDBSeasonDetail.self) { group in
-            for number in numbers {
+            var pending = numbers.makeIterator()
+            var seasons: [TMDBSeasonDetail] = []
+            for _ in 0..<6 {
+                guard let number = pending.next() else { break }
                 group.addTask { try await self.season(showID: id, seasonNumber: number) }
             }
-            return try await group.reduce(into: []) { $0.append($1) }
+            while let season = try await group.next() {
+                seasons.append(season)
+                if let number = pending.next() {
+                    group.addTask { try await self.season(showID: id, seasonNumber: number) }
+                }
+            }
+            return seasons
         }
         return seasons.sorted { $0.seasonNumber < $1.seasonNumber }
     }
@@ -107,12 +131,20 @@ public struct TMDBClient: Sendable {
         components.queryItems = (query.merging(["language": language]) { current, _ in current })
             .sorted { $0.key < $1.key }
             .map { URLQueryItem(name: $0.key, value: $0.value) }
+        // URLComponents leaves "+" as is, and servers read it as a space: "C++" searched for "C  ".
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacing("+", with: "%2B")
 
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await session.data(for: request)
+        var (data, response) = try await session.data(for: request)
+        // Rate limited: wait as asked (briefly) and try once more, rather than failing a whole refresh or import.
+        if let http = response as? HTTPURLResponse, http.statusCode == 429 {
+            let wait = http.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 1
+            try await Task.sleep(for: .seconds(min(max(wait, 0.5), 10)))
+            (data, response) = try await session.data(for: request)
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let body = try? Self.decoder.decode(TMDBErrorBody.self, from: data)

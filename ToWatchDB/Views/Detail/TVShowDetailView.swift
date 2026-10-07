@@ -56,7 +56,8 @@ struct TVShowDetailView: View {
                 } trailing: {
                     RatingView(rating: show.userRating) { appState.library.setRating(show, $0) }
                 }
-                ExternalLinks(kind: .tv, tmdbID: show.tmdbID, trailerKey: show.trailerKey, homepage: show.homepage)
+                ExternalLinks(kind: .tv, tmdbID: show.tmdbID, trailerKey: show.trailerKey, imdbID: show.imdbID,
+                              homepage: show.homepage)
             }
         } extra: {
             WhereToWatchSection(kind: .tv, tmdbID: show.tmdbID)
@@ -66,6 +67,7 @@ struct TVShowDetailView: View {
         }
         .pageTitle(show.name)
         .focusedSceneValue(\.focusedTitle, isActivePage ? .show(show) : nil)
+        .hasOwnRefreshButton()
         .pageToolbar {
             ToolbarItemGroup {
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh() }
@@ -200,7 +202,8 @@ struct TVShowDetailView: View {
             parts.append(end.isEmpty || end == first.yearString ? first.yearString : "\(first.yearString)–\(end)")
         }
         if let seasons = show.numberOfSeasons { parts.append("\(seasons) season\(seasons == 1 ? "" : "s")") }
-        if let vote = show.voteAverage, vote > 0 { parts.append("TMDB \(vote.formatted(.number.precision(.fractionLength(1))))") }
+        if let rating = show.imdbRating { parts.append("IMDb \(rating.ratingString)") }
+        if let vote = show.voteAverage, vote > 0 { parts.append("TMDB \(vote.ratingString)") }
         return parts.joined(separator: " · ")
     }
 

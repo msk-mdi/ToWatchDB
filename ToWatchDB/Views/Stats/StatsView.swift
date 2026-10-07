@@ -10,15 +10,19 @@ struct StatsView: View {
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
-    @State private var period: StatsPeriod = .year(Calendar.current.component(.year, from: .now))
+    @State private var period: StatsPeriod = .year(StatsPeriod.calendar.component(.year, from: .now))
     @State private var comparedYear: Int?
     @State private var isShowingReview = false
 
+    /// A period's stats, cached per day: a period like "last 30 days" moves with the date.
+    static func cacheKey(_ period: StatsPeriod) -> String {
+        "stats-\(period.label)-\(Calendar.current.startOfDay(for: .now))"
+    }
+
     var body: some View {
         // Cached until the library changes, so coming back to Stats doesn't recompute everything.
-        let day = Calendar.current.startOfDay(for: .now)
         // A hidden page (kept alive on Mac) shows its last stats instead of recomputing after every save.
-        let stats = appState.cached("stats-\(period.label)-\(day)", allowStale: !isActive) {
+        let stats = appState.cached(Self.cacheKey(period), allowStale: !isActive) {
             StatsService.stats(movies: movies, shows: shows, period: period)
         }
         let years = appState.cached("watch-years", allowStale: !isActive) { StatsService.watchYears(movies: movies, shows: shows) }
@@ -106,7 +110,7 @@ struct StatsView: View {
 
     /// The current year is always offered, plus every year with watch history.
     private func yearPeriods(_ years: [Int]) -> [StatsPeriod] {
-        let current = Calendar.current.component(.year, from: .now)
+        let current = StatsPeriod.calendar.component(.year, from: .now)
         return Set(years + [current]).sorted(by: >).map(StatsPeriod.year)
     }
 
@@ -385,7 +389,8 @@ private struct CompareSection: View {
 
     var body: some View {
         let other = comparedYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first { $0 < year } ?? years[0]
-        let previous = appState.cached("stats-\(other)", allowStale: !isActive) {
+        // The page's key: comparing against a year already shown (or showing the compared year) reuses its stats.
+        let previous = appState.cached(StatsView.cacheKey(.year(other)), allowStale: !isActive) {
             StatsService.stats(movies: movies, shows: shows, period: .year(other))
         }
 

@@ -5,6 +5,9 @@ import ToWatchCore
 @main
 struct ToWatchDBApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
+    #endif
     #if DEBUG && os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
@@ -46,9 +49,6 @@ struct ToWatchDBApp: App {
                         ToWatchShortcuts.updateAppShortcutParameters()
                     }
                     appState.syncWithDropbox(for: phase)
-                }
-                .onChange(of: appState.libraryVersion) { _, version in
-                    if version != appState.dropbox.syncedVersion { appState.syncWithDropbox(after: .seconds(5)) }
                 }
                 .onChange(of: appIcon, initial: true) { _, icon in icon.applyAsAppIcon() }
         }
@@ -158,7 +158,14 @@ struct AppCommands: Commands {
     /// On macOS the app keeps running with its main window closed; reopen it so the command isn't lost.
     private func inMainWindow(_ action: () -> Void) {
         #if os(macOS)
-        if appState.mainWindowCount == 0 { openWindow(id: Self.mainWindowID) }
+        let isMainWindow = { (window: NSWindow) in window.identifier?.rawValue.hasPrefix("\(Self.mainWindowID)-") == true }
+        if appState.mainWindowCount == 0 {
+            openWindow(id: Self.mainWindowID)
+        } else if NSApp.keyWindow.map(isMainWindow) != true, let window = NSApp.windows.first(where: isMainWindow) {
+            // Requests wait for an active window that presents them, and the Settings window doesn't: from
+            // there, a command did nothing until the main window was clicked.
+            window.makeKeyAndOrderFront(nil)
+        }
         #endif
         action()
     }
@@ -198,3 +205,21 @@ struct AppCommands: Commands {
         }
     }
 }
+
+#if os(macOS)
+/// Syncs unsynced edits before quitting. A Mac app never goes to the background, so without this an edit made
+/// just before quitting reached other devices only after the next launch.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor static weak var appState: AppState?
+
+    @MainActor
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let appState = Self.appState, appState.hasUnsyncedChanges else { return .terminateNow }
+        Task {
+            await appState.syncBeforeQuit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+#endif

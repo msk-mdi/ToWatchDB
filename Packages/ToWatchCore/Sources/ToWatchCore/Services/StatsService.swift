@@ -19,8 +19,20 @@ public enum StatsPeriod: Hashable, Sendable {
         }
     }
 
+    /// The calendar stats count in: the user's time zone, week start, and locale, but always Gregorian years.
+    /// With an era calendar (Japanese, Buddhist) the year numbers were era years, so "2026" picked the wrong span.
+    public static var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        let current = Calendar.current
+        calendar.timeZone = current.timeZone
+        calendar.locale = current.locale
+        calendar.firstWeekday = current.firstWeekday
+        calendar.minimumDaysInFirstWeek = current.minimumDaysInFirstWeek
+        return calendar
+    }
+
     /// `nil` means unbounded (all time).
-    public func interval(now: Date = .now, calendar: Calendar = .current) -> DateInterval? {
+    public func interval(now: Date = .now, calendar: Calendar = StatsPeriod.calendar) -> DateInterval? {
         switch self {
         case .allTime:
             return nil
@@ -83,7 +95,7 @@ public struct WatchStats: Hashable, Sendable {
 public enum StatsService {
     @MainActor
     public static func stats(movies: [Movie], shows: [TVShow], period: StatsPeriod,
-                             now: Date = .now, calendar: Calendar = .current, topCount: Int = 10) -> WatchStats {
+                             now: Date = .now, calendar: Calendar = StatsPeriod.calendar, topCount: Int = 10) -> WatchStats {
         let interval = period.interval(now: now, calendar: calendar)
         let inPeriod: (Date?) -> Bool = { date in
             guard let interval else { return true }
@@ -143,7 +155,8 @@ public enum StatsService {
         }, limit: topCount)
         stats.posterPaths = recentPosters.sorted { $0.0 > $1.0 }.map(\.1)
 
-        let bucketRange = interval ?? events.map(\.date).min().map { DateInterval(start: $0, end: now) }
+        // `min`: a watch dated after `now` (a device whose clock was ahead) would make the interval trap.
+        let bucketRange = interval ?? events.map(\.date).min().map { DateInterval(start: min($0, now), end: now) }
         if let bucketRange {
             stats.granularity = granularity(for: bucketRange)
             stats.activity = buckets(events, over: bucketRange, granularity: stats.granularity, calendar: calendar)
@@ -153,7 +166,7 @@ public enum StatsService {
 
     /// Years that have at least one dated watch, newest first.
     @MainActor
-    public static func watchYears(movies: [Movie], shows: [TVShow], calendar: Calendar = .current) -> [Int] {
+    public static func watchYears(movies: [Movie], shows: [TVShow], calendar: Calendar = StatsPeriod.calendar) -> [Int] {
         let dates = movies.compactMap(\.watchedDate)
             + shows.flatMap { ($0.seasons ?? []).flatMap { $0.episodes ?? [] } }.compactMap(\.watchedDate)
         return Set(dates.map { calendar.component(.year, from: $0) }).sorted(by: >)

@@ -13,7 +13,7 @@ struct UpcomingView: View {
         // the page after each save); a hidden page keeps the last list.
         let (items, days) = appState.cached("upcoming-\(UpcomingService.startOfToday(now))", allowStale: !isActive) {
             let items = UpcomingService.upcoming(in: appState.container.mainContext, now: now)
-            let days = Dictionary(grouping: items) { $0.date.map { UpcomingService.startOfToday($0) } ?? .distantFuture }
+            let days = Dictionary(grouping: items) { $0.date.map { TMDBDate.day(of: $0) } ?? .distantFuture }
                 .sorted { $0.key < $1.key }
             return (items, days)
         }
@@ -23,12 +23,12 @@ struct UpcomingView: View {
                 ContentUnavailableView("Nothing Upcoming", systemImage: "calendar",
                                        description: Text("New episodes and releases from your library show up here."))
             } else {
-                List {
+                RowList {
                     ForEach(days, id: \.key) { day, dayItems in
                         Section {
-                            ForEach(dayItems) { UpcomingRow(item: $0) }
+                            ForEach(dayItems) { UpcomingRow(item: $0).rowListRow() }
                         } header: {
-                            HStack {
+                            RowListHeader {
                                 Text(day.tmdbDayString)
                                 Spacer()
                                 Text(relative(day, now: now)).foregroundStyle(.secondary)
@@ -39,9 +39,9 @@ struct UpcomingView: View {
             }
         }
         .pageTitle("Upcoming")
-        .pageToolbar {
-            // Also keeps the Mac toolbar from collapsing: a List page with an empty toolbar
-            // made the whole window shift up when you switched to it.
+        #if os(iOS)
+        // On Mac the window has the Refresh button (see RootView).
+        .toolbar {
             ToolbarItem {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await appState.refreshLibrary(force: true) }
@@ -49,6 +49,7 @@ struct UpcomingView: View {
                 .disabled(appState.isRefreshing)
             }
         }
+        #endif
     }
 
     private func relative(_ day: Date, now: Date) -> String {
@@ -64,6 +65,15 @@ private struct UpcomingRow: View {
     let item: UpcomingItem
 
     var body: some View {
+        links
+            #if os(macOS)
+            // Outside a List, a link draws as a bordered button.
+            .buttonStyle(.plain)
+            #endif
+    }
+
+    @ViewBuilder
+    private var links: some View {
         switch item {
         case let .movie(movie):
             NavigationLink(value: movie) {
@@ -91,5 +101,9 @@ private struct UpcomingRow: View {
             }
         }
         .padding(.vertical, 2)
+        #if os(macOS)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        #endif
     }
 }

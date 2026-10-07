@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+import os
 #else
 import UIKit
 #endif
@@ -96,5 +97,39 @@ private struct ThemeModifier: ViewModifier {
         content
             .tint(accent.color)
             .environment(\.themeColor, accent.color)
+            #if os(macOS)
+            .onChange(of: accent, initial: true) { AppKitAccent.apply(accent) }
+            #endif
     }
 }
+
+#if os(macOS)
+/// AppKit draws some accents itself, like a menu's highlighted row or a pressed pop-up button, with
+/// `NSColor.controlAccentColor`. That's the asset catalog's coral whatever `.tint` says, so this points it
+/// at the theme color instead. Coral leaves AppKit's own value alone.
+enum AppKitAccent {
+    /// Behind a lock: the getter can be called from AppKit's render threads while the main thread swaps it.
+    private static let override = OSAllocatedUnfairLock<NSColor?>(uncheckedState: nil)
+
+    private static let installed: Void = {
+        let selector = #selector(getter: NSColor.controlAccentColor)
+        guard let method = class_getClassMethod(NSColor.self, selector) else { return }
+        typealias Getter = @convention(c) (AnyClass, Selector) -> NSColor
+        let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+        let replacement: @convention(block) (AnyClass) -> NSColor = { type in override.withLockUnchecked { $0 } ?? original(type, selector) }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }()
+
+    @MainActor
+    static func apply(_ theme: ThemeColor) {
+        _ = installed
+        let color = theme == .coral ? nil : NSColor(theme.color)
+        // Every themed window applies its theme as it opens; redraw the app only when the color changes.
+        let changed = override.withLockUnchecked { current in
+            defer { current = color }
+            return current != color
+        }
+        if changed { NotificationCenter.default.post(name: NSColor.systemColorsDidChangeNotification, object: nil) }
+    }
+}
+#endif

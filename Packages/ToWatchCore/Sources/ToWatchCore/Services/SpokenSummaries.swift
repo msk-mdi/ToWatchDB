@@ -3,10 +3,15 @@ import Foundation
 /// Sentences for Siri and Shortcuts results. Kept here, apart from the intents, so they're testable.
 public enum SpokenSummaries {
     public static func nextEpisodes(_ shows: [TVShow], limit: Int = 5, now: Date = .now) -> String {
+        // One walk of each show's episodes, then a sort on the stored dates (the order Next to Watch uses).
         let queue = shows
             .filter { !$0.isAbandoned }
-            .compactMap { show in show.nextEpisodeToWatch(asOf: now).map { (show, $0) } }
-            .sorted { ($0.0.lastWatchedDate ?? .distantPast) > ($1.0.lastWatchedDate ?? .distantPast) }
+            .compactMap { show -> (show: TVShow, episode: Episode, lastWatched: Date)? in
+                let progress = show.progressSummary(asOf: now)
+                return progress.nextEpisode.map { (show, $0, progress.lastWatched ?? .distantPast) }
+            }
+            .sorted { $0.lastWatched > $1.lastWatched }
+            .map { ($0.show, $0.episode) }
         guard !queue.isEmpty else { return "You're all caught up. No episodes left to watch." }
         let items = queue.prefix(limit).map { show, episode in "\(show.name) \(episode.code)" }
         let more = queue.count > limit ? ", and \(queue.count - limit) more" : ""

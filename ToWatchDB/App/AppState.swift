@@ -21,6 +21,8 @@ final class AppState {
     var mainWindowCount = 0
     /// Discover's trending lists, kept across page switches so Discover doesn't refetch and redraw every visit.
     var trending: Trending?
+    /// Why the trending lists couldn't load, if they couldn't.
+    private(set) var trendingError: String?
 
     struct Trending {
         let movies: [MediaSummary]
@@ -44,10 +46,37 @@ final class AppState {
 
     private(set) var tokenOverride: String? = TokenStore.load()
 
+    /// Loads Discover's trending lists, unless fresh ones are cached. Here rather than in Discover so the
+    /// Mac window's Refresh button can reload them.
+    func loadTrending(force: Bool = false) async {
+        guard let client, let token else { return }
+        if !force, trending?.isFresh(token: token, language: language) == true { return }
+        trendingError = nil
+        let language = language, started = Date.now
+        do {
+            async let movies = client.trendingMovies()
+            async let shows = client.trendingTVShows()
+            let loaded = Trending(movies: try await movies.results.map(MediaSummary.init),
+                                  shows: try await shows.results.map(MediaSummary.init),
+                                  token: token, language: language, loadedAt: started)
+            // Two loads can overlap (the page and the Refresh button, or a token or language change). Keep a
+            // result only if it's still for the current settings and no newer one landed meanwhile.
+            guard token == self.token, language == self.language,
+                  (trending.map { $0.loadedAt <= started } ?? true) else { return }
+            trending = loaded
+        } catch is CancellationError {
+        } catch {
+            trendingError = error.localizedDescription
+        }
+    }
+
     let dropbox = DropboxSync()
     /// Sample-data and snapshot runs use a throwaway library, which must never reach Dropbox.
     private let isInMemory: Bool
     @ObservationIgnored private var dropboxDelay: Task<Void, Never>?
+    #if os(iOS)
+    @ObservationIgnored private var backgroundSync: UIBackgroundTaskIdentifier = .invalid
+    #endif
 
     /// TMDB `language` parameter; empty means follow the system.
     var language: String = UserDefaults.standard.string(forKey: "tmdbLanguage") ?? "" {
@@ -67,6 +96,8 @@ final class AppState {
     /// models, which crash when read, so `allowStale` doesn't serve them.
     @ObservationIgnored private var lastDeletionVersion = 0
     @ObservationIgnored private var derivedCache: [String: (version: Int, value: Any)] = [:]
+    /// The day `derivedCache` was last emptied: many keys include the day, so older entries are never read again.
+    @ObservationIgnored private var derivedCacheDay = Calendar.current.startOfDay(for: .now)
     @ObservationIgnored private var saveObserver: (any NSObjectProtocol)?
 
     init(inMemory: Bool = false) {
@@ -82,9 +113,19 @@ final class AppState {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.libraryVersion += 1
-                if deleted?.isEmpty == false { self.lastDeletionVersion = self.libraryVersion }
+                if deleted?.isEmpty == false {
+                    self.lastDeletionVersion = self.libraryVersion
+                    // Nothing cached before a deletion is served again, and it may hold the deleted models.
+                    self.derivedCache.removeAll()
+                }
+                // Here rather than in a view: on Mac, edits from a title window, Settings, or Siri with the main
+                // window closed weren't synced until it reopened.
+                if self.libraryVersion != self.dropbox.syncedVersion { self.syncWithDropbox(after: .seconds(5)) }
             }
         }
+        #if os(macOS)
+        AppDelegate.appState = self
+        #endif
     }
 
     /// Computes a value derived from the library once per library version. Stats walk every episode,
@@ -96,6 +137,11 @@ final class AppState {
     /// it so a save doesn't make every hidden page recompute; they catch up when they're shown again.
     func cached<T>(_ key: String, allowStale: Bool = false, _ compute: () -> T) -> T {
         let libraryVersion = libraryVersion
+        let today = Calendar.current.startOfDay(for: .now)
+        if today != derivedCacheDay {
+            derivedCache.removeAll()
+            derivedCacheDay = today
+        }
         if let entry = derivedCache[key],
            entry.version == libraryVersion || (allowStale && entry.version >= lastDeletionVersion),
            let value = entry.value as? T {
@@ -128,6 +174,8 @@ final class AppState {
             return value
         }
         let value = try await fetch()
+        // Entries are an hour old at most when read, so older ones only take memory (credits, provider lists).
+        responseCache = responseCache.filter { Date.now.timeIntervalSince($0.value.loadedAt) < 3600 }
         responseCache[key] = (value, .now)
         return value
     }
@@ -143,7 +191,7 @@ final class AppState {
 
     var client: TMDBClient? { SharedLibrary.makeClient(token: token, language: language) }
 
-    var library: LibraryService { LibraryService(context: container.mainContext, client: client) }
+    var library: LibraryService { LibraryService(context: container.mainContext, client: client, imdb: IMDbClient()) }
 
     func setTokenOverride(_ token: String?) {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -182,6 +230,28 @@ final class AppState {
         }
     }
 
+    /// Whether a save hasn't reached Dropbox yet.
+    var hasUnsyncedChanges: Bool { dropbox.isConnected && !isInMemory && libraryVersion != dropbox.syncedVersion }
+
+    /// Syncs before the app quits, waiting at most `timeout`: an edit made just before quitting otherwise waited
+    /// for the next launch to reach other devices.
+    func syncBeforeQuit(timeout: Duration = .seconds(5)) async {
+        dropboxDelay?.cancel()
+        let sync = Task {
+            // A sync already running would only queue another pass and return at once.
+            while dropbox.isSyncing, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
+            if hasUnsyncedChanges, !Task.isCancelled {
+                await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
+            }
+        }
+        let deadline = Task {
+            try? await Task.sleep(for: timeout)
+            sync.cancel()
+        }
+        await sync.value
+        deadline.cancel()
+    }
+
     /// Syncs when the app comes to the front (at most once a minute) and before it goes to the background
     /// if there are unsynced changes.
     func syncWithDropbox(for phase: ScenePhase) {
@@ -191,11 +261,32 @@ final class AppState {
                 syncWithDropbox()
             }
         case .background where libraryVersion != dropbox.syncedVersion:
+            #if os(iOS)
+            // Without a background task, iOS suspends the app mid-upload and the edits wait for the next launch.
+            guard dropbox.isConnected, !isInMemory, backgroundSync == .invalid else { return }
+            dropboxDelay?.cancel()
+            backgroundSync = UIApplication.shared.beginBackgroundTask(withName: "Dropbox Sync") { [weak self] in
+                self?.endBackgroundSync()
+            }
+            Task {
+                await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
+                endBackgroundSync()
+            }
+            #else
             syncWithDropbox()
+            #endif
         default:
             break
         }
     }
+
+    #if os(iOS)
+    private func endBackgroundSync() {
+        guard backgroundSync != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundSync)
+        backgroundSync = .invalid
+    }
+    #endif
 
     /// Picks up new episodes and release-date changes. `force` ignores the 12-hour freshness window.
     func refreshLibrary(force: Bool = false) async {
@@ -203,6 +294,7 @@ final class AppState {
         isRefreshing = true
         defer { isRefreshing = false }
         await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
+        await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400)
     }
 }
 
@@ -225,10 +317,10 @@ enum SharedLibrary {
     static func makeClient(token: String? = TokenStore.load() ?? TokenStore.bundledToken,
                            language: String = UserDefaults.standard.string(forKey: "tmdbLanguage") ?? "") -> TMDBClient? {
         guard let token else { return nil }
-        return TMDBClient(token: token, language: language.isEmpty ? Locale.current.identifier(.bcp47) : language)
+        return TMDBClient(token: token, language: language.isEmpty ? TMDBClient.language(for: .current) : language)
     }
 
-    static var service: LibraryService { LibraryService(context: container.mainContext, client: makeClient()) }
+    static var service: LibraryService { LibraryService(context: container.mainContext, client: makeClient(), imdb: IMDbClient()) }
 
     static var watchRegion: String {
         UserDefaults.standard.string(forKey: "watchRegion") ?? Locale.current.region?.identifier ?? "US"

@@ -34,6 +34,7 @@ private struct RemotePreview: View {
 
     @State private var movie: TMDBMovieDetail?
     @State private var show: TMDBTVDetail?
+    @State private var imdbRating: IMDbRating?
     @State private var isAdding = false
 
     var body: some View {
@@ -90,8 +91,10 @@ private struct RemotePreview: View {
 
     private var links: some View {
         ExternalLinks(kind: summary.kind, tmdbID: summary.tmdbID,
-                      trailerKey: (movie?.videos ?? show?.videos)?.bestTrailerKey, imdbID: movie?.imdbId)
+                      trailerKey: (movie?.videos ?? show?.videos)?.bestTrailerKey, imdbID: imdbID)
     }
+
+    private var imdbID: String? { movie?.imdbId ?? show?.externalIds?.imdbId }
 
     private var isCompact: Bool {
         #if os(iOS)
@@ -106,6 +109,7 @@ private struct RemotePreview: View {
         if let year = summary.date?.yearString { parts.append(year) }
         if let runtime = movie?.runtime, runtime > 0 { parts.append(runtime.runtimeString) }
         if let seasons = show?.numberOfSeasons { parts.append("\(seasons) season\(seasons == 1 ? "" : "s")") }
+        if let imdbRating { parts.append("IMDb \(imdbRating.value.ratingString)") }
         return parts.joined(separator: " · ")
     }
 
@@ -115,6 +119,11 @@ private struct RemotePreview: View {
         switch summary.kind {
         case .movie: movie = try? await appState.cachedResponse("movie-\(id)") { try await client.movie(id: id) }
         case .tv: show = try? await appState.cachedResponse("tv-\(id)") { try await client.tvShow(id: id) }
+        }
+        if let imdbID {
+            imdbRating = try? await appState.cachedResponse("imdb-\(imdbID)") {
+                try await IMDbClient().ratings(for: [imdbID])[imdbID] ?? nil
+            }
         }
     }
 
@@ -126,10 +135,11 @@ private struct RemotePreview: View {
                 switch summary.kind {
                 case .movie:
                     let added = if let movie { library.insertMovie(movie) } else { try await library.addMovie(tmdbID: summary.tmdbID) }
-                    if backlog { library.setBacklog(added, true) }
+                    if backlog, added.isLive { library.setBacklog(added, true) }
+                    if movie != nil { library.refreshIMDbRatingsLater(movies: [added]) }
                 case .tv:
                     let added = if let show { try await library.addShow(show) } else { try await library.addShow(tmdbID: summary.tmdbID) }
-                    if backlog { library.setBacklog(added, true) }
+                    if backlog, added.isLive { library.setBacklog(added, true) }
                 }
             }
             isAdding = false

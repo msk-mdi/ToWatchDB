@@ -21,16 +21,12 @@ public enum UpcomingItem: Identifiable {
 }
 
 public enum UpcomingService {
-    /// Start of the current UTC day. TMDB dates are UTC midnights, so an item dated today counts as upcoming.
+    /// The user's current day as a TMDB date (a UTC midnight), so an item dated today counts as upcoming.
     public static func startOfToday(_ now: Date = .now) -> Date {
-        utcCalendar.startOfDay(for: now)
+        TMDBDate.today(now)
     }
 
-    private static let utcCalendar: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .gmt
-        return calendar
-    }()
+    private static var utcCalendar: Calendar { TMDBDate.utcCalendar }
 
     /// Movies releasing today or later, soonest first.
     public static func upcomingMovies(_ movies: [Movie], now: Date = .now) -> [Movie] {

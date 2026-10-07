@@ -42,7 +42,8 @@ private func insertSeverance(into library: LibraryService) throws -> TVShow {
     return library.insertShow(detail, seasons: [specials, season1, season2])
 }
 
-private let now = date("2026-09-23")
+// Noon UTC, so it falls on Sep 23 in every time zone within ±12 hours: "today" is the local day.
+private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
 
 // MARK: - Decoding
 
@@ -72,6 +73,55 @@ private let now = date("2026-09-23")
     #expect(TMDBDate.parse("") == nil)
     #expect(TMDBDate.parse(nil) == nil)
     #expect(TMDBDate.parse("2022-02-18") == Date(timeIntervalSince1970: 1_645_142_400))
+}
+
+@Test func decodesIMDbRatings() throws {
+    let json = Data(#"""
+    {"data":{"t0":{"ratingsSummary":{"aggregateRating":8.8,"voteCount":2876809}},
+             "t1":{"ratingsSummary":{"aggregateRating":null,"voteCount":0}},"t2":null}}
+    """#.utf8)
+    let ratings = try IMDbClient.decode(json, ids: ["tt1375666", "tt9999999", "tt0000000", "tt0000001"])
+    // Titles IMDb answered for without a rating are explicit `nil`s; one it didn't answer for is left out.
+    #expect(ratings == ["tt1375666": IMDbRating(value: 8.8, votes: 2_876_809), "tt9999999": nil, "tt0000000": nil])
+}
+
+@Test func imdbErrorsDontReadAsMissingRatings() throws {
+    // A rejected or limited query comes back with a 200 status, errors, and no data.
+    let rejected = Data(#"{"errors":[{"message":"Rate limited"}],"data":null}"#.utf8)
+    #expect(throws: (any Error).self) { try IMDbClient.decode(rejected, ids: ["tt1375666"]) }
+    let unscoped = Data(#"{"errors":[{"message":"Too complex"}],"data":{"t0":null}}"#.utf8)
+    #expect(throws: (any Error).self) { try IMDbClient.decode(unscoped, ids: ["tt1375666"]) }
+
+    // A field that failed comes back null like an unknown title; it's left out so its rating is kept.
+    let partial = Data(#"""
+    {"errors":[{"message":"Timeout","path":["t1","ratingsSummary"]}],
+     "data":{"t0":{"ratingsSummary":{"aggregateRating":7.1,"voteCount":10}},"t1":null}}
+    """#.utf8)
+    #expect(try IMDbClient.decode(partial, ids: ["tt1", "tt2"]) == ["tt1": IMDbRating(value: 7.1, votes: 10)])
+}
+
+@Test func todayIsTheUsersLocalDay() throws {
+    let pacific = try #require(TimeZone(identifier: "America/Los_Angeles"))
+    let tokyo = try #require(TimeZone(identifier: "Asia/Tokyo"))
+    // 6 pm on Sep 22 in California is already Sep 23 in UTC; 8 am on Sep 23 in Tokyo is still Sep 22 in UTC.
+    #expect(TMDBDate.today(date("2026-09-23").addingTimeInterval(3600), timeZone: pacific) == date("2026-09-22"))
+    #expect(TMDBDate.today(date("2026-09-22").addingTimeInterval(23 * 3600), timeZone: tokyo) == date("2026-09-23"))
+    #expect(TMDBDate.today(now, timeZone: .gmt) == date("2026-09-23"))
+    #expect(TMDBDate.day(of: date("2026-09-23").addingTimeInterval(3600)) == date("2026-09-23"))
+}
+
+@Test func tmdbLanguageFromLocale() {
+    #expect(TMDBClient.language(for: Locale(identifier: "en_US@calendar=buddhist")) == "en-US")
+    #expect(TMDBClient.language(for: Locale(identifier: "es_419")) == "es")
+    #expect(TMDBClient.language(for: Locale(identifier: "fr")) == "fr")
+}
+
+@Test func imdbQueryOnlyTakesPlainIDs() {
+    #expect(IMDbClient.isValidID("tt1375666"))
+    #expect(!IMDbClient.isValidID("tt"))
+    #expect(!IMDbClient.isValidID("tt1\") { x }"))
+    #expect(!IMDbClient.isValidID("nm0634240"))
+    #expect(IMDbClient.query(for: ["tt1"]) == #"{ t0: title(id: "tt1") { ratingsSummary { aggregateRating voteCount } } }"#)
 }
 
 // MARK: - Library
@@ -177,6 +227,24 @@ private let now = date("2026-09-23")
     #expect(try library.context.fetchCount(FetchDescriptor<Episode>()) == 13)
     #expect(show.regularEpisodes.first?.isWatched == true)
     #expect(show.regularEpisodes.first?.watchedDate == now)
+}
+
+@MainActor @Test func refreshRemovesEpisodesTMDBDropped() throws {
+    let library = try makeLibrary()
+    let show = try insertSeverance(into: library)
+    let detail: TMDBTVDetail = try fixture("tv_severance")
+    let season1: TMDBSeasonDetail = try fixture("season_1")
+    let s2e1 = try #require(show.regularEpisodes.first { $0.code == "S02E01" })
+    library.setWatched(s2e1, true, on: now)
+
+    // TMDB now lists only season 1 (no specials, no season 2), and season 1 without its last episode.
+    let trimmed = TMDBSeasonDetail(id: season1.id, seasonNumber: 1, name: season1.name, overview: nil, posterPath: nil,
+                                   airDate: season1.airDate, episodes: Array(season1.episodes.dropLast()))
+    library.insertShow(detail, seasons: [trimmed])
+    #expect(show.regularEpisodes.map(\.code) == (1...8).map { String(format: "S01E%02d", $0) } + ["S02E01"],
+            "the watched episode stays; unwatched ones TMDB dropped go")
+    #expect(show.sortedSeasons.map(\.seasonNumber) == [1, 2])
+    #expect(try library.context.fetchCount(FetchDescriptor<Episode>()) == 9)
 }
 
 @MainActor @Test func upcoming() throws {
@@ -642,6 +710,77 @@ private final class SyncDevice {
     #expect(try phone.library.context.fetchCount(FetchDescriptor<Episode>()) == 0)
 }
 
+/// After applying a downloaded file, the driver makes that file the base: if its upload then conflicts, the retry
+/// must see what the file brought in as the other device's edits, not this one's.
+@MainActor @Test func syncRetryMergesAgainstTheFileItApplied() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    try mac.sync(&file)
+    try phone.sync(&file)
+    let phoneMovie = try #require(phone.library.movie(tmdbID: movie.tmdbID))
+
+    // The phone rates it 8 and uploads. The Mac downloads and applies that file, but its upload conflicts…
+    phone.library.setRating(phoneMovie, 8)
+    try phone.sync(&file)
+    let applied = try #require(file)
+    _ = try mac.library.applySyncedBackup(LibrarySync.merge(base: mac.base, local: try mac.library.makeBackup(), remote: applied))
+    mac.base = applied
+    // …because the phone changed the rating again meanwhile. The retry keeps the newer rating.
+    phone.library.setRating(phoneMovie, 6)
+    try phone.sync(&file)
+    try mac.sync(&file)
+    #expect(movie.userRating == 6)
+}
+
+@MainActor @Test func lostLibrarySyncsAsFirstSync() throws {
+    let mac = try SyncDevice()
+    var file: LibraryBackup?
+    for id in 1...5 { mac.library.context.insert(Movie(tmdbID: id, title: "Film \(id)")) }
+    mac.library.save()
+    try mac.sync(&file)
+    let base = try #require(mac.base)
+
+    // The store was recreated empty while the base file survived: merging against that base would empty the file.
+    let empty = try makeLibrary().makeBackup()
+    #expect(LibrarySync.usableBase(base, local: empty) == nil)
+    #expect(LibrarySync.merge(base: LibrarySync.usableBase(base, local: empty), local: empty, remote: try #require(file)).movies.count == 5)
+    // A library emptied by hand from a few titles keeps its base, so the deletions carry.
+    var small = base
+    small.movies.removeLast(3)
+    #expect(LibrarySync.usableBase(small, local: empty) != nil)
+}
+
+@Test func syncIgnoresTMDBAndIMDbDetails() throws {
+    var a = LibraryBackup(), b = LibraryBackup()
+    let movie = LibraryBackup.MovieRecord(
+        tmdbID: 1, title: "Film", genres: [], cast: [], directors: [], addedDate: date("2026-01-01"), isWatched: false,
+        isInBacklog: true, isFavorite: false, notes: [], spaceIDs: [], tagIDs: [])
+    a.movies = [movie]
+    b.movies = [movie]
+    b.movies[0].imdbRating = 7.9
+    b.movies[0].overview = "Refreshed on another device."
+    #expect(LibrarySync.sameContent(a, b))
+    b.movies[0].userRating = 8
+    #expect(!LibrarySync.sameContent(a, b))
+}
+
+@MainActor @Test func deletedModelsAreNotLive() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let space = try #require(library.createSpace(name: "Mind Benders", symbolName: "brain", colorName: "purple"))
+    #expect(movie.isLive && space.isLive)
+
+    library.context.delete(movie)
+    #expect(!movie.isLive, "an unsaved deletion counts")
+    library.delete(space)
+    #expect(!space.isLive)
+    // An editor still holding the deleted space saves or deletes it again: nothing happens.
+    library.update(space, name: "Renamed", symbolName: "star", colorName: "red")
+    library.delete(space)
+    #expect(try library.context.fetchCount(FetchDescriptor<Space>()) == 0)
+}
+
 @MainActor @Test func syncKeepsEditsMadeOnBothDevices() throws {
     let mac = try SyncDevice(), phone = try SyncDevice()
     var file: LibraryBackup?
@@ -723,6 +862,52 @@ private final class SyncDevice {
                                      "Spare Me, Great Lord! (2021)", "Untitled Show"])
     #expect(entries.map(\.kind) == [.movie, .movie, .movie, .movie, .show, .show, .show])
     #expect(entries.first?.line == 3)
+}
+
+/// Answers every request with 401, like TMDB with a revoked token.
+private final class UnauthorizedProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status_message":"Invalid API key"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor @Test func listImportReportsFailedRequestsApartFromNotFound() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [UnauthorizedProtocol.self]
+    let client = TMDBClient(token: "revoked", language: "en-US", session: URLSession(configuration: configuration))
+    let library = LibraryService(context: try makeLibrary().context, client: client)
+
+    let result = try await library.importList(ListImport.parse("Arrival (2016)\nTV SHOWS\nSeverance"), mark: .none)
+    #expect(result.notFound.isEmpty)
+    #expect(result.failed.map(\.label) == ["Arrival (2016)", "Severance"])
+    #expect(result.failureReason?.contains("401") == true)
+    #expect(try library.context.fetchCount(FetchDescriptor<Movie>()) == 0)
+}
+
+@Test func parsesWindowsTitleLists() {
+    // UTF-16 with a byte-order mark and CRLF line endings, as Notepad saves "Unicode".
+    let text = "TV SHOWS\r\nThe Sopranos (1999)\r\n\r\nSeverance (2022)\r\n"
+    let data = Data([0xFF, 0xFE]) + text.data(using: .utf16LittleEndian)!
+    let entries = ListImport.parse(ListImport.decodeText(data))
+    #expect(entries.map(\.label) == ["The Sopranos (1999)", "Severance (2022)"])
+    #expect(entries.map(\.kind) == [.show, .show])
+    #expect(entries.map(\.line) == [2, 4])
+    #expect(ListImport.parse("Blade Runner (1982) (Director's Cut)\nLa La Land (2016) musical").map(\.label)
+        == ["Blade Runner (1982)", "La La Land (2016)"])
+    // A UTF-8 byte-order mark doesn't hide the heading either.
+    #expect(ListImport.parse("\u{FEFF}TV SHOWS\nSeverance (2022)").map(\.kind) == [.show])
+}
+
+@MainActor @Test func csvQuotesLoneLineBreaks() {
+    #expect(LibraryService.csvField("Two\nLines") == "\"Two\nLines\"")
+    #expect(LibraryService.csvField("Carriage\rReturn") == "\"Carriage\rReturn\"")
+    #expect(LibraryService.csvField("Plain") == "Plain")
 }
 
 @Test func matchesListTitlesOnTMDB() {

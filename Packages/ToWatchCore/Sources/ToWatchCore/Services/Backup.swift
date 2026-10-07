@@ -35,6 +35,8 @@ public struct LibraryBackup: Codable, Sendable {
         public var releaseStatus: String?
         public var voteAverage: Double?
         public var imdbID: String?
+        public var imdbRating: Double?
+        public var imdbVoteCount: Int?
         public var homepage: String?
         public var trailerKey: String?
         public var cast: [PersonCredit]
@@ -91,6 +93,9 @@ public struct LibraryBackup: Codable, Sendable {
         public var numberOfEpisodes: Int?
         public var episodeRuntime: Int?
         public var voteAverage: Double?
+        public var imdbID: String?
+        public var imdbRating: Double?
+        public var imdbVoteCount: Int?
         public var homepage: String?
         public var trailerKey: String?
         public var cast: [PersonCredit]
@@ -196,7 +201,9 @@ public extension LibraryService {
     func makeBackup() throws -> LibraryBackup {
         var backup = LibraryBackup()
         backup.movies = try context.fetch(FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])).map(Self.record)
-        backup.shows = try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)])).map(Self.record)
+        let episodeNotes = notesByEpisode()
+        backup.shows = try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)]))
+            .map { Self.record($0, episodeNotes: episodeNotes) }
         // Collections in a stable order, so an unchanged library writes an identical file.
         backup.spaces = try context.fetch(FetchDescriptor<Space>(sortBy: [SortDescriptor(\.createdAt)])).map {
             .init(uuid: $0.uuid, name: $0.name, symbolName: $0.symbolName, colorName: $0.colorName, createdAt: $0.createdAt)
@@ -210,6 +217,15 @@ public extension LibraryService {
         return backup
     }
 
+    /// Every episode's notes from one fetch. Reading `episode.notes` runs a query per episode, and backups and
+    /// syncs visit every episode in the library.
+    internal func notesByEpisode() -> [PersistentIdentifier: [Note]] {
+        let notes = (try? context.fetch(FetchDescriptor<Note>())) ?? []
+        var byEpisode: [PersistentIdentifier: [Note]] = [:]
+        for note in notes { if let episode = note.episode { byEpisode[episode.persistentModelID, default: []].append(note) } }
+        return byEpisode
+    }
+
     func exportBackupData() throws -> Data {
         try BackupCoding.encoder.encode(makeBackup())
     }
@@ -219,27 +235,34 @@ public extension LibraryService {
             .map { .init(text: $0.text, createdAt: $0.createdAt, updatedAt: $0.updatedAt) }
     }
 
+    /// Sorted, because relationship order isn't stable: unsorted, sync saw a change on every pass.
+    private static func sortedIDs(_ ids: [UUID]) -> [UUID] {
+        ids.sorted { $0.uuidString < $1.uuidString }
+    }
+
     private static func record(_ movie: Movie) -> LibraryBackup.MovieRecord {
         .init(tmdbID: movie.tmdbID, title: movie.title, originalTitle: movie.originalTitle, overview: movie.overview,
               tagline: movie.tagline, posterPath: movie.posterPath, backdropPath: movie.backdropPath,
               releaseDate: movie.releaseDate, runtime: movie.runtime, genres: movie.genres,
               releaseStatus: movie.releaseStatus, voteAverage: movie.voteAverage, imdbID: movie.imdbID,
+              imdbRating: movie.imdbRating, imdbVoteCount: movie.imdbVoteCount,
               homepage: movie.homepage, trailerKey: movie.trailerKey, cast: movie.cast, directors: movie.directors,
               addedDate: movie.addedDate, isWatched: movie.isWatched, watchedDate: movie.watchedDate,
               userRating: movie.userRating, isInBacklog: movie.isInBacklog, isFavorite: movie.isFavorite,
-              notes: notes(movie.notes), spaceIDs: (movie.spaces ?? []).map(\.uuid), tagIDs: (movie.tags ?? []).map(\.uuid))
+              notes: notes(movie.notes), spaceIDs: sortedIDs((movie.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((movie.tags ?? []).map(\.uuid)))
     }
 
-    private static func record(_ show: TVShow) -> LibraryBackup.ShowRecord {
+    private static func record(_ show: TVShow, episodeNotes: [PersistentIdentifier: [Note]]) -> LibraryBackup.ShowRecord {
         .init(tmdbID: show.tmdbID, name: show.name, originalName: show.originalName, overview: show.overview,
               tagline: show.tagline, posterPath: show.posterPath, backdropPath: show.backdropPath,
               firstAirDate: show.firstAirDate, lastAirDate: show.lastAirDate, showStatus: show.showStatus,
               genres: show.genres, networks: show.networks, numberOfSeasons: show.numberOfSeasons,
               numberOfEpisodes: show.numberOfEpisodes, episodeRuntime: show.episodeRuntime,
-              voteAverage: show.voteAverage, homepage: show.homepage, trailerKey: show.trailerKey,
+              voteAverage: show.voteAverage, imdbID: show.imdbID, imdbRating: show.imdbRating,
+              imdbVoteCount: show.imdbVoteCount, homepage: show.homepage, trailerKey: show.trailerKey,
               cast: show.cast, creators: show.creators, addedDate: show.addedDate, userRating: show.userRating,
               isInBacklog: show.isInBacklog, isFavorite: show.isFavorite, isAbandoned: show.isAbandoned,
-              notes: notes(show.notes), spaceIDs: (show.spaces ?? []).map(\.uuid), tagIDs: (show.tags ?? []).map(\.uuid),
+              notes: notes(show.notes), spaceIDs: sortedIDs((show.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((show.tags ?? []).map(\.uuid)),
               seasons: show.sortedSeasons.map { season in
                   .init(tmdbID: season.tmdbID, seasonNumber: season.seasonNumber, name: season.name,
                         overview: season.overview, posterPath: season.posterPath, airDate: season.airDate,
@@ -248,7 +271,7 @@ public extension LibraryService {
                                   overview: episode.overview, airDate: episode.airDate, runtime: episode.runtime,
                                   stillPath: episode.stillPath, isWatched: episode.isWatched,
                                   watchedDate: episode.watchedDate, userRating: episode.userRating,
-                                  notes: notes(episode.notes))
+                                  notes: notes(episodeNotes[episode.persistentModelID]))
                         })
               })
     }
@@ -370,6 +393,8 @@ public extension LibraryService {
         movie.releaseStatus = record.releaseStatus
         movie.voteAverage = record.voteAverage
         movie.imdbID = record.imdbID
+        movie.imdbRating = record.imdbRating
+        movie.imdbVoteCount = record.imdbVoteCount
         movie.homepage = record.homepage
         movie.trailerKey = record.trailerKey
         movie.castData = PersonCredit.encode(record.cast)
@@ -395,6 +420,9 @@ public extension LibraryService {
         show.numberOfEpisodes = record.numberOfEpisodes
         show.episodeRuntime = record.episodeRuntime
         show.voteAverage = record.voteAverage
+        show.imdbID = record.imdbID
+        show.imdbRating = record.imdbRating
+        show.imdbVoteCount = record.imdbVoteCount
         show.homepage = record.homepage
         show.trailerKey = record.trailerKey
         show.castData = PersonCredit.encode(record.cast)
@@ -521,7 +549,8 @@ public extension LibraryService {
 
     /// RFC 4180: quote fields containing commas, quotes, or line breaks; double embedded quotes.
     static func csvField(_ value: String) -> String {
-        guard value.contains(where: { ",\"\r\n".contains($0) }) else { return value }
+        // Scalars, not Characters: "\r\n" is one Character, so a lone "\n" didn't match it.
+        guard value.unicodeScalars.contains(where: { ",\"\r\n".unicodeScalars.contains($0) }) else { return value }
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 }

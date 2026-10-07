@@ -16,8 +16,7 @@ public enum LibrarySync {
     /// The merged library: apply it here with `applySyncedBackup`, then upload what results.
     public static func merge(base: LibraryBackup?, local: LibraryBackup, remote: LibraryBackup) -> LibraryBackup {
         // Dates in a file have whole seconds; round-trip this device's library so unchanged dates compare equal.
-        let base = base.map(normalized)
-        let (local, remote) = matchingTags(normalized(local), normalized(remote))
+        let (base, local, remote) = matchingTags(base.map(normalized), normalized(local), normalized(remote))
 
         var merged = local
         merged.spaces = keyed(base?.spaces, local.spaces, remote.spaces, key: \.uuid) { m in
@@ -95,6 +94,16 @@ public enum LibrarySync {
         return merged
     }
 
+    /// The last sync's snapshot to merge against, or `nil` to merge as a first sync. An empty library whose last
+    /// sync had several titles was lost or recreated (a reset store, a failed migration), not emptied by hand:
+    /// against the base, every title would look deleted here and the merge would empty the file on every device.
+    /// As a first sync, it gets the file's library back instead.
+    public static func usableBase(_ base: LibraryBackup?, local: LibraryBackup) -> LibraryBackup? {
+        guard let base else { return nil }
+        let isEmpty = local.titleCount == 0 && local.spaces.isEmpty && local.tags.isEmpty && local.smartLists.isEmpty
+        return isEmpty && base.titleCount >= 5 ? nil : base
+    }
+
     /// The backup as it reads back from a file: dates to the whole second.
     public static func normalized(_ backup: LibraryBackup) -> LibraryBackup {
         guard let data = try? BackupCoding.encoder.encode(backup),
@@ -102,12 +111,57 @@ public enum LibrarySync {
         return decoded
     }
 
-    /// Whether two snapshots hold the same library, ignoring when they were made.
+    /// Whether two snapshots hold the same library for the user: the same titles and collections, and the same
+    /// watch data, ratings, notes, and memberships. TMDB and IMDb details are left out: each device refreshes them
+    /// at its own times and a merge keeps its own, so comparing them made devices re-upload on every sync.
     public static func sameContent(_ a: LibraryBackup, _ b: LibraryBackup) -> Bool {
-        var a = normalized(a), b = normalized(b)
-        a.exportedAt = .distantPast
-        b.exportedAt = .distantPast
-        return (try? BackupCoding.encoder.encode(a)) == (try? BackupCoding.encoder.encode(b))
+        let a = try? BackupCoding.encoder.encode(UserContent(normalized(a)))
+        return a != nil && a == (try? BackupCoding.encoder.encode(UserContent(normalized(b))))
+    }
+
+    /// The parts of a snapshot the user owns, in a stable order.
+    private struct UserContent: Encodable {
+        struct Movie: Encodable {
+            let tmdbID: Int, addedDate: Date, isWatched: Bool, watchedDate: Date?, userRating: Double?
+            let isInBacklog: Bool, isFavorite: Bool, notes: [LibraryBackup.NoteRecord], spaceIDs: [UUID], tagIDs: [UUID]
+        }
+        struct Show: Encodable {
+            let tmdbID: Int, addedDate: Date, userRating: Double?, isInBacklog: Bool, isFavorite: Bool, isAbandoned: Bool
+            let notes: [LibraryBackup.NoteRecord], spaceIDs: [UUID], tagIDs: [UUID], episodes: [Episode]
+        }
+        /// Only episodes with something of the user's: new episodes from a refresh aren't a change.
+        struct Episode: Encodable {
+            let season: Int, episode: Int, isWatched: Bool, watchedDate: Date?, userRating: Double?
+            let notes: [LibraryBackup.NoteRecord]
+        }
+
+        let movies: [Movie], shows: [Show]
+        let spaces: [LibraryBackup.SpaceRecord], tags: [LibraryBackup.TagRecord], smartLists: [LibraryBackup.SmartListRecord]
+
+        init(_ backup: LibraryBackup) {
+            func sorted(_ ids: [UUID]) -> [UUID] { ids.sorted { $0.uuidString < $1.uuidString } }
+            movies = backup.movies.sorted { $0.tmdbID < $1.tmdbID }.map {
+                Movie(tmdbID: $0.tmdbID, addedDate: $0.addedDate, isWatched: $0.isWatched, watchedDate: $0.watchedDate,
+                      userRating: $0.userRating, isInBacklog: $0.isInBacklog, isFavorite: $0.isFavorite, notes: $0.notes,
+                      spaceIDs: sorted($0.spaceIDs), tagIDs: sorted($0.tagIDs))
+            }
+            shows = backup.shows.sorted { $0.tmdbID < $1.tmdbID }.map { show in
+                let episodes = show.seasons.flatMap { season in
+                    season.episodes.compactMap { episode -> Episode? in
+                        guard episode.isWatched || episode.userRating != nil || !episode.notes.isEmpty else { return nil }
+                        return Episode(season: season.seasonNumber, episode: episode.episodeNumber, isWatched: episode.isWatched,
+                                       watchedDate: episode.watchedDate, userRating: episode.userRating, notes: episode.notes)
+                    }
+                }
+                return Show(tmdbID: show.tmdbID, addedDate: show.addedDate, userRating: show.userRating,
+                            isInBacklog: show.isInBacklog, isFavorite: show.isFavorite, isAbandoned: show.isAbandoned,
+                            notes: show.notes, spaceIDs: sorted(show.spaceIDs), tagIDs: sorted(show.tagIDs),
+                            episodes: episodes.sorted { ($0.season, $0.episode) < ($1.season, $1.episode) })
+            }
+            spaces = backup.spaces.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            tags = backup.tags.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            smartLists = backup.smartLists.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+        }
     }
 
     // MARK: Merging
@@ -217,7 +271,10 @@ public enum LibrarySync {
 
     /// Two devices can each create a tag with the same name. Tags are matched by name in the app, so they
     /// become one tag rather than twins. Both sides settle on the smaller ID, so every device picks the same one.
-    private static func matchingTags(_ local: LibraryBackup, _ remote: LibraryBackup) -> (LibraryBackup, LibraryBackup) {
+    /// The base is renamed too: otherwise the device whose ID was dropped saw its own tag as new, kept its own
+    /// name over the file's, and the devices took an extra round of uploads to agree.
+    private static func matchingTags(_ base: LibraryBackup?, _ local: LibraryBackup,
+                                     _ remote: LibraryBackup) -> (LibraryBackup?, LibraryBackup, LibraryBackup) {
         var replacements: [UUID: UUID] = [:]
         for remoteTag in remote.tags where !local.tags.contains(where: { $0.uuid == remoteTag.uuid }) {
             guard let localTag = local.tags.first(where: { $0.name.localizedCaseInsensitiveCompare(remoteTag.name) == .orderedSame }),
@@ -226,7 +283,7 @@ public enum LibrarySync {
             replacements[localTag.uuid] = kept
             replacements[remoteTag.uuid] = kept
         }
-        guard !replacements.isEmpty else { return (local, remote) }
+        guard !replacements.isEmpty else { return (base, local, remote) }
         func replacingTags(in backup: LibraryBackup) -> LibraryBackup {
             func replaced(_ id: UUID) -> UUID { replacements[id] ?? id }
             var backup = backup
@@ -238,7 +295,7 @@ public enum LibrarySync {
             }
             return backup
         }
-        return (replacingTags(in: local), replacingTags(in: remote))
+        return (base.map(replacingTags), replacingTags(in: local), replacingTags(in: remote))
     }
 
     /// Watched and its date change together.
@@ -266,6 +323,7 @@ public extension LibraryService {
     /// left alone. Returns whether anything changed.
     @discardableResult
     func applySyncedBackup(_ backup: LibraryBackup) throws -> Bool {
+        let episodeNotes = notesByEpisode()
         let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
                                 modelKey: \.uuid) { record in
             let space = Space(name: record.name, symbolName: record.symbolName, colorName: record.colorName)
@@ -328,7 +386,7 @@ public extension LibraryService {
             setNotes(record.notes, on: show.notes) { $0.show = show }
             if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }
-            setEpisodes(record.seasons, on: show)
+            setEpisodes(record.seasons, on: show, notes: episodeNotes)
         }
 
         guard context.hasChanges else { return false }
@@ -383,7 +441,8 @@ public extension LibraryService {
     }
 
     /// Creates seasons and episodes this device doesn't have yet, and sets each listed episode's user state.
-    private func setEpisodes(_ records: [LibraryBackup.SeasonRecord], on show: TVShow) {
+    private func setEpisodes(_ records: [LibraryBackup.SeasonRecord], on show: TVShow,
+                             notes episodeNotes: [PersistentIdentifier: [Note]]) {
         var seasons = Dictionary((show.seasons ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
         for record in records {
             let season = seasons[record.seasonNumber] ?? makeSeason(record, in: show)
@@ -395,7 +454,7 @@ public extension LibraryService {
                 assign(episode, \.isWatched, episodeRecord.isWatched)
                 assign(episode, \.watchedDate, episodeRecord.watchedDate)
                 assign(episode, \.userRating, episodeRecord.userRating)
-                setNotes(episodeRecord.notes, on: episode.notes) { $0.episode = episode }
+                setNotes(episodeRecord.notes, on: episodeNotes[episode.persistentModelID]) { $0.episode = episode }
             }
         }
     }

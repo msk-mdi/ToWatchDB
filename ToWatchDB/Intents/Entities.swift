@@ -27,7 +27,9 @@ struct MovieEntity: AppEntity {
 struct MovieQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [MovieEntity] {
         await MainActor.run {
-            identifiers.compactMap { SharedLibrary.service.movie(tmdbID: $0).map(MovieEntity.init) }
+            // One service: building it reads (and on Mac decrypts) the TMDB token.
+            let library = SharedLibrary.service
+            return identifiers.compactMap { library.movie(tmdbID: $0).map(MovieEntity.init) }
         }
     }
 
@@ -77,7 +79,8 @@ struct ShowEntity: AppEntity {
 struct ShowQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [ShowEntity] {
         await MainActor.run {
-            identifiers.compactMap { SharedLibrary.service.show(tmdbID: $0).map { ShowEntity($0) } }
+            let library = SharedLibrary.service
+            return identifiers.compactMap { library.show(tmdbID: $0).map { ShowEntity($0) } }
         }
     }
 
@@ -201,7 +204,7 @@ enum StatsPeriodOption: String, AppEnum {
     ]
 
     var period: StatsPeriod {
-        let year = Calendar.current.component(.year, from: .now)
+        let year = StatsPeriod.calendar.component(.year, from: .now)
         return switch self {
         case .thisWeek: .thisWeek
         case .thisMonth: .thisMonth

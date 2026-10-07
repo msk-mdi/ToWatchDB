@@ -11,6 +11,9 @@ struct RootView: View {
     @State private var router = IntentRouter.shared
     /// Tab bar layouts: lists that aren't tabs, opened by a menu command or a Siri or Shortcuts action.
     @State private var intentSheet: IntentSheet?
+    /// Mac: whether the visible page has a detail pushed, which hides the window's Refresh button.
+    /// The visible page has its own Refresh button (a title's page), so the window's hides.
+    @State private var hasOwnRefreshButton = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -151,7 +154,10 @@ struct RootView: View {
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             #if os(macOS)
-            PageHost(selected: appState.selectedTab) { tab in screen(for: tab).appDestinations() }
+            PageHost(selected: appState.selectedTab, hasOwnRefreshButton: $hasOwnRefreshButton) { tab in
+                screen(for: tab).appDestinations()
+            }
+            .windowRefreshButton(appState, isVisible: !hasOwnRefreshButton)
             #else
             // A fresh stack per list, so going back to a list doesn't land on a stale detail page.
             NavigationStack { screen(for: appState.selectedTab).appDestinations() }
@@ -240,11 +246,19 @@ struct RootView: View {
     private var tabBar: some View {
         #if os(macOS)
         // A segmented control in the toolbar's center: unlike TabView's tab bar, it stays in place
-        // whatever toolbar items the current screen adds.
-        PageHost(selected: appState.selectedTab) { tab in screen(for: tab, inTabBar: true).appDestinations() }
-            .toolbar {
-                ToolbarItem(placement: .principal) { TopBarPicker(tabs: tabBarTabs) }
-            }
+        // whatever toolbar items the current screen adds. AppKit only keeps a principal item centered while
+        // it fits beside the leading and trailing items, so the window title (a long detail title pushed
+        // it sideways) is left out of the toolbar; each page shows its own title.
+        PageHost(selected: appState.selectedTab, hasOwnRefreshButton: $hasOwnRefreshButton) { tab in
+            screen(for: tab, inTabBar: true).appDestinations()
+        }
+        // Outside the stacks, so pushed pages get it too.
+        .environment(\.showsTitleInPage, true)
+        .windowRefreshButton(appState, isVisible: !hasOwnRefreshButton)
+        .toolbar(removing: .title)
+        .toolbar {
+            ToolbarItem(placement: .principal) { TopBarPicker(tabs: tabBarTabs) }
+        }
         #else
         tabView
         #endif
@@ -327,6 +341,41 @@ private struct SidebarRow: View {
 }
 
 #if os(macOS)
+extension View {
+    /// Mac: one Refresh button for the window instead of one per page. Any change to the toolbar's items makes
+    /// AppKit re-lay out the toolbar and rebuild the keyboard loop of the whole window, hidden pages included,
+    /// which made each page switch stall (CODEBASE §7). Discover reloads trending titles; other pages refresh
+    /// the library. Search has none: its search field keeps the toolbar from being empty. A detail page has
+    /// its own Refresh button for its title, so the window's is hidden there.
+    func windowRefreshButton(_ appState: AppState, isVisible: Bool = true) -> some View {
+        toolbar {
+            if isVisible, appState.selectedTab != .search {
+                ToolbarItem(id: "refresh") {
+                    WindowRefreshButton()
+                }
+            }
+        }
+    }
+}
+
+private struct WindowRefreshButton: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        let isDiscover = appState.selectedTab == .discover
+        Button("Refresh", systemImage: "arrow.clockwise") {
+            Task {
+                if isDiscover {
+                    await appState.loadTrending(force: true)
+                } else {
+                    await appState.refreshLibrary(force: true)
+                }
+            }
+        }
+        .disabled(isDiscover ? appState.client == nil : appState.isRefreshing)
+    }
+}
+
 /// Mac top bar: the main sections as a segmented control.
 private struct TopBarPicker: View {
     @Environment(AppState.self) private var appState

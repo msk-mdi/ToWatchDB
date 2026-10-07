@@ -147,3 +147,21 @@ public struct SmartListRules: Codable, Sendable, Hashable {
         return calendar
     }()
 }
+
+extension SmartListRules {
+    /// Sets are written sorted. Their order differs between instances and launches, so two identical rules
+    /// encoded differently, and sync saw a change and uploaded the library on every pass.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(media, forKey: .media)
+        try container.encode(statuses.sorted { $0.rawValue < $1.rawValue }, forKey: .statuses)
+        try container.encode(genres.sorted(), forKey: .genres)
+        try container.encode(tagIDs.sorted { $0.uuidString < $1.uuidString }, forKey: .tagIDs)
+        try container.encode(spaceIDs.sorted { $0.uuidString < $1.uuidString }, forKey: .spaceIDs)
+        try container.encodeIfPresent(minimumRating, forKey: .minimumRating)
+        try container.encodeIfPresent(releasedFrom, forKey: .releasedFrom)
+        try container.encodeIfPresent(releasedThrough, forKey: .releasedThrough)
+        try container.encode(backlogOnly, forKey: .backlogOnly)
+        try container.encode(favoritesOnly, forKey: .favoritesOnly)
+    }
+}

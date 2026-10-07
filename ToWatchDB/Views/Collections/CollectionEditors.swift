@@ -42,6 +42,9 @@ private struct CollectionEditorPresenter: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: appState.collectionEditor?.id, initial: true) { claim() }
+            // A request made while this window's sheet was open waited for a change that never came, then
+            // popped up on its own the next time the window became active.
+            .onChange(of: target == nil) { claim() }
             #if os(macOS)
             .onChange(of: appearsActive) { claim() }
             #endif
@@ -136,17 +139,32 @@ private struct TagEditor: View {
                 LabeledContent("Preview") {
                     CollectionChip(name: name.isEmpty ? "Tag" : name, color: CollectionPalette.color(colorName))
                 }
+            } footer: {
+                // Tags are matched by name, so two with one name would be merged unpredictably by import and sync.
+                if isNameTaken {
+                    if tag == nil {
+                        Text("There's already a tag with this name. Saving uses it.")
+                    } else {
+                        Text("There's already a tag with this name.").foregroundStyle(.red)
+                    }
+                }
             }
             Section("Color") { ColorSwatchPicker(selection: $colorName) }
         }
         .formStyle(.grouped)
         .navigationTitle(tag == nil ? "New Tag" : "Edit Tag")
-        .editorToolbar(canSave: !name.trimmingCharacters(in: .whitespaces).isEmpty, save: save)
+        .editorToolbar(canSave: !name.trimmingCharacters(in: .whitespaces).isEmpty && !(isNameTaken && tag != nil), save: save)
         .onAppear {
             guard let tag else { return }
             name = tag.name
             colorName = tag.colorName
         }
+    }
+
+    private var isNameTaken: Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let existing = appState.library.tag(named: trimmed) else { return false }
+        return existing.persistentModelID != tag?.persistentModelID
     }
 
     private func save() {
@@ -211,9 +229,13 @@ private struct SmartListEditor: View {
                 }
             }
 
-            Section("Release Year") {
+            Section {
                 yearField("From", value: $rules.releasedFrom)
                 yearField("Through", value: $rules.releasedThrough)
+            } header: {
+                Text("Release Year")
+            } footer: {
+                if !hasValidYears { Text("“From” can’t be after “Through”.").foregroundStyle(.red) }
             }
 
             if !genres.isEmpty {
@@ -255,7 +277,7 @@ private struct SmartListEditor: View {
         }
         .formStyle(.grouped)
         .navigationTitle(list == nil ? "New Smart List" : "Edit Smart List")
-        .editorToolbar(canSave: !name.trimmingCharacters(in: .whitespaces).isEmpty, save: save)
+        .editorToolbar(canSave: !name.trimmingCharacters(in: .whitespaces).isEmpty && hasValidYears, save: save)
         .onAppear {
             genres = appState.library.allGenres()
             guard let list else { return }
@@ -282,6 +304,11 @@ private struct SmartListEditor: View {
             #if os(iOS)
             .keyboardType(.numberPad)
             #endif
+    }
+
+    private var hasValidYears: Bool {
+        guard let from = rules.releasedFrom, let through = rules.releasedThrough else { return true }
+        return from <= through
     }
 
     private func save() {

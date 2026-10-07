@@ -139,6 +139,12 @@ public struct TMDBTVDetail: Codable, Sendable, Hashable {
     public let networks: [TMDBNetwork]?
     public let credits: TMDBCredits?
     public let videos: TMDBVideoList?
+    public let externalIds: TMDBExternalIDs?
+}
+
+/// A show's IDs on other sites (movies carry `imdb_id` directly).
+public struct TMDBExternalIDs: Codable, Sendable, Hashable {
+    public let imdbId: String?
 }
 
 public struct TMDBEpisode: Codable, Sendable, Hashable {
@@ -167,13 +173,33 @@ public struct TMDBErrorBody: Decodable, Sendable {
     public let statusMessage: String?
 }
 
-/// TMDB dates are `yyyy-MM-dd` strings (sometimes empty). They're calendar days, so they're parsed in UTC
-/// and compared against the start of "today" in UTC too, which keeps "released today" stable across time zones.
+/// TMDB dates are `yyyy-MM-dd` strings (sometimes empty). They're calendar days, so they're parsed as UTC
+/// midnights and compared against `today`: the user's local date, written the same way.
 public enum TMDBDate {
     public static func parse(_ string: String?) -> Date? {
         guard let string, !string.isEmpty else { return nil }
         return try? Date(string, strategy: Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
     }
+
+    /// The user's current calendar day as a TMDB date (its UTC midnight). Comparing against the UTC day instead
+    /// made tomorrow's episodes count as aired on a US evening, and kept yesterday's as "today" in Asia.
+    public static func today(_ now: Date = .now, timeZone: TimeZone = .current) -> Date {
+        var local = Calendar(identifier: .gregorian)
+        local.timeZone = timeZone
+        let day = local.dateComponents([.year, .month, .day], from: now)
+        return utcCalendar.date(from: day) ?? utcCalendar.startOfDay(for: now)
+    }
+
+    /// The UTC day a TMDB date falls on.
+    public static func day(of date: Date) -> Date {
+        utcCalendar.startOfDay(for: date)
+    }
+
+    static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }()
 
     /// The year of a TMDB `yyyy-MM-dd` date.
     public static func year(_ string: String?) -> Int? {

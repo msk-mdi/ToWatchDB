@@ -11,12 +11,11 @@ struct DiscoverView: View {
     @Query private var movies: [Movie]
     @Query private var shows: [TVShow]
 
-    @State private var loadError: String?
-
     private var trendingMovies: [MediaSummary] { appState.trending?.movies ?? [] }
     private var trendingShows: [MediaSummary] { appState.trending?.shows ?? [] }
 
     var body: some View {
+        let loadError = appState.trendingError
         let ids = appState.cached("library-ids") { LibraryIDs(movies: movies, shows: shows) }
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -36,20 +35,22 @@ struct DiscoverView: View {
                 } description: {
                     Text(loadError ?? "")
                 } actions: {
-                    Button("Retry") { Task { await load(force: true) } }
+                    Button("Retry") { Task { await appState.loadTrending(force: true) } }
                 }
             }
         }
         .pageTitle("Discover")
-        .pageToolbar {
-            // Also keeps the Mac toolbar from being empty, which made macOS collapse it and shift the window.
+        #if os(iOS)
+        // On Mac the window has the Refresh button (see RootView).
+        .toolbar {
             ToolbarItem {
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(force: true) } }
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await appState.loadTrending(force: true) } }
                     .disabled(appState.client == nil)
             }
         }
+        #endif
         .settingsToolbarButton(appState)
-        .task(id: appState.token) { await load() }
+        .task(id: "\(appState.token ?? "")|\(appState.language)") { await appState.loadTrending() }
     }
 
     private func shelf(_ title: String, _ items: [MediaSummary], _ ids: LibraryIDs) -> some View {
@@ -80,22 +81,6 @@ struct DiscoverView: View {
         #else
         150
         #endif
-    }
-
-    private func load(force: Bool = false) async {
-        guard let client = appState.client, let token = appState.token else { return }
-        if !force, appState.trending?.isFresh(token: token, language: appState.language) == true { return }
-        loadError = nil
-        do {
-            async let movies = client.trendingMovies()
-            async let shows = client.trendingTVShows()
-            appState.trending = .init(movies: try await movies.results.map(MediaSummary.init),
-                                      shows: try await shows.results.map(MediaSummary.init),
-                                      token: token, language: appState.language, loadedAt: .now)
-        } catch is CancellationError {
-        } catch {
-            loadError = error.localizedDescription
-        }
     }
 }
 

@@ -35,6 +35,7 @@ public extension LibraryService {
     }
 
     func update(_ space: Space, name: String, symbolName: String, colorName: String) {
+        guard space.isLive else { return } // An open editor can outlive a sync that deleted it.
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { space.name = trimmed }
         space.symbolName = symbolName
@@ -63,6 +64,7 @@ public extension LibraryService {
 
     /// Deletes a space and drops it from smart-list rules, which would otherwise match nothing.
     func delete(_ space: Space) {
+        guard space.isLive else { return } // Already deleted, by a sync for example.
         let id = space.uuid
         forEachSmartList { $0.spaceIDs.remove(id) }
         context.delete(space)
@@ -84,6 +86,7 @@ public extension LibraryService {
     }
 
     func update(_ tag: MediaTag, name: String, colorName: String) {
+        guard tag.isLive else { return } // An open editor can outlive a sync that deleted it.
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { tag.name = trimmed }
         tag.colorName = colorName
@@ -116,6 +119,7 @@ public extension LibraryService {
 
     /// Deletes a tag and drops it from smart-list rules, which would otherwise match nothing.
     func delete(_ tag: MediaTag) {
+        guard tag.isLive else { return } // Already deleted, by a sync for example.
         let id = tag.uuid
         forEachSmartList { $0.tagIDs.remove(id) }
         context.delete(tag)
@@ -138,6 +142,7 @@ public extension LibraryService {
     }
 
     func update(_ list: SmartList, name: String, symbolName: String, colorName: String, rules: SmartListRules) {
+        guard list.isLive else { return } // An open editor can outlive a sync that deleted it.
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { list.name = trimmed }
         list.symbolName = symbolName

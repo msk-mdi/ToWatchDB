@@ -46,6 +46,12 @@ final class AppState {
 
     private(set) var tokenOverride: String? = TokenStore.load()
 
+    /// The Seerr server titles are requested on, and how the app signs in to it.
+    private(set) var seerrServer: String = UserDefaults.standard.string(forKey: "seerrServer") ?? ""
+    private(set) var seerrAuth: SeerrAuth? = SeerrAuthStore.load()
+    /// Who the app is signed in to Seerr as, for Settings.
+    private(set) var seerrUserName: String? = UserDefaults.standard.string(forKey: "seerrUserName")
+
     /// Loads Discover's trending lists, unless fresh ones are cached. Here rather than in Discover so the
     /// Mac window's Refresh button can reload them.
     func loadTrending(force: Bool = false) async {
@@ -201,6 +207,29 @@ final class AppState {
         } else {
             TokenStore.save(trimmed)
             tokenOverride = trimmed
+        }
+    }
+
+    /// Seerr client for requesting titles, if a server is set up.
+    var seerr: SeerrClient? { seerrAuth.flatMap { SeerrClient(server: seerrServer, auth: $0) } }
+
+    /// Saves a connected Seerr client and who it's signed in as; `nil` forgets the server and sign-in.
+    func setSeerr(_ client: SeerrClient?, userName: String? = nil) {
+        let defaults = UserDefaults.standard
+        if let client {
+            defaults.set(client.baseURL.absoluteString, forKey: "seerrServer")
+            defaults.set(userName, forKey: "seerrUserName")
+            SeerrAuthStore.save(client.auth)
+            seerrServer = client.baseURL.absoluteString
+            seerrAuth = client.auth
+            seerrUserName = userName
+        } else {
+            defaults.removeObject(forKey: "seerrServer")
+            defaults.removeObject(forKey: "seerrUserName")
+            SeerrAuthStore.delete()
+            seerrServer = ""
+            seerrAuth = nil
+            seerrUserName = nil
         }
     }
 

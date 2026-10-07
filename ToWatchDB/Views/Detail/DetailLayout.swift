@@ -3,6 +3,7 @@ import ToWatchCore
 
 /// Common detail page: backdrop, poster + title header, actions, overview, facts, extra content, and cast.
 struct DetailLayout<Actions: View, Extra: View>: View {
+    @Environment(\.isActivePage) private var isActivePage
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var isCompact: Bool { sizeClass == .compact }
@@ -98,6 +99,10 @@ struct DetailLayout<Actions: View, Extra: View>: View {
             ToolbarItem(placement: .principal) { Text(verbatim: "").accessibilityHidden(true) }
         }
         .modifier(HiddenTopScrollEdge())
+        #else
+        // As on iOS, the backdrop goes right up under the toolbar, with no toolbar background over it.
+        // Pages kept alive offscreen share the window's toolbar, so only the visible one hides it.
+        .toolbarBackgroundVisibility(isActivePage ? .hidden : .automatic, for: .windowToolbar)
         #endif
     }
 

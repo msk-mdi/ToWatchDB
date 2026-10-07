@@ -16,6 +16,13 @@ struct SettingsView: View {
     @State private var fileRequest: LibraryFileRequest?
     @State private var testResult: String?
     @State private var isTesting = false
+    @State private var seerrServerDraft = ""
+    @State private var seerrKeyDraft = ""
+    @State private var seerrUserDraft = ""
+    @State private var seerrPasswordDraft = ""
+    @State private var seerrMethod = SeerrSignInMethod.jellyfin
+    @State private var seerrTestResult: String?
+    @State private var isTestingSeerr = false
     #if os(macOS)
     @State private var formWidth: CGFloat = 0
     #endif
@@ -87,6 +94,8 @@ struct SettingsView: View {
                 // Release builds ship without a token, so this is where every new user starts.
                 Link("Get a free API Read Access Token at themoviedb.org", destination: TMDBLinks.apiSettings)
             }
+
+            seerrSection
 
             Section("Library") {
                 // Counted in the store instead of loading every title; recounted after each save.
@@ -200,6 +209,128 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var seerrSection: some View {
+        Section {
+            if let seerr = appState.seerr {
+                LabeledContent("Server", value: seerr.baseURL.absoluteString)
+                LabeledContent("Signed In As") {
+                    switch seerr.auth {
+                    case .apiKey: Text("API key (admin)")
+                    case .session: Text(appState.seerrUserName ?? "Your account")
+                    }
+                }
+                HStack {
+                    Button("Test Connection") { testSeerr() }
+                        .disabled(isTestingSeerr)
+                    if isTestingSeerr { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Button("Sign Out", role: .destructive) { signOutOfSeerr() }
+                }
+                .rowButtonStyle()
+            } else {
+                TextField("Server", text: $seerrServerDraft, prompt: Text("http://192.168.1.10:5055"))
+                    .textContentType(.URL)
+                    #if os(iOS)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    #endif
+                Picker("Sign In With", selection: $seerrMethod) {
+                    ForEach(SeerrSignInMethod.allCases) { Text($0.label).tag($0) }
+                }
+                switch seerrMethod {
+                case .jellyfin, .seerr:
+                    TextField(seerrMethod == .seerr ? "Email" : "Username", text: $seerrUserDraft)
+                        #if os(iOS)
+                        .textContentType(seerrMethod == .seerr ? .emailAddress : .username)
+                        .keyboardType(seerrMethod == .seerr ? .emailAddress : .default)
+                        .textInputAutocapitalization(.never)
+                        #else
+                        .textContentType(.username)
+                        #endif
+                        .autocorrectionDisabled()
+                    SecureField("Password", text: $seerrPasswordDraft)
+                        .textContentType(.password)
+                case .apiKey:
+                    SecureField("API Key", text: $seerrKeyDraft, prompt: Text("Paste your Seerr API key"))
+                }
+                HStack {
+                    Button("Sign In") { connectSeerr() }
+                        .disabled(isTestingSeerr || !canConnectSeerr)
+                    if isTestingSeerr { ProgressView().controlSize(.small) }
+                }
+                .rowButtonStyle()
+            }
+            if let seerrTestResult {
+                Text(seerrTestResult).font(.callout).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Seerr")
+        } footer: {
+            Text("Request movies and shows on your Seerr, Overseerr, or Jellyseerr server from any title's page. Sign in with the Jellyfin or Emby account you use on Seerr, or a Seerr account: requests are made as you, with your permissions, and your password isn't stored. Seerr signs you out after 30 days. An API key (Seerr ▸ Settings ▸ General) acts as the server's admin and doesn't expire. Plain http works only for addresses on your local network.")
+        }
+    }
+
+    private var canConnectSeerr: Bool {
+        let filled = { (text: String) in !text.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard filled(seerrServerDraft) else { return false }
+        return seerrMethod == .apiKey ? filled(seerrKeyDraft) : filled(seerrUserDraft) && !seerrPasswordDraft.isEmpty
+    }
+
+    /// Checks the address and sign-in before saving them, so a typo doesn't leave a server that never answers.
+    private func connectSeerr() {
+        isTestingSeerr = true
+        seerrTestResult = nil
+        let server = seerrServerDraft, user = seerrUserDraft.trimmingCharacters(in: .whitespaces)
+        let password = seerrPasswordDraft, key = seerrKeyDraft, method = seerrMethod
+        Task {
+            do {
+                let (client, account): (SeerrClient, SeerrUser)
+                switch method {
+                case .apiKey:
+                    guard let keyClient = SeerrClient(server: server, apiKey: key) else { throw SeerrError.invalidServer }
+                    (client, account) = (keyClient, try await keyClient.currentUser())
+                case .jellyfin:
+                    (client, account) = try await SeerrClient.signIn(server: server, with: .jellyfin(username: user, password: password))
+                case .seerr:
+                    (client, account) = try await SeerrClient.signIn(server: server, with: .seerr(email: user, password: password))
+                }
+                appState.setSeerr(client, userName: account.name)
+                seerrServerDraft = ""
+                seerrUserDraft = ""
+                seerrPasswordDraft = ""
+                seerrKeyDraft = ""
+                seerrTestResult = "Signed in as \(account.name)."
+            } catch {
+                seerrTestResult = error.localizedDescription
+            }
+            isTestingSeerr = false
+        }
+    }
+
+    private func testSeerr() {
+        guard let client = appState.seerr else { return }
+        isTestingSeerr = true
+        seerrTestResult = nil
+        Task {
+            do {
+                seerrTestResult = "Connected as \(try await client.currentUser().name)."
+            } catch {
+                seerrTestResult = error.localizedDescription
+            }
+            isTestingSeerr = false
+        }
+    }
+
+    private func signOutOfSeerr() {
+        let client = appState.seerr
+        appState.setSeerr(nil)
+        seerrTestResult = nil
+        // Ends the session on the server too; forgetting it here is what matters if that fails.
+        Task { try? await client?.signOut() }
+    }
+
     private func connectDropbox() {
         Task {
             await appState.dropbox.connect { url, scheme in
@@ -252,6 +383,18 @@ struct SettingsView: View {
                 testResult = error.localizedDescription
             }
             isTesting = false
+        }
+    }
+}
+
+private enum SeerrSignInMethod: String, CaseIterable, Identifiable {
+    case jellyfin, seerr, apiKey
+    var id: Self { self }
+    var label: String {
+        switch self {
+        case .jellyfin: "Jellyfin or Emby"
+        case .seerr: "Seerr Account"
+        case .apiKey: "API Key"
         }
     }
 }

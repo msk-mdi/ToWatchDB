@@ -967,3 +967,149 @@ private final class UnauthorizedProtocol: URLProtocol {
                                   C(id: 2, titles: ["@ in the mood for love"], year: 2001)],
                                  title: "In the Mood for Love", year: 2001) == 1)
 }
+
+// MARK: - Seerr
+
+@Test func normalizesSeerrServerAddresses() {
+    #expect(SeerrClient.normalizedURL("192.168.1.10:5055")?.absoluteString == "http://192.168.1.10:5055")
+    #expect(SeerrClient.normalizedURL(" https://requests.example.com/ ")?.absoluteString == "https://requests.example.com")
+    #expect(SeerrClient.normalizedURL("http://nas.local:5055/api/v1/")?.absoluteString == "http://nas.local:5055")
+    #expect(SeerrClient.normalizedURL("https://example.com/seerr")?.absoluteString == "https://example.com/seerr")
+    #expect(SeerrClient.normalizedURL("ftp://example.com") == nil)
+    #expect(SeerrClient.normalizedURL("") == nil)
+    #expect(SeerrClient(server: "http://nas.local:5055", apiKey: "  ") == nil)
+}
+
+@Test func readsSeerrSeasonAvailability() throws {
+    let json = """
+    {"id": 95396, "seasons": [
+        {"seasonNumber": 0, "name": "Specials", "episodeCount": 3},
+        {"seasonNumber": 1, "name": "Season 1", "episodeCount": 9},
+        {"seasonNumber": 2, "name": "Season 2", "episodeCount": 10},
+        {"seasonNumber": 3, "name": "Season 3", "episodeCount": 10},
+        {"seasonNumber": 4, "name": "Season 4", "episodeCount": 10}],
+     "mediaInfo": {"status": 4,
+        "seasons": [{"seasonNumber": 1, "status": 5}, {"seasonNumber": 2, "status": 1}],
+        "requests": [{"id": 12, "status": 1, "is4k": false, "seasons": [{"seasonNumber": 2}],
+                      "requestedBy": {"id": 3, "jellyfinUsername": "mehdi"}},
+                     {"id": 10, "status": 3, "is4k": false, "seasons": [{"seasonNumber": 3}]},
+                     {"id": 11, "status": 1, "is4k": true, "seasons": [{"seasonNumber": 4}]}]}}
+    """
+    let title = SeerrTitle(try JSONDecoder().decode(SeerrDetailBody.self, from: Data(json.utf8)))
+    #expect(title.availability == .partiallyAvailable)
+    #expect(title.seasons.map(\.number) == [1, 2, 3, 4])
+    #expect(title.seasons.map(\.availability) == [.available, .requested, .requestable, .requestable])
+    #expect(title.requestableSeasons.map(\.number) == [3, 4])
+    #expect(title.requests == [SeerrRequest(id: 12, isApproved: false, seasons: [2], requestedBy: "mehdi")])
+
+    let available = SeerrTitle(try JSONDecoder().decode(SeerrDetailBody.self, from: Data(
+        #"{"id": 1, "mediaInfo": {"status": 5, "mediaUrl": "http://nas.local:8096/web/#/details?id=abc"}}"#.utf8)))
+    #expect(available.mediaURL?.host() == "nas.local")
+    #expect(!available.isInProgress)
+
+    let unknown = SeerrTitle(try JSONDecoder().decode(SeerrDetailBody.self, from: Data(#"{"id": 1}"#.utf8)))
+    #expect(unknown.availability == .requestable)
+    #expect(unknown.seasons.isEmpty)
+}
+
+/// Records the request and answers 201, like Seerr accepting it.
+private final class SeerrRecordingProtocol: URLProtocol {
+    nonisolated(unsafe) static var lastRequest: URLRequest?
+    nonisolated(unsafe) static var lastBody: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lastRequest = request
+        Self.lastBody = request.httpBody ?? request.httpBodyStream.map { stream in
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                data.append(buffer, count: count)
+            }
+            return data
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"id": 7, "status": 1}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Test func sendsSeerrRequests() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [SeerrRecordingProtocol.self]
+    let client = try #require(SeerrClient(server: "nas.local:5055/", apiKey: "secret",
+                                          session: URLSession(configuration: configuration)))
+    try await client.request(.tv, tmdbID: 95396, seasons: [3, 1])
+
+    let request = try #require(SeerrRecordingProtocol.lastRequest)
+    #expect(request.url?.absoluteString == "http://nas.local:5055/api/v1/request")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "X-Api-Key") == "secret")
+    let body = try #require(SeerrRecordingProtocol.lastBody)
+    let sent = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+    #expect(sent?["mediaType"] as? String == "tv")
+    #expect(sent?["mediaId"] as? Int == 95396)
+    #expect(sent?["seasons"] as? [Int] == [1, 3])
+}
+
+/// Signs in any Jellyfin account, then expects its session cookie on every later request.
+private final class SeerrSignInProtocol: URLProtocol {
+    nonisolated(unsafe) static var lastRequest: URLRequest?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lastRequest = request
+        let path = request.url!.path()
+        let signedIn = request.value(forHTTPHeaderField: "Cookie") == "connect.sid=s%3Aabc.def"
+        let (status, headers, body): (Int, [String: String], String) = switch path {
+        case "/api/v1/auth/jellyfin":
+            (200, ["Set-Cookie": "connect.sid=s%3Aabc.def; Path=/; Expires=Fri, 06 Nov 2026 10:00:00 GMT; HttpOnly"],
+             #"{"id": 3, "jellyfinUsername": "mehdi", "displayName": ""}"#)
+        case "/api/v1/auth/me" where signedIn: (200, [:], #"{"id": 3, "jellyfinUsername": "mehdi"}"#)
+        case "/api/v1/request/7" where signedIn && request.httpMethod == "DELETE": (204, [:], "")
+        default: (403, [:], #"{"message": "You do not have permission to access this endpoint."}"#)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Test func signsInToSeerrWithJellyfin() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [SeerrSignInProtocol.self]
+    configuration.httpCookieStorage = nil
+    let session = URLSession(configuration: configuration)
+
+    let (client, user) = try await SeerrClient.signIn(server: "nas.local:5055", with: .jellyfin(username: "mehdi", password: "pw"),
+                                                      session: session)
+    #expect(user.name == "mehdi")
+    #expect(client.auth == .session("s%3Aabc.def"))
+    #expect(try await client.currentUser().id == 3)
+    #expect(SeerrSignInProtocol.lastRequest?.value(forHTTPHeaderField: "X-Api-Key") == nil)
+
+    // An expired session reads as signed out, not as a missing permission.
+    let expired = try #require(SeerrClient(server: "nas.local:5055", auth: .session("old"), session: session))
+    do { _ = try await expired.currentUser() } catch SeerrError.unauthorized {} catch { Issue.record("\(error)") }
+
+    // Deleting: 204 with no body; someone else's request is refused without signing out.
+    try await client.deleteRequest(id: 7)
+    do {
+        try await client.deleteRequest(id: 8)
+        Issue.record("Expected a refusal")
+    } catch let SeerrError.http(status, message) {
+        #expect(status == 403)
+        #expect(message?.contains("permission") == true)
+    }
+    do { try await expired.deleteRequest(id: 7) } catch SeerrError.unauthorized {} catch { Issue.record("\(error)") }
+}

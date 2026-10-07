@@ -65,6 +65,7 @@ private struct RemotePreview: View {
                     .labelStyle(WideLabelStyle())
                     .controlSize(.large)
                     .disabled(isAdding)
+                    seerrButton
                     links
                 }
             } else {
@@ -76,6 +77,7 @@ private struct RemotePreview: View {
                     Button { add(backlog: true) } label: {
                         Label("Add to Backlog", systemImage: "tray.and.arrow.down")
                     }
+                    seerrButton
                     if isAdding { ProgressView().controlSize(.small) }
                     Spacer()
                     links
@@ -92,6 +94,10 @@ private struct RemotePreview: View {
     private var links: some View {
         ExternalLinks(kind: summary.kind, tmdbID: summary.tmdbID,
                       trailerKey: (movie?.videos ?? show?.videos)?.bestTrailerKey, imdbID: imdbID)
+    }
+
+    private var seerrButton: some View {
+        SeerrRequestButton(kind: summary.kind, tmdbID: summary.tmdbID, title: summary.title)
     }
 
     private var imdbID: String? { movie?.imdbId ?? show?.externalIds?.imdbId }

@@ -56,6 +56,7 @@ struct TVShowDetailView: View {
                 } trailing: {
                     RatingView(rating: show.userRating) { appState.library.setRating(show, $0) }
                 }
+                SeerrRequestButton(kind: .tv, tmdbID: show.tmdbID, title: show.name)
                 ExternalLinks(kind: .tv, tmdbID: show.tmdbID, trailerKey: show.trailerKey, imdbID: show.imdbID,
                               homepage: show.homepage)
             }

@@ -24,6 +24,13 @@
 	<string>$(DROPBOX_APP_KEY)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.entertainment</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to your Seerr server to request movies and shows.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save your Year in Review card to your photo library.</string>
 	<key>TMDBReadToken</key>

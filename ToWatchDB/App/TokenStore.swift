@@ -1,4 +1,5 @@
 import Foundation
+import ToWatchCore
 import Security
 #if os(macOS)
 import CryptoKit
@@ -23,7 +24,24 @@ enum TokenStore {
     }
 }
 
-/// The app's secrets: the TMDB token and the Dropbox sign-in.
+/// The Seerr API key or sign-in session, kept with the other secrets (see `SecretStore`).
+enum SeerrAuthStore {
+    private static let account = "seerr-auth"
+
+    static func load() -> SeerrAuth? {
+        SecretStore.load(account).flatMap { try? JSONDecoder().decode(SeerrAuth.self, from: Data($0.utf8)) }
+    }
+
+    @discardableResult
+    static func save(_ auth: SeerrAuth) -> Bool {
+        guard let data = try? JSONEncoder().encode(auth) else { return false }
+        return SecretStore.save(String(decoding: data, as: UTF8.self), account: account)
+    }
+
+    static func delete() { SecretStore.delete(account) }
+}
+
+/// The app's secrets: the TMDB token, the Dropbox sign-in, and the Seerr API key.
 ///
 /// iOS keeps them in the Keychain. On macOS the app is signed ad hoc, so the Keychain knows it only by the hash
 /// of one exact build and asked for the login password after every update. There they're kept in a file

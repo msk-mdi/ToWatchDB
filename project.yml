@@ -35,6 +35,10 @@ targets:
         DropboxAppKey: $(DROPBOX_APP_KEY)
         UILaunchScreen: {}
         NSPhotoLibraryAddUsageDescription: Save your Year in Review card to your photo library.
+        # A Seerr server on the home network is usually plain http (http://192.168.1.10:5055).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Connect to your Seerr server to request movies and shows.
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.mehdi.towatchdb.title
             UTTypeDescription: ToWatchDB Title

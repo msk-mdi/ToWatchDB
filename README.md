@@ -98,8 +98,9 @@ ToWatchDB gets its movie and show information from TMDB, which needs a free key:
 4. In ToWatchDB, open **Settings ▸ TMDB** and paste it.
 
 ### Optional
-- **Dropbox Sync:** **Settings ▸ Dropbox Sync ▸ Connect Dropbox**, on each device. Your library is kept in
-  Dropbox ▸ Apps ▸ ToWatchDB.
+- **Dropbox Sync:** **Settings ▸ Dropbox Sync ▸ Connect Dropbox**, on each device, with the same Dropbox account.
+  Any Dropbox account works, including a free one: the sync file is small. ToWatchDB can only see its own
+  folder, Dropbox ▸ Apps ▸ ToWatchDB, where your library is kept.
 - **Seerr:** **Settings ▸ Seerr**: enter your server's address, then sign in with your Jellyfin or Emby account,
   your Seerr account, or the server's API key.
 - **Where to Watch country:** **Settings ▸ TMDB** (it starts with your device's region).
@@ -126,6 +127,9 @@ like "Arrival (2016)".
 ratings from TMDB and IMDb.
 
 **Can I use it without Dropbox?** Yes. Sync is optional; without it, each device keeps its own library.
+
+**Can ToWatchDB read my other Dropbox files?** No. It only has access to its own folder, Dropbox ▸ Apps ▸
+ToWatchDB.
 
 **Does it cost anything?** No. ToWatchDB is free, and so is a TMDB key for personal use.
 

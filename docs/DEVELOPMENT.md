@@ -51,8 +51,10 @@ On iPad and Mac, any title can open in its own window, posters drag into the lib
    Optionally add your signing team there too, so Siri & Shortcuts actions run.
    For Dropbox Sync, create an app at <https://www.dropbox.com/developers/apps> (Scoped access, **App folder**,
    named e.g. ToWatchDB), enable the `files.content.read` and `files.content.write` permissions, and put its
-   app key in `DROPBOX_APP_KEY`. The key isn't secret (sign-in uses PKCE), so Release builds keep it. While the
-   Dropbox app is in development mode, only your own account (plus up to 500 users you link) can connect.
+   app key in `DROPBOX_APP_KEY`. The key isn't secret (sign-in uses PKCE), so Release builds keep it. A new
+   Dropbox app only accepts your own account: click **Enable additional users** on its App Console page to let
+   up to 500 accounts connect (the released app has this on). Once 50 accounts have connected, Dropbox gives two
+   weeks to apply for production status (**Apply for production**, free) before new accounts are blocked.
 3. `xcodegen generate && open ToWatchDB.xcodeproj`
 
 The Xcode project is generated from `project.yml` — edit that, not the `.xcodeproj`.

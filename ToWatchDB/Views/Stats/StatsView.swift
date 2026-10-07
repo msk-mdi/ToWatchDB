@@ -7,8 +7,6 @@ import ToWatchCore
 struct StatsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
 
     @State private var period: StatsPeriod = .year(StatsPeriod.calendar.component(.year, from: .now))
     @State private var comparedYear: Int?
@@ -23,9 +21,11 @@ struct StatsView: View {
         // Cached until the library changes, so coming back to Stats doesn't recompute everything.
         // A hidden page (kept alive on Mac) shows its last stats instead of recomputing after every save.
         let stats = appState.cached(Self.cacheKey(period), allowStale: !isActive) {
-            StatsService.stats(movies: movies, shows: shows, period: period)
+            StatsService.stats(movies: appState.all(), shows: appState.all(), period: period)
         }
-        let years = appState.cached("watch-years", allowStale: !isActive) { StatsService.watchYears(movies: movies, shows: shows) }
+        let years = appState.cached("watch-years", allowStale: !isActive) {
+            StatsService.watchYears(movies: appState.all(), shows: appState.all())
+        }
         let showsCompare = if case let .year(year) = period { years.contains { $0 != year } } else { false }
         // With nothing else on the page, the empty state is centered like every other screen's.
         let isBlank = stats.isEmpty && !showsCompare && stats.undatedWatches == 0
@@ -55,7 +55,7 @@ struct StatsView: View {
 
                 if showsCompare, case let .year(year) = period {
                     CompareSection(year: year, current: stats, years: years.filter { $0 != year },
-                                   comparedYear: $comparedYear, movies: movies, shows: shows)
+                                   comparedYear: $comparedYear)
                 }
 
                 if stats.undatedWatches > 0, period != .allTime {
@@ -384,14 +384,12 @@ private struct CompareSection: View {
     let current: WatchStats
     let years: [Int]
     @Binding var comparedYear: Int?
-    let movies: [Movie]
-    let shows: [TVShow]
 
     var body: some View {
         let other = comparedYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first { $0 < year } ?? years[0]
         // The page's key: comparing against a year already shown (or showing the compared year) reuses its stats.
         let previous = appState.cached(StatsView.cacheKey(.year(other)), allowStale: !isActive) {
-            StatsService.stats(movies: movies, shows: shows, period: .year(other))
+            StatsService.stats(movies: appState.all(), shows: appState.all(), period: .year(other))
         }
 
         VStack(alignment: .leading, spacing: 12) {

@@ -8,15 +8,13 @@ struct DiscoverView: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
 
     private var trendingMovies: [MediaSummary] { appState.trending?.movies ?? [] }
     private var trendingShows: [MediaSummary] { appState.trending?.shows ?? [] }
 
     var body: some View {
         let loadError = appState.trendingError
-        let ids = appState.cached("library-ids") { LibraryIDs(movies: movies, shows: shows) }
+        let ids = appState.libraryIDs
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if appState.client != nil && loadError == nil {

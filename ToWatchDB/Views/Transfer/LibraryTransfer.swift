@@ -98,7 +98,8 @@ private struct LibraryFileTransfers: ViewModifier {
                 filename = "ToWatchDB Backup \(today).json"
                 isExporting = true
             case .exportCSV:
-                document = ExportFile(data: Data(try appState.library.exportCSV().utf8))
+                // The byte-order mark makes Excel read the file as UTF-8 rather than garbling accented titles.
+                document = ExportFile(data: Data(("\u{FEFF}" + (try appState.library.exportCSV())).utf8))
                 contentType = .commaSeparatedText
                 filename = "ToWatchDB \(today).csv"
                 isExporting = true

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // Codable mirrors of the TMDB v3 JSON payloads we use. Decoded with `.convertFromSnakeCase`.
 
@@ -184,11 +185,28 @@ public enum TMDBDate {
     /// The user's current calendar day as a TMDB date (its UTC midnight). Comparing against the UTC day instead
     /// made tomorrow's episodes count as aired on a US evening, and kept yesterday's as "today" in Asia.
     public static func today(_ now: Date = .now, timeZone: TimeZone = .current) -> Date {
+        // Called for every episode in a progress pass; building a calendar each time was most of its cost.
+        if let last = lastToday.withLock({ $0 }), last.timeZone == timeZone, last.interval.start <= now, now < last.interval.end {
+            return last.day
+        }
         var local = Calendar(identifier: .gregorian)
         local.timeZone = timeZone
-        let day = local.dateComponents([.year, .month, .day], from: now)
-        return utcCalendar.date(from: day) ?? utcCalendar.startOfDay(for: now)
+        let components = local.dateComponents([.year, .month, .day], from: now)
+        let day = utcCalendar.date(from: components) ?? utcCalendar.startOfDay(for: now)
+        if let interval = local.dateInterval(of: .day, for: now) {
+            lastToday.withLock { $0 = Today(timeZone: timeZone, interval: interval, day: day) }
+        }
+        return day
     }
+
+    private struct Today: Sendable {
+        let timeZone: TimeZone
+        /// The local day `day` stands for.
+        let interval: DateInterval
+        let day: Date
+    }
+
+    private static let lastToday = Mutex<Today?>(nil)
 
     /// The UTC day a TMDB date falls on.
     public static func day(of date: Date) -> Date {

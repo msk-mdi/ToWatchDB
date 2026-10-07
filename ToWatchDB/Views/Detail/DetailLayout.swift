@@ -197,7 +197,8 @@ struct CastRow: View {
             Text("Cast").font(.title3.bold())
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(cast) { person in
+                    // By position: TMDB can list one person twice (two roles), and duplicate IDs confuse ForEach.
+                    ForEach(Array(cast.enumerated()), id: \.offset) { _, person in
                         VStack(spacing: 6) {
                             RemoteImage(url: TMDBImage.url(person.profilePath, size: .small)) { image in
                                 image.resizable().scaledToFill()

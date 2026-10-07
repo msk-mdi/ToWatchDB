@@ -130,8 +130,8 @@ public struct LibraryService {
     @discardableResult
     public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async -> Int {
         let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
-        let shows = ((try? context.fetch(FetchDescriptor<TVShow>())) ?? [])
-            .filter { $0.isOngoing && !$0.isAbandoned && isStale($0.lastRefreshed) }
+        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate { !$0.isAbandoned }))) ?? [])
+            .filter { $0.isOngoing && isStale($0.lastRefreshed) }
         let movies = ((try? context.fetch(FetchDescriptor<Movie>())) ?? [])
             .filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
 
@@ -178,8 +178,9 @@ public struct LibraryService {
             .filter { $0.imdbID != nil && isStale($0) }
         let allShows = ((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).filter(isStale)
         await lookUpIMDbIDs(allShows.filter { $0.imdbID == nil }, now: now)
+        // The lookup awaited the network: a title deleted meanwhile (by the user or a sync) can't be read.
         let shows = allShows.filter { $0.isLive && $0.imdbID != nil }
-        return await refreshIMDbRatings(movies: movies, shows: shows, now: now)
+        return await refreshIMDbRatings(movies: movies.filter(\.isLive), shows: shows, now: now)
     }
 
     /// A show gets its IMDb ID from a full refresh, and only ongoing shows are refreshed on their own, so
@@ -297,8 +298,11 @@ public struct LibraryService {
     }
 
     // MARK: Watch state
+    // Setters skip a model deleted meanwhile (by a sync, or a refresh dropping an episode): a view or menu can
+    // still hold it, and writing to a deleted model can trap.
 
     public func setWatched(_ movie: Movie, _ watched: Bool, on date: Date? = .now) {
+        guard movie.isLive else { return }
         movie.isWatched = watched
         movie.watchedDate = watched ? date : nil
         if watched { movie.isInBacklog = false }
@@ -306,6 +310,7 @@ public struct LibraryService {
     }
 
     public func setWatched(_ episode: Episode, _ watched: Bool, on date: Date? = .now) {
+        guard episode.isLive else { return }
         episode.isWatched = watched
         episode.watchedDate = watched ? date : nil
         if watched, let show = episode.show {
@@ -317,18 +322,21 @@ public struct LibraryService {
 
     /// Marks every aired episode of the season watched (or all of them unwatched).
     public func setWatched(_ season: Season, _ watched: Bool, on date: Date? = .now, now: Date = .now) {
+        guard season.isLive else { return }
         let episodes = watched ? season.airedEpisodes(asOf: now) : season.sortedEpisodes
         mark(episodes, watched: watched, on: date, show: season.show)
     }
 
     /// Marks every aired regular episode of the show watched (or every episode unwatched).
     public func setWatched(_ show: TVShow, _ watched: Bool, on date: Date? = .now, now: Date = .now) {
+        guard show.isLive else { return }
         let episodes = watched ? show.airedEpisodes(asOf: now) : show.sortedSeasons.flatMap(\.sortedEpisodes)
         mark(episodes, watched: watched, on: date, show: show)
     }
 
     /// Marks this episode and every aired regular episode before it as watched.
     public func markWatchedUpTo(_ episode: Episode, on date: Date? = .now, now: Date = .now) {
+        guard episode.isLive else { return }
         guard let show = episode.show else { return setWatched(episode, true, on: date) }
         let ordered = show.regularEpisodes
         guard let index = ordered.firstIndex(where: { $0.persistentModelID == episode.persistentModelID }) else {
@@ -352,30 +360,39 @@ public struct LibraryService {
 
     // MARK: Lists, ratings, notes
 
-    public func setBacklog(_ movie: Movie, _ value: Bool) { movie.isInBacklog = value; save() }
-    public func setBacklog(_ show: TVShow, _ value: Bool) { show.isInBacklog = value; save() }
-    public func setFavorite(_ movie: Movie, _ value: Bool) { movie.isFavorite = value; save() }
-    public func setFavorite(_ show: TVShow, _ value: Bool) { show.isFavorite = value; save() }
-    public func setAbandoned(_ show: TVShow, _ value: Bool) { show.isAbandoned = value; save() }
+    public func setBacklog(_ movie: Movie, _ value: Bool) { set(movie, \.isInBacklog, value) }
+    public func setBacklog(_ show: TVShow, _ value: Bool) { set(show, \.isInBacklog, value) }
+    public func setFavorite(_ movie: Movie, _ value: Bool) { set(movie, \.isFavorite, value) }
+    public func setFavorite(_ show: TVShow, _ value: Bool) { set(show, \.isFavorite, value) }
+    public func setAbandoned(_ show: TVShow, _ value: Bool) { set(show, \.isAbandoned, value) }
 
     /// Ratings are 0–10; `nil` clears.
-    public func setRating(_ movie: Movie, _ rating: Double?) { movie.userRating = rating.map(Self.clampRating); save() }
-    public func setRating(_ show: TVShow, _ rating: Double?) { show.userRating = rating.map(Self.clampRating); save() }
-    public func setRating(_ episode: Episode, _ rating: Double?) { episode.userRating = rating.map(Self.clampRating); save() }
+    public func setRating(_ movie: Movie, _ rating: Double?) { set(movie, \.userRating, rating.map(Self.clampRating)) }
+    public func setRating(_ show: TVShow, _ rating: Double?) { set(show, \.userRating, rating.map(Self.clampRating)) }
+    public func setRating(_ episode: Episode, _ rating: Double?) { set(episode, \.userRating, rating.map(Self.clampRating)) }
+
+    private func set<M: PersistentModel, T>(_ model: M, _ keyPath: ReferenceWritableKeyPath<M, T>, _ value: T) {
+        guard model.isLive else { return }
+        model[keyPath: keyPath] = value
+        save()
+    }
 
     static func clampRating(_ value: Double) -> Double { min(max(value, 0), 10) }
 
     @discardableResult
-    public func addNote(_ text: String, to movie: Movie) -> Note? { insertNote(text) { $0.movie = movie } }
+    public func addNote(_ text: String, to movie: Movie) -> Note? { insertNote(text, besides: movie.notes) { $0.movie = movie } }
     @discardableResult
-    public func addNote(_ text: String, to show: TVShow) -> Note? { insertNote(text) { $0.show = show } }
+    public func addNote(_ text: String, to show: TVShow) -> Note? { insertNote(text, besides: show.notes) { $0.show = show } }
     @discardableResult
-    public func addNote(_ text: String, to episode: Episode) -> Note? { insertNote(text) { $0.episode = episode } }
+    public func addNote(_ text: String, to episode: Episode) -> Note? { insertNote(text, besides: episode.notes) { $0.episode = episode } }
 
-    private func insertNote(_ text: String, attach: (Note) -> Void) -> Note? {
+    private func insertNote(_ text: String, besides existing: [Note]?, attach: (Note) -> Void) -> Note? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let note = Note(text: trimmed)
+        // Sync and import tell a title's notes apart by their creation second; two in one second became one.
+        let taken = Set((existing ?? []).map { LibrarySync.noteKey($0.createdAt) })
+        while taken.contains(LibrarySync.noteKey(note.createdAt)) { note.createdAt += 1 }
         context.insert(note)
         attach(note)
         save()

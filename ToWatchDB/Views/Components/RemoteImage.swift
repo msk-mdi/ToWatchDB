@@ -80,7 +80,12 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
     }
 
     private func load() async {
-        guard let url else { return }
+        guard let url else {
+            // An image left from a previous URL would keep showing instead of the placeholder.
+            loaded = nil
+            failed = false
+            return
+        }
         if ImageCache.shared.image(for: url) != nil {
             // The body already draws it from the cache; only clear an image left from a previous URL.
             if loaded != nil { loaded = nil }
@@ -90,6 +95,9 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
         failed = false
         do {
             let entry = try await ImageCache.shared.load(url)
+            // Waiting on the shared download ignores cancellation: the URL changed meanwhile, and this older
+            // image would replace the new one.
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.15)) { loaded = entry.image }
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {

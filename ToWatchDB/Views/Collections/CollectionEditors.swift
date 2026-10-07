@@ -133,6 +133,8 @@ private struct TagEditor: View {
     @State private var colorName = "gray"
 
     var body: some View {
+        // Once per redraw: each check fetches every tag.
+        let isNameTaken = isNameTaken
         Form {
             Section {
                 TextField("Name", text: $name, prompt: Text("Rewatch"))
@@ -299,8 +301,12 @@ private struct SmartListEditor: View {
         )
     }
 
+    /// A text field that updates the rules on every keystroke. A formatted value field only committed on Return
+    /// or leaving the field, so a year typed just before clicking Save was dropped.
     private func yearField(_ label: String, value: Binding<Int?>) -> some View {
-        TextField(label, value: value, format: .number.grouping(.never), prompt: Text("Any"))
+        TextField(label, text: Binding(get: { value.wrappedValue.map(String.init) ?? "" },
+                                       set: { value.wrappedValue = Int($0.filter(\.isASCII).filter(\.isNumber)) }),
+                  prompt: Text("Any"))
             #if os(iOS)
             .keyboardType(.numberPad)
             #endif

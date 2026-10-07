@@ -13,7 +13,7 @@ final class DropboxSync {
 
     let client: DropboxClient? = DropboxClient.bundledAppKey.map(DropboxClient.init)
 
-    private(set) var isConnected = SecretStore.load(refreshTokenAccount) != nil
+    private(set) var isConnected = false
     private(set) var isSyncing = false
     private(set) var lastError: String?
 
@@ -27,6 +27,30 @@ final class DropboxSync {
 
     /// The library version the last sync uploaded or found already in Dropbox. A save after it needs a sync.
     private(set) var syncedVersion: Int?
+
+    /// The Dropbox revision the base snapshot matches. While the file is still at it, a sync with no local
+    /// changes has nothing to do, and one with changes can merge with the base instead of downloading.
+    @ObservationIgnored private var syncedRev: String? = UserDefaults.standard.string(forKey: "dropboxSyncedRev") {
+        didSet { UserDefaults.standard.set(syncedRev, forKey: "dropboxSyncedRev") }
+    }
+    /// The sign-in couldn't be read when checked (a locked iPhone), so it's checked again before each sync.
+    @ObservationIgnored private var isConnectionUnknown = false
+
+    init() { checkConnection() }
+
+    /// Reads the sign-in again if it couldn't be read before. Called before syncing.
+    func checkConnectionIfNeeded() {
+        if isConnectionUnknown { checkConnection() }
+    }
+
+    private func checkConnection() {
+        do {
+            isConnected = try SecretStore.read(Self.refreshTokenAccount) != nil
+            isConnectionUnknown = false
+        } catch {
+            isConnectionUnknown = true
+        }
+    }
 
     @ObservationIgnored private var accessToken: (value: String, expires: Date)?
     /// A sync asked for while one was running; it runs right after, so a change made meanwhile isn't missed.
@@ -58,9 +82,11 @@ final class DropboxSync {
             accessToken = (tokens.accessToken, .now.addingTimeInterval(tokens.expiresIn - 60))
             // A different account's file has nothing to do with the last one's.
             try? FileManager.default.removeItem(at: Self.baseURL)
+            syncedRev = nil
             lastSynced = nil
             syncedVersion = nil
             lastError = nil
+            isConnectionUnknown = false
             isConnected = true
             accountEmail = try? await client.accountEmail(accessToken: tokens.accessToken)
         } catch {
@@ -85,6 +111,8 @@ final class DropboxSync {
         }
         SecretStore.delete(Self.refreshTokenAccount)
         try? FileManager.default.removeItem(at: Self.baseURL)
+        syncedRev = nil
+        isConnectionUnknown = false
         accessToken = nil
         accountEmail = nil
         lastSynced = nil
@@ -98,6 +126,7 @@ final class DropboxSync {
     /// Downloads the file, merges it with the library, and uploads the result if it changed.
     /// `library` must be read fresh after each await; `version` is the library's current save count.
     func sync(library: @escaping () -> LibraryService, version: @escaping () -> Int) async {
+        checkConnectionIfNeeded()
         guard isConnected, let client else { return }
         guard !isSyncing else {
             needsAnotherPass = true
@@ -118,7 +147,21 @@ final class DropboxSync {
         // A conflict means another device uploaded between our download and upload: merge again with its file.
         for attempt in 1...3 {
             do {
-                let file = try await authorized(session) { try await client.download(path: Self.path, accessToken: $0) }
+                // Most syncs (each time the app comes to the front) find nothing new on either side. Checking the
+                // revision skips downloading, decoding and snapshotting the whole library for those.
+                let file: DropboxClient.File?
+                if attempt == 1, let syncedRev, let base = Self.loadBaseData(),
+                   try await authorized(session, { try await client.revision(path: Self.path, accessToken: $0) }) == syncedRev {
+                    try checkSession()
+                    if syncedVersion == version() {
+                        lastSynced = .now
+                        lastError = nil
+                        return
+                    }
+                    file = DropboxClient.File(data: base, rev: syncedRev)
+                } else {
+                    file = try await authorized(session) { try await client.download(path: Self.path, accessToken: $0) }
+                }
                 try checkSession()
                 // Decoding, merging, and encoding the whole library took about a second on the main thread,
                 // which froze scrolling after launch. Only reading and writing the models stays on it.
@@ -147,22 +190,22 @@ final class DropboxSync {
                     // The library now holds everything in this file, so the file is the new common ancestor. With
                     // the old base, a retry after a conflict (or the next sync after a failed upload) took what
                     // this merge brought in for edits made here, and overwrote newer edits from other devices.
-                    if let file { saveBase(file.data) }
+                    if let file { saveBase(file.data, rev: file.rev) }
                 }
                 let snapshotVersion = version()
                 let (data, changed) = try await Self.offMain { [local] in
-                    let snapshot = LibrarySync.normalized(local)
-                    return (try BackupCoding.encoder.encode(snapshot), remote.map { !LibrarySync.sameContent($0, snapshot) } ?? true)
+                    (try BackupCoding.compactEncoder.encode(local), remote.map { !LibrarySync.sameContent($0, local) } ?? true)
                 }
 
+                var rev = file?.rev
                 if changed {
                     try checkSession()
-                    try await authorized(session) {
+                    rev = try await authorized(session) {
                         try await client.upload(data, path: Self.path, replacing: file?.rev, accessToken: $0)
                     }
                 }
                 try checkSession()
-                saveBase(data)
+                saveBase(data, rev: rev)
                 syncedVersion = snapshotVersion
                 lastSynced = .now
                 lastError = nil
@@ -175,6 +218,9 @@ final class DropboxSync {
                 // "Sync will try again later": wait a little and try again before saying so.
                 do { try await Task.sleep(for: .seconds(5 * attempt)) } catch { return }
                 continue
+            } catch DropboxError.secretsUnavailable {
+                lastError = DropboxError.secretsUnavailable.localizedDescription
+                return
             } catch DropboxError.signedOut {
                 disconnect()
                 lastError = DropboxError.signedOut.localizedDescription
@@ -207,8 +253,14 @@ final class DropboxSync {
 
     private func validAccessToken() async throws -> String {
         if let accessToken, accessToken.expires > .now { return accessToken.value }
-        guard let client, let refreshToken = SecretStore.load(Self.refreshTokenAccount) else { throw DropboxError.signedOut }
+        let session = session
+        let refreshToken: String?
+        do { refreshToken = try SecretStore.read(Self.refreshTokenAccount) } catch { throw DropboxError.secretsUnavailable }
+        guard let client, let refreshToken else { throw DropboxError.signedOut }
         let tokens = try await client.refresh(refreshToken)
+        // Connecting or disconnecting meanwhile: this token is for the old sign-in, and caching it would let the
+        // next sync upload to that account.
+        guard session == self.session else { throw CancellationError() }
         accessToken = (tokens.accessToken, .now.addingTimeInterval(tokens.expiresIn - 60))
         return tokens.accessToken
     }
@@ -225,13 +277,20 @@ final class DropboxSync {
         try await Task.detached(priority: .userInitiated, operation: work).value
     }
 
+    private nonisolated static func loadBaseData() -> Data? { try? Data(contentsOf: Self.baseURL) }
+
     private nonisolated static func loadBase() -> LibraryBackup? {
-        guard let data = try? Data(contentsOf: Self.baseURL) else { return nil }
-        return try? BackupCoding.decode(data)
+        loadBaseData().flatMap { try? BackupCoding.decode($0) }
     }
 
-    private func saveBase(_ data: Data) {
+    /// `rev` is the Dropbox revision whose content `data` matches, if known.
+    private func saveBase(_ data: Data, rev: String?) {
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
-        try? data.write(to: Self.baseURL, options: .atomic)
+        do {
+            try data.write(to: Self.baseURL, options: .atomic)
+            syncedRev = rev
+        } catch {
+            syncedRev = nil
+        }
     }
 }

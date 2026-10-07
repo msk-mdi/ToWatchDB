@@ -35,14 +35,26 @@ public struct IMDbClient: Sendable {
     /// Ratings keyed by IMDb ID (`tt…`). A `nil` value means IMDb answered for that title but has no rating
     /// (or doesn't know the ID); IDs it didn't answer for are left out, so their stored ratings stay as they are.
     /// Throws when IMDb returns no data, which it does with a 200 status when it rejects or limits a query.
+    /// A failed batch only leaves its titles out, so a limit hit late in a big library keeps the earlier ones;
+    /// it throws only if every batch failed.
     public func ratings(for ids: [String]) async throws -> [String: IMDbRating?] {
         // IDs are interpolated into the query, so anything that isn't a plain `tt` ID is dropped.
         let valid = Array(Set(ids.filter(Self.isValidID))).sorted()
         var ratings: [String: IMDbRating?] = [:]
+        var lastError: (any Error)?
+        var answered = false
         for start in stride(from: 0, to: valid.count, by: Self.batchSize) {
             let batch = Array(valid[start..<min(start + Self.batchSize, valid.count)])
-            try await ratings.merge(fetch(batch)) { _, new in new }
+            do {
+                try await ratings.merge(fetch(batch)) { _, new in new }
+                answered = true
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
         }
+        if !answered, let lastError { throw lastError }
         return ratings
     }
 

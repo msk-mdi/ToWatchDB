@@ -18,8 +18,8 @@ struct ToWatchDBApp: App {
     #else
     @State private var appState = AppState()
     #endif
-    /// Library version the App Shortcut parameters were last updated for.
-    @State private var shortcutsVersion: Int?
+    /// What the App Shortcut parameters were last updated with (see `AppState.shortcutsContent`).
+    @State private var shortcutsContent: Int?
 
     init() {
         // Posters are requested constantly while scrolling; a larger shared cache keeps them local.
@@ -42,11 +42,15 @@ struct ToWatchDBApp: App {
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     // Teach Siri the current show and movie names for phrases like "Mark Severance watched".
-                    // On Mac the app becomes active every time it comes to the front, so only when the library
-                    // changed since the last update.
-                    if phase == .active, shortcutsVersion != appState.libraryVersion {
-                        shortcutsVersion = appState.libraryVersion
-                        ToWatchShortcuts.updateAppShortcutParameters()
+                    // On Mac the app becomes active every time it comes to the front, so only when what Siri is
+                    // taught changed: updating walks every show's episodes, and most saves (a refresh, a sync)
+                    // change neither the names nor the next episodes.
+                    if phase == .active {
+                        let content = appState.shortcutsContent
+                        if shortcutsContent != content {
+                            shortcutsContent = content
+                            ToWatchShortcuts.updateAppShortcutParameters()
+                        }
                     }
                     appState.syncWithDropbox(for: phase)
                 }
@@ -121,11 +125,7 @@ struct AppCommands: Commands {
             Button("Export as CSV…") { inMainWindow { appState.fileRequest = .exportCSV } }
         }
         CommandMenu("Library") {
-            Button("Refresh Library") { Task { await appState.refreshLibrary(force: true) } }
-                .keyboardShortcut("r")
-                .disabled(appState.isRefreshing)
-            Button("Sync with Dropbox") { appState.syncWithDropbox() }
-                .disabled(!appState.dropbox.isConnected || appState.dropbox.isSyncing)
+            LibrarySyncCommands(appState: appState)
             Divider()
             Button("Next to Watch") { show(.nextToWatch) }
                 .keyboardShortcut("1")
@@ -223,3 +223,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 #endif
+
+/// Refresh and Sync, in their own view: reading the refresh and sync state in the commands' body redrew every
+/// menu (and worked out the focused show's next episode) each time a sync or refresh started or stopped.
+private struct LibrarySyncCommands: View {
+    let appState: AppState
+
+    var body: some View {
+        Button("Refresh Library") { Task { await appState.refreshLibrary(force: true) } }
+            .keyboardShortcut("r")
+            .disabled(appState.isRefreshing)
+        Button("Sync with Dropbox") { appState.syncWithDropbox() }
+            .disabled(!appState.dropbox.isConnected || appState.dropbox.isSyncing)
+    }
+}

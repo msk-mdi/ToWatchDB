@@ -7,6 +7,7 @@ import ToWatchCore
 /// requested in one click; a show opens a season picker.
 struct SeerrRequestButton: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -16,7 +17,9 @@ struct SeerrRequestButton: View {
 
     @State private var status: SeerrTitle?
     @State private var isRequesting = false
-    @State private var isPickingSeasons = false
+    /// The status the season sheet was opened with. The live one goes nil if a status check fails, which left
+    /// the sheet empty, without its buttons.
+    @State private var seasonPicker: SeerrTitle?
     /// Bumped after a request or deletion, to load the new status (and keep checking it).
     @State private var watchGeneration = 0
     @State private var deleting: SeerrRequest?
@@ -34,7 +37,7 @@ struct SeerrRequestButton: View {
             .fixedSize(horizontal: !isCompact, vertical: false)
             .buttonStyle(.bordered)
             .modifier(CompactWidth(isCompact: isCompact))
-            .task(id: "\(seerr.baseURL)|\(seerr.auth.hashValue)|\(kind.rawValue)-\(tmdbID)|\(watchGeneration)") {
+            .task(id: "\(seerr.baseURL)|\(seerr.auth.hashValue)|\(kind.rawValue)-\(tmdbID)|\(watchGeneration)|\(isActive)") {
                 await watch(seerr)
             }
             .confirmationDialog("Delete the request for “\(title)”?",
@@ -46,9 +49,9 @@ struct SeerrRequestButton: View {
                      ? "It's already approved. Seerr forgets the request, but a download Radarr or Sonarr already started keeps going."
                      : "Seerr forgets the request before anyone approves it.")
             }
-            .sheet(isPresented: $isPickingSeasons) {
-                if let status {
-                    SeerrSeasonSheet(showTitle: title, seerrTitle: status) { request(seerr, seasons: $0) }
+            .sheet(isPresented: Binding(get: { seasonPicker != nil }, set: { if !$0 { seasonPicker = nil } })) {
+                if let seasonPicker {
+                    SeerrSeasonSheet(showTitle: title, seerrTitle: seasonPicker) { request(seerr, seasons: $0) }
                 }
             }
         }
@@ -58,7 +61,7 @@ struct SeerrRequestButton: View {
     private func button(_ seerr: SeerrClient, _ status: SeerrTitle) -> some View {
         if canRequest(status) {
             Button {
-                if kind == .tv { isPickingSeasons = true } else { request(seerr, seasons: []) }
+                if kind == .tv { seasonPicker = status } else { request(seerr, seasons: []) }
             } label: {
                 // The page's text color: dark with white text, or white with dark text in Dark Mode.
                 Label(requestLabel(status), systemImage: "tray.and.arrow.down")
@@ -127,7 +130,8 @@ struct SeerrRequestButton: View {
     }
 
     /// Loads the status, then checks it every 30 seconds while a request is in progress, so Requested turns
-    /// into Watch Now when the title arrives. Stops with the page. Hidden when Seerr can't be reached.
+    /// into Watch Now when the title arrives. Stops with the page, and while it's hidden (kept alive on Mac).
+    /// Hidden when Seerr can't be reached.
     private func watch(_ seerr: SeerrClient) async {
         while !Task.isCancelled {
             do {
@@ -136,9 +140,13 @@ struct SeerrRequestButton: View {
                 return
             } catch {
                 status = nil
+                isRequesting = false
                 return
             }
-            guard status?.isInProgress == true else { return }
+            // A request or deletion keeps the buttons off until its new status is in: turned back on with the
+            // old one, a second click sent the request again.
+            isRequesting = false
+            guard status?.isInProgress == true, isActive else { return }
             try? await Task.sleep(for: .seconds(30))
         }
     }
@@ -151,8 +159,8 @@ struct SeerrRequestButton: View {
                 watchGeneration += 1
             } catch {
                 appState.errorMessage = error.localizedDescription
+                isRequesting = false
             }
-            isRequesting = false
         }
     }
 
@@ -164,8 +172,8 @@ struct SeerrRequestButton: View {
                 watchGeneration += 1
             } catch {
                 appState.errorMessage = error.localizedDescription
+                isRequesting = false
             }
-            isRequesting = false
         }
     }
 }

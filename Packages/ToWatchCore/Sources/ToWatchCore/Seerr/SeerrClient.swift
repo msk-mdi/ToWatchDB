@@ -180,7 +180,9 @@ public struct SeerrClient: Sendable {
     static func normalizedURL(_ server: String) -> URL? {
         var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        if !text.contains("://") { text = "http://" + text }
+        // Without a scheme: plain http only for a home-network address (an IP, a .local or single-label name),
+        // which App Transport Security allows. It blocks http to anything else, so a public host gets https.
+        if !text.contains("://") { text = (isLocalNetworkAddress(text) ? "http://" : "https://") + text }
         while text.hasSuffix("/") { text.removeLast() }
         for suffix in ["/api/v1", "/api"] where text.lowercased().hasSuffix(suffix) {
             text.removeLast(suffix.count)
@@ -188,6 +190,13 @@ public struct SeerrClient: Sendable {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
               url.host() != nil else { return nil }
         return url
+    }
+
+    private static func isLocalNetworkAddress(_ address: String) -> Bool {
+        let hostAndPort = address.prefix { $0 != "/" }
+        if hostAndPort.hasPrefix("[") { return true } // An IPv6 literal.
+        let host = hostAndPort.prefix { $0 != ":" }.lowercased()
+        return !host.contains(".") || host.hasSuffix(".local") || host.allSatisfy { $0.isNumber || $0 == "." }
     }
 
     // MARK: Endpoints

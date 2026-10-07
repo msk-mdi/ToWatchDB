@@ -109,7 +109,7 @@ public enum LibrarySync {
 
     /// The backup as it reads back from a file: dates to the whole second.
     public static func normalized(_ backup: LibraryBackup) -> LibraryBackup {
-        guard let data = try? BackupCoding.encoder.encode(backup),
+        guard let data = try? BackupCoding.compactEncoder.encode(backup),
               let decoded = try? BackupCoding.decoder.decode(LibraryBackup.self, from: data) else { return backup }
         return decoded
     }
@@ -117,9 +117,10 @@ public enum LibrarySync {
     /// Whether two snapshots hold the same library for the user: the same titles and collections, and the same
     /// watch data, ratings, notes, and memberships. TMDB and IMDb details are left out: each device refreshes them
     /// at its own times and a merge keeps its own, so comparing them made devices re-upload on every sync.
+    /// Dates are written to the whole second, so the snapshots don't need normalizing first.
     public static func sameContent(_ a: LibraryBackup, _ b: LibraryBackup) -> Bool {
-        let a = try? BackupCoding.encoder.encode(UserContent(normalized(a)))
-        return a != nil && a == (try? BackupCoding.encoder.encode(UserContent(normalized(b))))
+        let a = try? BackupCoding.compactEncoder.encode(UserContent(a))
+        return a != nil && a == (try? BackupCoding.compactEncoder.encode(UserContent(b)))
     }
 
     /// The parts of a snapshot the user owns, in a stable order.
@@ -230,8 +231,10 @@ public enum LibrarySync {
 
     static func noteKey(_ createdAt: Date) -> Int { Int(createdAt.timeIntervalSince1970.rounded(.down)) }
 
-    /// Seasons and episodes are TMDB metadata, so one missing on a side isn't a deletion: the other side's is
-    /// kept. Episodes on both sides merge their watch state, rating, and notes.
+    /// Seasons and episodes are TMDB metadata, so one missing here isn't a deletion: the file's is kept if it
+    /// holds user data. One without any isn't taken: a refresh here removed it because TMDB dropped it, and
+    /// taking it back brought back the phantom episodes the removal was for. Each device's own refresh adds
+    /// the real new ones. Episodes on both sides merge their watch state, rating, and notes.
     private static func seasons(_ show: Versions<LibraryBackup.ShowRecord>) -> [LibraryBackup.SeasonRecord] {
         typealias EpisodeKey = [Int]
         func episodes(_ record: LibraryBackup.ShowRecord?) -> [EpisodeKey: LibraryBackup.EpisodeRecord] {
@@ -260,13 +263,20 @@ public enum LibrarySync {
             }
             return season
         }
+        func hasUserData(_ episode: LibraryBackup.EpisodeRecord) -> Bool {
+            episode.isWatched || episode.userRating != nil || !episode.notes.isEmpty
+        }
         for remoteSeason in show.remote.seasons {
             if let index = seasons.firstIndex(where: { $0.seasonNumber == remoteSeason.seasonNumber }) {
                 let present = Set(seasons[index].episodes.map(\.episodeNumber))
-                seasons[index].episodes += remoteSeason.episodes.filter { !present.contains($0.episodeNumber) }
+                let added = remoteSeason.episodes.filter { !present.contains($0.episodeNumber) && hasUserData($0) }
+                guard !added.isEmpty else { continue }
+                seasons[index].episodes += added
                 seasons[index].episodes.sort { $0.episodeNumber < $1.episodeNumber }
-            } else {
-                seasons.append(remoteSeason)
+            } else if remoteSeason.episodes.contains(where: hasUserData) {
+                var season = remoteSeason
+                season.episodes = season.episodes.filter(hasUserData)
+                seasons.append(season)
             }
         }
         return seasons.sorted { $0.seasonNumber < $1.seasonNumber }
@@ -326,7 +336,7 @@ public extension LibraryService {
     /// left alone, except for IMDb ratings newer than this device's. Returns whether anything changed.
     @discardableResult
     func applySyncedBackup(_ backup: LibraryBackup) throws -> Bool {
-        let episodeNotes = notesByEpisode()
+        let notes = notesByOwner()
         let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
                                 modelKey: \.uuid) { record in
             let space = Space(name: record.name, symbolName: record.symbolName, colorName: record.colorName)
@@ -366,7 +376,9 @@ public extension LibraryService {
             if list.rules != record.rules { list.rules = record.rules }
         }
 
-        try upsert(backup.movies, existing: context.fetch(FetchDescriptor<Movie>()), key: \.tmdbID,
+        var movies = FetchDescriptor<Movie>()
+        movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
+        try upsert(backup.movies, existing: context.fetch(movies), key: \.tmdbID,
                    modelKey: \.tmdbID, make: makeMovie) { movie, record in
             assign(movie, \.isWatched, record.isWatched)
             assign(movie, \.watchedDate, record.watchedDate)
@@ -375,12 +387,14 @@ public extension LibraryService {
             assign(movie, \.isFavorite, record.isFavorite)
             assign(movie, \.addedDate, record.addedDate)
             movie.adoptIMDbRating(from: record)
-            setNotes(record.notes, on: movie.notes) { $0.movie = movie }
+            setNotes(record.notes, on: notes.movies[movie.persistentModelID]) { $0.movie = movie }
             if Set((movie.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { movie.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((movie.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { movie.tags = record.tagIDs.compactMap { tags[$0] } }
         }
 
-        try upsert(backup.shows, existing: context.fetch(FetchDescriptor<TVShow>()), key: \.tmdbID,
+        var shows = FetchDescriptor<TVShow>()
+        shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
+        try upsert(backup.shows, existing: context.fetch(shows), key: \.tmdbID,
                    modelKey: \.tmdbID, make: makeShow) { show, record in
             assign(show, \.userRating, record.userRating)
             assign(show, \.isInBacklog, record.isInBacklog)
@@ -388,10 +402,10 @@ public extension LibraryService {
             assign(show, \.isAbandoned, record.isAbandoned)
             assign(show, \.addedDate, record.addedDate)
             show.adoptIMDbRating(from: record)
-            setNotes(record.notes, on: show.notes) { $0.show = show }
+            setNotes(record.notes, on: notes.shows[show.persistentModelID]) { $0.show = show }
             if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }
-            setEpisodes(record.seasons, on: show, notes: episodeNotes)
+            setEpisodes(record.seasons, on: show, notes: notes.episodes)
         }
 
         guard context.hasChanges else { return false }

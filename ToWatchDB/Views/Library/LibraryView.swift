@@ -6,8 +6,8 @@ import ToWatchCore
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
+    // Titles aren't queried: a query refetched the whole library after every save, even on hidden pages and
+    // when the cached list was reused. `scopedItems` fetches them when the list is recomputed.
     // Sorted by the store (localized standard order), not on every body pass.
     @Query(sort: \Space.name) private var spaces: [Space]
     @Query(sort: \MediaTag.name) private var tags: [MediaTag]
@@ -31,19 +31,6 @@ struct LibraryView: View {
         self.allowsScopeChange = allowsScopeChange
         self.showsSettingsButton = showsSettingsButton
         _sort = State(initialValue: scope.defaultSort)
-        // A list with a fixed scope loads only the titles it can show. With a scope picker the scope can change,
-        // so everything is loaded.
-        if !allowsScopeChange {
-            switch scope {
-            case .movies: _shows = Query(filter: #Predicate { _ in false })
-            case .shows: _movies = Query(filter: #Predicate { _ in false })
-            case .backlog:
-                _movies = Query(filter: #Predicate { $0.isInBacklog })
-                _shows = Query(filter: #Predicate { $0.isInBacklog })
-            case .watched: _movies = Query(filter: #Predicate { $0.isWatched })
-            default: break
-            }
-        }
     }
 
     var body: some View {
@@ -385,16 +372,24 @@ struct LibraryView: View {
         func status(_ item: LibraryItem) -> WatchStatus {
             self.showProgress(for: item, in: progress)?.status ?? item.watchStatus()
         }
+        func items(_ movies: [Movie], _ shows: [TVShow]) -> [LibraryItem] {
+            movies.map(LibraryItem.movie) + shows.map(LibraryItem.show)
+        }
+        // Only the titles the scope can show are loaded. A space or tag starts from its own titles rather than
+        // reading every title's spaces or tags.
         var items: [LibraryItem] = switch scope {
-        case .movies: movies.map(LibraryItem.movie)
-        case .shows: shows.map(LibraryItem.show)
-        default: movies.map(LibraryItem.movie) + shows.map(LibraryItem.show)
+        case .movies: items(appState.all(), [])
+        case .shows: items([], appState.all())
+        case .backlog: items(appState.all(matching: #Predicate { $0.isInBacklog }), appState.all(matching: #Predicate { $0.isInBacklog }))
+        case .watched: items(appState.all(matching: #Predicate { $0.isWatched }), appState.all())
+        case let .space(id):
+            spaces.first { $0.uuid == id }.map { items($0.movies ?? [], $0.shows ?? []) } ?? []
+        case let .tag(id):
+            tags.first { $0.uuid == id }.map { items($0.movies ?? [], $0.shows ?? []) } ?? []
+        default: items(appState.all(), appState.all())
         }
         switch scope {
-        case .backlog: items = items.filter(\.isInBacklog)
         case .watched: items = items.filter { status($0) == .watched }
-        case let .space(id): items = items.filter { $0.spaces.contains { $0.uuid == id } }
-        case let .tag(id): items = items.filter { $0.tags.contains { $0.uuid == id } }
         case let .smartList(id):
             let rules = smartLists.first { $0.uuid == id }?.rules ?? SmartListRules()
             items = items.filter { item in

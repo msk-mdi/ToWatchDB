@@ -149,6 +149,10 @@ public struct SmartListRules: Codable, Sendable, Hashable {
 }
 
 extension SmartListRules {
+    private enum CodingKeys: String, CodingKey {
+        case media, statuses, genres, tagIDs, spaceIDs, minimumRating, releasedFrom, releasedThrough, backlogOnly, favoritesOnly
+    }
+
     /// Sets are written sorted. Their order differs between instances and launches, so two identical rules
     /// encoded differently, and sync saw a change and uploaded the library on every pass.
     public func encode(to encoder: any Encoder) throws {
@@ -163,5 +167,22 @@ extension SmartListRules {
         try container.encodeIfPresent(releasedThrough, forKey: .releasedThrough)
         try container.encode(backlogOnly, forKey: .backlogOnly)
         try container.encode(favoritesOnly, forKey: .favoritesOnly)
+    }
+
+    /// A missing key takes its default. The synthesized decoder threw for any non-optional field a stored rule
+    /// lacked, so adding a criterion would have made every existing smart list match everything.
+    public init(from decoder: any Decoder) throws {
+        self.init()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        media = try container.decodeIfPresent(Media.self, forKey: .media) ?? media
+        statuses = try container.decodeIfPresent(Set<WatchStatus>.self, forKey: .statuses) ?? statuses
+        genres = try container.decodeIfPresent(Set<String>.self, forKey: .genres) ?? genres
+        tagIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .tagIDs) ?? tagIDs
+        spaceIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .spaceIDs) ?? spaceIDs
+        minimumRating = try container.decodeIfPresent(Double.self, forKey: .minimumRating)
+        releasedFrom = try container.decodeIfPresent(Int.self, forKey: .releasedFrom)
+        releasedThrough = try container.decodeIfPresent(Int.self, forKey: .releasedThrough)
+        backlogOnly = try container.decodeIfPresent(Bool.self, forKey: .backlogOnly) ?? backlogOnly
+        favoritesOnly = try container.decodeIfPresent(Bool.self, forKey: .favoritesOnly) ?? favoritesOnly
     }
 }

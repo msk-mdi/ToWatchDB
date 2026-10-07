@@ -586,6 +586,14 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
 14. **No `List` for plain row pages on Mac.** A Mac `List` is an `NSTableView`; showing it (Next to Watch,
     Upcoming) cost about 20 ms per switch, and its rows about as much again. `RowList` uses a lazy stack on
     macOS and keeps `List` (and swipe actions) on iOS.
+15. **No whole-table `@Query` feeding a cache.** A `@Query` refetches after every save, hidden pages included,
+    even when `appState.cached` reuses its value. Pages fetch titles inside the `cached` closure instead
+    (`appState.all(_:matching:)`, `appState.libraryIDs`); `@Query` stays for small tables and filtered lookups.
+16. **Sync skips unchanged files.** `DropboxSync` keeps the revision its base matches: when the file is still
+    at it, a sync with no local changes stops after one metadata request, and one with changes merges against
+    the base without downloading. The sync file is compact JSON (`BackupCoding.compactEncoder`).
+17. **Group notes in one fetch.** `notesByOwner()` reads every note once for backups and syncs; reading
+    `movie.notes` or `episode.notes` runs a query per model.
 
 To measure page switches, see §9.
 

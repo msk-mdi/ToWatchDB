@@ -178,6 +178,15 @@ public enum BackupCoding {
         return encoder
     }()
 
+    /// For the sync file and comparisons, which no one reads: indenting the season and episode tree made the
+    /// file much larger to encode, upload, download, and decode on every sync.
+    public static let compactEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
+
     public static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -185,15 +194,20 @@ public enum BackupCoding {
     }()
 
     public static func decode(_ data: Data) throws -> LibraryBackup {
-        // Check the version first so a newer format gets a clear message rather than a decoding error.
+        // The whole file is parsed once; only when that fails is the version read, so a newer format gets a
+        // clear message rather than a decoding error.
         struct Header: Decodable { let version: Int }
-        guard let header = try? decoder.decode(Header.self, from: data) else {
-            throw BackupError.unreadable("It has no format version.")
-        }
-        guard header.version <= LibraryBackup.currentVersion else { throw BackupError.unsupportedVersion(header.version) }
         do {
-            return try decoder.decode(LibraryBackup.self, from: data)
+            let backup = try decoder.decode(LibraryBackup.self, from: data)
+            guard backup.version <= LibraryBackup.currentVersion else { throw BackupError.unsupportedVersion(backup.version) }
+            return backup
+        } catch let error as BackupError {
+            throw error
         } catch {
+            guard let header = try? decoder.decode(Header.self, from: data) else {
+                throw BackupError.unreadable("It has no format version.")
+            }
+            guard header.version <= LibraryBackup.currentVersion else { throw BackupError.unsupportedVersion(header.version) }
             throw BackupError.unreadable(error.localizedDescription)
         }
     }
@@ -201,13 +215,23 @@ public enum BackupCoding {
 
 // MARK: - Export
 
+/// Notes grouped by the model they belong to.
+struct NotesByOwner {
+    var movies: [PersistentIdentifier: [Note]] = [:]
+    var shows: [PersistentIdentifier: [Note]] = [:]
+    var episodes: [PersistentIdentifier: [Note]] = [:]
+}
+
 public extension LibraryService {
     func makeBackup() throws -> LibraryBackup {
         var backup = LibraryBackup()
-        backup.movies = try context.fetch(FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])).map(Self.record)
-        let episodeNotes = notesByEpisode()
-        backup.shows = try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)]))
-            .map { Self.record($0, episodeNotes: episodeNotes) }
+        let notes = notesByOwner()
+        var movies = FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])
+        movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
+        backup.movies = try context.fetch(movies).map { Self.record($0, notes: notes) }
+        var shows = FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)])
+        shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
+        backup.shows = try context.fetch(shows).map { Self.record($0, notes: notes) }
         // Collections in a stable order, so an unchanged library writes an identical file.
         backup.spaces = try context.fetch(FetchDescriptor<Space>(sortBy: [SortDescriptor(\.createdAt)])).map {
             .init(uuid: $0.uuid, name: $0.name, symbolName: $0.symbolName, colorName: $0.colorName, createdAt: $0.createdAt)
@@ -221,13 +245,21 @@ public extension LibraryService {
         return backup
     }
 
-    /// Every episode's notes from one fetch. Reading `episode.notes` runs a query per episode, and backups and
-    /// syncs visit every episode in the library.
-    internal func notesByEpisode() -> [PersistentIdentifier: [Note]] {
+    /// Every title's and episode's notes from one fetch. Reading `episode.notes` or `movie.notes` runs a query
+    /// per model, and backups and syncs visit every title and episode in the library.
+    internal func notesByOwner() -> NotesByOwner {
         let notes = (try? context.fetch(FetchDescriptor<Note>())) ?? []
-        var byEpisode: [PersistentIdentifier: [Note]] = [:]
-        for note in notes { if let episode = note.episode { byEpisode[episode.persistentModelID, default: []].append(note) } }
-        return byEpisode
+        var result = NotesByOwner()
+        for note in notes {
+            if let episode = note.episode {
+                result.episodes[episode.persistentModelID, default: []].append(note)
+            } else if let movie = note.movie {
+                result.movies[movie.persistentModelID, default: []].append(note)
+            } else if let show = note.show {
+                result.shows[show.persistentModelID, default: []].append(note)
+            }
+        }
+        return result
     }
 
     func exportBackupData() throws -> Data {
@@ -244,7 +276,7 @@ public extension LibraryService {
         ids.sorted { $0.uuidString < $1.uuidString }
     }
 
-    private static func record(_ movie: Movie) -> LibraryBackup.MovieRecord {
+    private static func record(_ movie: Movie, notes byOwner: NotesByOwner) -> LibraryBackup.MovieRecord {
         .init(tmdbID: movie.tmdbID, title: movie.title, originalTitle: movie.originalTitle, overview: movie.overview,
               tagline: movie.tagline, posterPath: movie.posterPath, backdropPath: movie.backdropPath,
               releaseDate: movie.releaseDate, runtime: movie.runtime, genres: movie.genres,
@@ -253,10 +285,10 @@ public extension LibraryService {
               homepage: movie.homepage, trailerKey: movie.trailerKey, cast: movie.cast, directors: movie.directors,
               addedDate: movie.addedDate, isWatched: movie.isWatched, watchedDate: movie.watchedDate,
               userRating: movie.userRating, isInBacklog: movie.isInBacklog, isFavorite: movie.isFavorite,
-              notes: notes(movie.notes), spaceIDs: sortedIDs((movie.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((movie.tags ?? []).map(\.uuid)))
+              notes: notes(byOwner.movies[movie.persistentModelID]), spaceIDs: sortedIDs((movie.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((movie.tags ?? []).map(\.uuid)))
     }
 
-    private static func record(_ show: TVShow, episodeNotes: [PersistentIdentifier: [Note]]) -> LibraryBackup.ShowRecord {
+    private static func record(_ show: TVShow, notes byOwner: NotesByOwner) -> LibraryBackup.ShowRecord {
         .init(tmdbID: show.tmdbID, name: show.name, originalName: show.originalName, overview: show.overview,
               tagline: show.tagline, posterPath: show.posterPath, backdropPath: show.backdropPath,
               firstAirDate: show.firstAirDate, lastAirDate: show.lastAirDate, showStatus: show.showStatus,
@@ -266,7 +298,7 @@ public extension LibraryService {
               imdbVoteCount: show.imdbVoteCount, imdbRatingDate: show.imdbRatingDate, homepage: show.homepage, trailerKey: show.trailerKey,
               cast: show.cast, creators: show.creators, addedDate: show.addedDate, userRating: show.userRating,
               isInBacklog: show.isInBacklog, isFavorite: show.isFavorite, isAbandoned: show.isAbandoned,
-              notes: notes(show.notes), spaceIDs: sortedIDs((show.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((show.tags ?? []).map(\.uuid)),
+              notes: notes(byOwner.shows[show.persistentModelID]), spaceIDs: sortedIDs((show.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((show.tags ?? []).map(\.uuid)),
               seasons: show.sortedSeasons.map { season in
                   .init(tmdbID: season.tmdbID, seasonNumber: season.seasonNumber, name: season.name,
                         overview: season.overview, posterPath: season.posterPath, airDate: season.airDate,
@@ -275,7 +307,7 @@ public extension LibraryService {
                                   overview: episode.overview, airDate: episode.airDate, runtime: episode.runtime,
                                   stillPath: episode.stillPath, isWatched: episode.isWatched,
                                   watchedDate: episode.watchedDate, userRating: episode.userRating,
-                                  notes: notes(episodeNotes[episode.persistentModelID]))
+                                  notes: notes(byOwner.episodes[episode.persistentModelID]))
                         })
               })
     }
@@ -421,8 +453,8 @@ public extension LibraryService {
             movie.addedDate = min(movie.addedDate, record.addedDate)
             movie.adoptIMDbRating(from: record)
             mergeNotes(record.notes, into: movie.notes) { $0.movie = movie }
-            movie.spaces = union(movie.spaces, record.spaceIDs.compactMap { spaces[$0] })
-            movie.tags = union(movie.tags, record.tagIDs.compactMap { tags[$0] })
+            if let merged = union(movie.spaces, record.spaceIDs.compactMap { spaces[$0] }) { movie.spaces = merged }
+            if let merged = union(movie.tags, record.tagIDs.compactMap { tags[$0] }) { movie.tags = merged }
         }
 
         for record in backup.shows {
@@ -438,8 +470,8 @@ public extension LibraryService {
             show.addedDate = min(show.addedDate, record.addedDate)
             show.adoptIMDbRating(from: record)
             mergeNotes(record.notes, into: show.notes) { $0.show = show }
-            show.spaces = union(show.spaces, record.spaceIDs.compactMap { spaces[$0] })
-            show.tags = union(show.tags, record.tagIDs.compactMap { tags[$0] })
+            if let merged = union(show.spaces, record.spaceIDs.compactMap { spaces[$0] }) { show.spaces = merged }
+            if let merged = union(show.tags, record.tagIDs.compactMap { tags[$0] }) { show.tags = merged }
             mergeSeasons(record.seasons, into: show)
         }
 
@@ -565,12 +597,17 @@ public extension LibraryService {
         }
     }
 
-    private func union<M: PersistentModel>(_ current: [M]?, _ additions: [M]) -> [M] {
+    /// The models with the additions, or nil if they're all there already: assigning anyway marked every
+    /// title changed, so importing a backup that changed nothing still rewrote the whole library.
+    private func union<M: PersistentModel>(_ current: [M]?, _ additions: [M]) -> [M]? {
         var result = current ?? []
-        for model in additions where !result.contains(where: { $0.persistentModelID == model.persistentModelID }) {
+        var ids = Set(result.map(\.persistentModelID))
+        var added = false
+        for model in additions where ids.insert(model.persistentModelID).inserted {
             result.append(model)
+            added = true
         }
-        return result
+        return added ? result : nil
     }
 }
 
@@ -622,8 +659,12 @@ public extension LibraryService {
         return rows.map { $0.map(Self.csvField).joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
     }
 
-    /// RFC 4180: quote fields containing commas, quotes, or line breaks; double embedded quotes.
+    /// RFC 4180: quote fields containing commas, quotes, or line breaks; double embedded quotes. A field that
+    /// starts like a formula gets a leading apostrophe, so a title or tag such as `=HYPERLINK(…)` stays text
+    /// in Excel and Sheets.
     static func csvField(_ value: String) -> String {
+        var value = value
+        if let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) { value = "'" + value }
         // Scalars, not Characters: "\r\n" is one Character, so a lone "\n" didn't match it.
         guard value.unicodeScalars.contains(where: { ",\"\r\n".unicodeScalars.contains($0) }) else { return value }
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""

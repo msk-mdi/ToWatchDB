@@ -5,8 +5,6 @@ import ToWatchCore
 /// Searches TMDB for movies or TV shows.
 struct SearchView: View {
     @Environment(AppState.self) private var appState
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
 
     @State private var query = ""
     @State private var kind: MediaSummary.Kind = .movie
@@ -17,7 +15,7 @@ struct SearchView: View {
 
     var body: some View {
         // Rebuilt once per save, not on every keystroke.
-        let ids = appState.cached("library-ids") { LibraryIDs(movies: movies, shows: shows) }
+        let ids = appState.libraryIDs
         ScrollView {
             kindPicker
                 #if os(macOS)
@@ -92,10 +90,13 @@ struct SearchView: View {
         searchError = nil
         defer { isSearching = false }
         do {
-            switch kind {
-            case .movie: results = try await client.searchMovies(text).results.map(MediaSummary.init)
-            case .tv: results = try await client.searchTVShows(text).results.map(MediaSummary.init)
+            let found = switch kind {
+            case .movie: try await client.searchMovies(text).results.map(MediaSummary.init)
+            case .tv: try await client.searchTVShows(text).results.map(MediaSummary.init)
             }
+            // A newer query or a cleared field cancelled this one after the response came in.
+            guard !Task.isCancelled else { return }
+            results = found
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
         } catch {

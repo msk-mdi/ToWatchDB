@@ -710,6 +710,42 @@ private final class SyncDevice {
     #expect(try phone.library.context.fetchCount(FetchDescriptor<Episode>()) == 0)
 }
 
+/// A refresh removes episodes TMDB dropped; the file still lists them, but without user data they stay gone.
+@MainActor @Test func syncDoesntBringBackEpisodesARefreshRemoved() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let show = try insertSeverance(into: mac.library)
+    try mac.sync(&file)
+    try phone.sync(&file)
+    let phoneShow = try #require(phone.library.show(tmdbID: show.tmdbID))
+    phone.library.setWatched(try #require(phoneShow.regularEpisodes.first { $0.code == "S02E02" }), true, on: now)
+    try phone.sync(&file)
+
+    // TMDB drops the specials and S02E03, and only the Mac refreshes.
+    let season2 = TMDBSeasonDetail(id: 2, seasonNumber: 2, name: "Season 2", overview: nil, posterPath: nil, airDate: "2025-01-16",
+                                   episodes: [episode(2, 1, airs: "2025-01-16"), episode(2, 2, airs: "2030-01-01")])
+    mac.library.insertShow(try fixture("tv_severance"), seasons: [try fixture("season_1"), season2])
+    try mac.sync(&file)
+    #expect(!show.regularEpisodes.contains { $0.code == "S02E03" })
+    #expect(show.sortedSeasons.map(\.seasonNumber) == [1, 2])
+    #expect(show.regularEpisodes.first { $0.code == "S02E02" }?.isWatched == true)
+}
+
+@MainActor @Test func notesAddedInOneSecondStayApart() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    library.addNote("One", to: movie)
+    library.addNote("Two", to: movie)
+    let keys = Set((movie.notes ?? []).map { LibrarySync.noteKey($0.createdAt) })
+    #expect(keys.count == 2)
+}
+
+@Test func smartListRulesMissingFieldsTakeDefaults() throws {
+    let rules = try JSONDecoder().decode(SmartListRules.self, from: Data(#"{"media":"movies","genres":["Drama"]}"#.utf8))
+    #expect(rules.media == .movies && rules.genres == ["Drama"])
+    #expect(!rules.backlogOnly && rules.statuses.isEmpty && rules.releasedFrom == nil)
+}
+
 /// After applying a downloaded file, the driver makes that file the base: if its upload then conflicts, the retry
 /// must see what the file brought in as the other device's edits, not this one's.
 @MainActor @Test func syncRetryMergesAgainstTheFileItApplied() throws {
@@ -975,6 +1011,9 @@ private final class UnauthorizedProtocol: URLProtocol {
     #expect(SeerrClient.normalizedURL(" https://requests.example.com/ ")?.absoluteString == "https://requests.example.com")
     #expect(SeerrClient.normalizedURL("http://nas.local:5055/api/v1/")?.absoluteString == "http://nas.local:5055")
     #expect(SeerrClient.normalizedURL("https://example.com/seerr")?.absoluteString == "https://example.com/seerr")
+    #expect(SeerrClient.normalizedURL("nas.local:5055")?.absoluteString == "http://nas.local:5055")
+    #expect(SeerrClient.normalizedURL("seerr:5055")?.absoluteString == "http://seerr:5055")
+    #expect(SeerrClient.normalizedURL("requests.example.com")?.absoluteString == "https://requests.example.com")
     #expect(SeerrClient.normalizedURL("ftp://example.com") == nil)
     #expect(SeerrClient.normalizedURL("") == nil)
     #expect(SeerrClient(server: "http://nas.local:5055", apiKey: "  ") == nil)

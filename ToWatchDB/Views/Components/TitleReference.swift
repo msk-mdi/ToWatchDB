@@ -127,6 +127,7 @@ struct TitleWindow: View {
             }
         }
         .collectionEditorSheet(appState)
+        .errorAlert(appState)
         // File menu requests are handled by whichever window is active, title windows included.
         .libraryFileTransfers(Binding(get: { appState.fileRequest }, set: { appState.fileRequest = $0 }))
         #if os(macOS)

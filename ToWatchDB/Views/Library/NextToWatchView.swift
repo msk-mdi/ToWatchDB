@@ -6,13 +6,12 @@ import ToWatchCore
 struct NextToWatchView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
-    @Query private var shows: [TVShow]
 
     var body: some View {
         // Hidden (kept alive on Mac): show the last queue instead of recomputing after every save.
         // Keyed by day: an episode airing today joins the queue after midnight, not at the next save.
         let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: !isActive) {
-            Self.queue(shows, progress: appState.showProgress())
+            Self.queue(appState.all(matching: #Predicate<TVShow> { !$0.isAbandoned }), progress: appState.showProgress())
         }
 
         Group {

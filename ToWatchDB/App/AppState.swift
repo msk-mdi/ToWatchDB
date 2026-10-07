@@ -44,11 +44,14 @@ final class AppState {
     private(set) var isRefreshing = false
     var errorMessage: String?
 
-    private(set) var tokenOverride: String? = TokenStore.load()
+    private(set) var tokenOverride: String?
 
     /// The Seerr server titles are requested on, and how the app signs in to it.
     private(set) var seerrServer: String = UserDefaults.standard.string(forKey: "seerrServer") ?? ""
-    private(set) var seerrAuth: SeerrAuth? = SeerrAuthStore.load()
+    private(set) var seerrAuth: SeerrAuth?
+    /// The secrets couldn't be read at launch (an iPhone launched in the background while locked), so they're
+    /// read again when the app comes to the front. Otherwise TMDB and Seerr stayed signed out until a relaunch.
+    @ObservationIgnored private var secretsUnread = false
     /// Who the app is signed in to Seerr as, for Settings.
     private(set) var seerrUserName: String? = UserDefaults.standard.string(forKey: "seerrUserName")
 
@@ -108,7 +111,7 @@ final class AppState {
 
     init(inMemory: Bool = false) {
         isInMemory = inMemory
-        container = inMemory ? SharedLibrary.makeContainer(inMemory: true) : SharedLibrary.container
+        container = inMemory == SharedLibrary.isInMemory ? SharedLibrary.container : SharedLibrary.makeContainer(inMemory: inMemory)
         saveObserver = NotificationCenter.default.addObserver(
             // No queue: the version must change synchronously with the save, before any view redraws with the
             // new data, or a redraw could store a value computed from stale data under the new version.
@@ -129,9 +132,20 @@ final class AppState {
                 if self.libraryVersion != self.dropbox.syncedVersion { self.syncWithDropbox(after: .seconds(5)) }
             }
         }
+        loadSecrets()
         #if os(macOS)
         AppDelegate.appState = self
         #endif
+    }
+
+    private func loadSecrets() {
+        do {
+            tokenOverride = try TokenStore.read()
+            seerrAuth = try SeerrAuthStore.read()
+            secretsUnread = false
+        } catch {
+            secretsUnread = true
+        }
     }
 
     /// Computes a value derived from the library once per library version. Stats walk every episode,
@@ -157,6 +171,29 @@ final class AppState {
         derivedCache[key] = (libraryVersion, value)
         return value
     }
+
+    /// Every model of a type, for `cached` closures. Pages used to `@Query` these, which refetched whole tables
+    /// after every save even when the cached value was reused (and on hidden pages kept alive on Mac).
+    func all<T: PersistentModel>(_ type: T.Type = T.self, matching predicate: Predicate<T>? = nil) -> [T] {
+        (try? container.mainContext.fetch(FetchDescriptor<T>(predicate: predicate))) ?? []
+    }
+
+    /// A hash of what Siri is taught: title names and each show's next episode.
+    var shortcutsContent: Int {
+        cached("shortcuts-content") {
+            var hasher = Hasher()
+            for movie in all(Movie.self) { hasher.combine(movie.title) }
+            let progress = showProgress()
+            for show in all(TVShow.self) {
+                hasher.combine(show.name)
+                hasher.combine(progress[show.persistentModelID]?.nextEpisode?.code)
+            }
+            return hasher.finalize()
+        }
+    }
+
+    /// The TMDB IDs in the library, for Discover and Search badges.
+    var libraryIDs: LibraryIDs { cached("library-ids") { LibraryIDs(movies: all(), shows: all()) } }
 
     /// Every show's progress, computed once per library version and shared by the pages that need it
     /// (library grids, Next to Watch): a show's progress walks all of its episodes. It fetches every show
@@ -246,6 +283,7 @@ final class AppState {
     /// Syncs with Dropbox if connected. `delay` coalesces a burst of edits into one sync; a later call
     /// restarts the wait. A sync already running finishes, then runs once more.
     func syncWithDropbox(after delay: Duration = .zero) {
+        dropbox.checkConnectionIfNeeded()
         guard dropbox.isConnected, !isInMemory else { return }
         dropboxDelay?.cancel()
         dropboxDelay = Task {
@@ -286,19 +324,26 @@ final class AppState {
     func syncWithDropbox(for phase: ScenePhase) {
         switch phase {
         case .active:
+            if secretsUnread { loadSecrets() }
             if libraryVersion != dropbox.syncedVersion || dropbox.lastSynced.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true {
                 syncWithDropbox()
             }
         case .background where libraryVersion != dropbox.syncedVersion:
             #if os(iOS)
             // Without a background task, iOS suspends the app mid-upload and the edits wait for the next launch.
+            dropbox.checkConnectionIfNeeded()
             guard dropbox.isConnected, !isInMemory, backgroundSync == .invalid else { return }
             dropboxDelay?.cancel()
             backgroundSync = UIApplication.shared.beginBackgroundTask(withName: "Dropbox Sync") { [weak self] in
                 self?.endBackgroundSync()
             }
             Task {
-                await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
+                // A sync already running would only queue another pass and return at once, ending the
+                // background task while that sync was still uploading.
+                while dropbox.isSyncing, backgroundSync != .invalid { try? await Task.sleep(for: .milliseconds(100)) }
+                if hasUnsyncedChanges, backgroundSync != .invalid {
+                    await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
+                }
                 endBackgroundSync()
             }
             #else
@@ -331,7 +376,13 @@ final class AppState {
 /// so using the same container (and main context) makes their changes appear in open windows immediately.
 @MainActor
 enum SharedLibrary {
-    static let container = makeContainer(inMemory: false)
+    #if DEBUG
+    /// Sample-data runs use a throwaway library, and Siri actions use it too: they changed the real one on disk.
+    static let isInMemory = DebugTools.usesSampleData
+    #else
+    static let isInMemory = false
+    #endif
+    static let container = makeContainer(inMemory: isInMemory)
 
     static func makeContainer(inMemory: Bool) -> ModelContainer {
         do {

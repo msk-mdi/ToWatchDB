@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(ThemeColor.accentKey) private var accent: ThemeColor = .coral
     @AppStorage(ThemeColor.appIconKey) private var appIcon: ThemeColor = .coral
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     @State private var tokenDraft = ""
@@ -166,7 +167,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { appState.isShowingSettings = false }
+                Button("Done") { dismiss() }
             }
         }
         #endif

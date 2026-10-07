@@ -66,14 +66,17 @@ struct DropboxClient: Sendable {
 
     func exchange(code: String, verifier: String) async throws -> Tokens {
         try await tokenRequest(["code": code, "grant_type": "authorization_code", "client_id": appKey,
-                                "code_verifier": verifier, "redirect_uri": redirectURI])
+                                "code_verifier": verifier, "redirect_uri": redirectURI], invalidGrant: .signInFailed("The sign-in code expired. Try again."))
     }
 
     func refresh(_ refreshToken: String) async throws -> Tokens {
-        try await tokenRequest(["grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": appKey])
+        try await tokenRequest(["grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": appKey],
+                               invalidGrant: .signedOut)
     }
 
-    private func tokenRequest(_ form: [String: String]) async throws -> Tokens {
+    /// `invalidGrant` is thrown for a 400 invalid_grant: a revoked refresh token signs the device out, while an
+    /// expired or reused code only fails that sign-in.
+    private func tokenRequest(_ form: [String: String], invalidGrant: DropboxError) async throws -> Tokens {
         var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/oauth2/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -82,8 +85,7 @@ struct DropboxClient: Sendable {
         request.httpBody = Data((body.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // A refresh token the user revoked (or an expired code) comes back as 400 invalid_grant.
-        if status == 400, String(decoding: data, as: UTF8.self).contains("invalid_grant") { throw DropboxError.signedOut }
+        if status == 400, String(decoding: data, as: UTF8.self).contains("invalid_grant") { throw invalidGrant }
         guard status == 200 else { throw DropboxError.http(status, Self.summary(data)) }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -132,6 +134,21 @@ struct DropboxClient: Sendable {
         let header = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Dropbox-API-Result") ?? ""
         let metadata = try JSONDecoder().decode(Metadata.self, from: Data(header.utf8))
         return File(data: data, rev: metadata.rev)
+    }
+
+    /// The file's revision, or nil if there isn't one yet. Much cheaper than downloading it to see if it changed.
+    func revision(path: String, accessToken: String) async throws -> String? {
+        var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/2/files/get_metadata")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(try Self.argument(["path": path]).utf8)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(data).hasPrefix("path/not_found") { return nil }
+        try Self.check(response, data)
+        struct Metadata: Decodable { let rev: String? }
+        return try JSONDecoder().decode(Metadata.self, from: data).rev
     }
 
     /// Writes the file. With `replacing`, only if it's still at that revision; otherwise only if there's none.
@@ -188,6 +205,8 @@ enum DropboxError: LocalizedError {
     case signInFailed(String)
     /// The sign-in was revoked, from Dropbox's website or another device.
     case signedOut
+    /// The sign-in saved on this device couldn't be read right now (the iPhone is locked).
+    case secretsUnavailable
     case expiredAccessToken
     case conflict
     case rateLimited
@@ -198,6 +217,7 @@ enum DropboxError: LocalizedError {
         case .notConfigured: "This build has no Dropbox app key. Set DROPBOX_APP_KEY in Config/Secrets.xcconfig."
         case let .signInFailed(reason): "Couldn't connect to Dropbox: \(reason)"
         case .signedOut: "Dropbox signed this device out. Connect again to keep syncing."
+        case .secretsUnavailable: "The Dropbox sign-in couldn't be read. Sync will try again later."
         case .expiredAccessToken: "The Dropbox session expired."
         case .conflict: "Another device changed the library on Dropbox at the same time. Try again."
         case .rateLimited: "Dropbox is busy. Sync will try again later."

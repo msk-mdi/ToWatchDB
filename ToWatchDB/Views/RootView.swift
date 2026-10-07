@@ -14,6 +14,10 @@ struct RootView: View {
     /// Mac: whether the visible page has a detail pushed, which hides the window's Refresh button.
     /// The visible page has its own Refresh button (a title's page), so the window's hides.
     @State private var hasOwnRefreshButton = false
+    /// The Siri title sheet and Settings, claimed from the app-wide request by the first window to see it.
+    /// Presenting the shared request directly opened them in every iPad window.
+    @State private var titleSheet: TitleReference?
+    @State private var isShowingSettings = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -24,14 +28,7 @@ struct RootView: View {
         Group {
             if usesTabBar { tabBar } else { sidebar }
         }
-        .alert("Something went wrong", isPresented: Binding(
-            get: { appState.errorMessage != nil },
-            set: { if !$0 { appState.errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(appState.errorMessage ?? "")
-        }
+        .errorAlert(appState)
         .collectionEditorSheet(appState)
         .libraryFileTransfers($appState.fileRequest)
         .onAppear { appState.mainWindowCount += 1 }
@@ -56,12 +53,15 @@ struct RootView: View {
             }
             appState.selectedTab = .all
         }
-        .sheet(item: $router.title) { reference in
+        .onChange(of: router.title?.id, initial: true) { claimTitle() }
+        // A request made while this window's sheet was open waits for it to close.
+        .onChange(of: titleSheet == nil) { claimTitle() }
+        .sheet(item: $titleSheet) { reference in
             NavigationStack {
                 RemoteDetailView(summary: MediaSummary(reference))
                     .appDestinations()
                     .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Done") { router.title = nil } }
+                        ToolbarItem(placement: .cancellationAction) { Button("Done") { titleSheet = nil } }
                     }
             }
             #if os(macOS)
@@ -95,7 +95,12 @@ struct RootView: View {
             }
         }
         #if os(iOS)
-        .sheet(isPresented: $appState.isShowingSettings) {
+        .onChange(of: appState.isShowingSettings, initial: true) { _, requested in
+            guard requested else { return }
+            appState.isShowingSettings = false
+            isShowingSettings = true
+        }
+        .sheet(isPresented: $isShowingSettings) {
             NavigationStack { SettingsView() }
         }
         #endif
@@ -124,6 +129,12 @@ struct RootView: View {
     }
 
     /// Tab bar layouts: shows a list that isn't a tab, as a Library scope when it is one, otherwise in a sheet.
+    private func claimTitle() {
+        guard titleSheet == nil, let title = router.title else { return }
+        router.title = nil
+        titleSheet = title
+    }
+
     private func open(_ tab: AppTab) {
         let scope = tab.libraryScope
         if let scope, LibraryScope.fixed.contains(scope) {
@@ -249,7 +260,10 @@ struct RootView: View {
         // whatever toolbar items the current screen adds. AppKit only keeps a principal item centered while
         // it fits beside the leading and trailing items, so the window title (a long detail title pushed
         // it sideways) is left out of the toolbar; each page shows its own title.
-        PageHost(selected: appState.selectedTab, hasOwnRefreshButton: $hasOwnRefreshButton) { tab in
+        // A list that isn't a tab (from a menu or Siri) is redirected to a sheet or the Library tab right after
+        // it's selected. Passing it through built that page and kept it alive, hidden, redrawing on every save.
+        PageHost(selected: tabBarTabs.contains(appState.selectedTab) ? appState.selectedTab : .all,
+                 hasOwnRefreshButton: $hasOwnRefreshButton) { tab in
             screen(for: tab, inTabBar: true).appDestinations()
         }
         // Outside the stacks, so pushed pages get it too.

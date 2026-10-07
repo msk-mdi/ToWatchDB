@@ -16,11 +16,18 @@ with monthly activity, top genres and actors, highlights, a comparison with anot
 (default: your device's region; change it per title or in Settings). Availability powered by JustWatch via TMDB.
 
 **Backup** (Settings, or File ▸ Import/Export on Mac): export the whole library as JSON and import it on any
-device. Importing merges, so nothing is lost or duplicated. **Export as CSV** gives one row per title for spreadsheets.
+device. Importing merges, so nothing is lost or duplicated. **Export as CSV** gives one row per title for
+spreadsheets (it opens correctly in Excel, accented titles included).
 
 **Dropbox Sync** (Settings ▸ Dropbox Sync): connect a Dropbox account and every device connected to it keeps
 the same library, backlog, watch history, ratings, notes, and collections. Changes sync when the app opens and a
-few seconds after each edit; removals and un-watching sync too. Needs a Dropbox app key (see Setup).
+few seconds after each edit; removals and un-watching sync too. When nothing changed, a sync is one small request,
+and a locked iPhone waits and tries again rather than disconnecting. Needs a Dropbox app key (see Setup).
+
+**Seerr requests** (Settings ▸ Seerr): sign in to a Seerr, Overseerr, or Jellyseerr server with a Jellyfin or
+Emby account, a Seerr account, or the server's API key. Every title page can then **Request on Seerr** (pick the
+seasons of a show), shows when it's requested, offers **Watch Now** once it's on your media server, and can
+delete a request. An address without `http://` uses http on the home network and https otherwise.
 
 **Siri & Shortcuts**: 18 actions (next episodes, upcoming, mark watched, rate, notes, backlog, stats, where to
 watch, open lists/collections/titles, search) and 9 ready-made Siri phrases such as "What's next in ToWatchDB"
@@ -37,6 +44,7 @@ On iPad and Mac, any title can open in its own window, posters drag into the lib
 1. `brew install xcodegen`
 2. `cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig` and paste your TMDB v4 read access token
    (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain on iPhone and iPad, and in a file encrypted by the Secure Enclave on Mac).
+   The Dropbox and Seerr sign-ins are stored the same way.
    Only Debug builds use it: Release builds ship without a token.
    Optionally add your signing team there too, so Siri & Shortcuts actions run.
    For Dropbox Sync, create an app at <https://www.dropbox.com/developers/apps> (Scoped access, **App folder**,
@@ -62,12 +70,15 @@ TMDB token: on first launch, paste your API Read Access Token (themoviedb.org �
 - **`.ipa` (iPhone + iPad):** `Scripts/build-ipa.sh` builds an unsigned `dist/ToWatchDB.ipa`. Install it with a
   sideloading tool such as AltStore or Sideloadly, which signs it with your free Apple ID (renewed every 7 days).
 
-The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml`.
+The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml` (currently 1.3.2, build 9).
+Releases are on the [GitHub releases page](https://github.com/msk-mdi/ToWatchDB/releases): `ToWatchDB.app.zip`
+for Mac and `ToWatchDB.ipa` for iPhone and iPad.
 
 ## Layout
 
-- `Packages/ToWatchCore` — TMDB client, SwiftData models, library/watch-state/upcoming logic. Tested with `swift test`.
-- `ToWatchDB/` — SwiftUI app (sidebar or tab bar layouts, detail views, settings).
+- `Packages/ToWatchCore` — TMDB, IMDb and Seerr clients, SwiftData models, library/watch-state/upcoming logic,
+  backup and sync merging. Tested with `swift test`.
+- `ToWatchDB/` — SwiftUI app (sidebar or tab bar layouts, detail views, settings, Dropbox sync, Siri actions).
 - `Scripts/generate-icons.swift` — redraws the themed app icons and their Settings previews.
 - `Scripts/snapshot-mac.sh` — debug visual pass: captures each screen's window on macOS.
 

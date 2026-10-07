@@ -34,6 +34,8 @@ fast and stable. Read it before making non-trivial changes. For setup and a feat
    - [Menu commands and the Title menu](#58-menu-commands-and-the-title-menu)
    - [Multiple windows, drag and drop](#59-multiple-windows-drag-and-drop)
    - [Files: backup import/export](#510-files-backup-importexport)
+   - [Dropbox sync](#510a-dropbox-sync)
+   - [Seerr requests](#510b-seerr-requests)
    - [Siri & Shortcuts (App Intents)](#511-siri--shortcuts-app-intents)
 6. [Platform differences](#6-platform-differences)
 7. [Performance notes](#7-performance-notes)
@@ -95,18 +97,23 @@ Packages/ToWatchCore/
     TMDB/TMDBClient.swift       HTTP client, errors, image URLs
     TMDB/TMDBModels.swift       Codable DTOs for TMDB JSON, date parsing
     TMDB/WatchProviders.swift   Where-to-watch DTOs and endpoints
+    TMDB/IMDbClient.swift       IMDb ratings, fetched in batches
+    Seerr/SeerrClient.swift     Seerr / Overseerr / Jellyseerr: sign-in, title status, requests
     Services/LibraryService.swift              Add/refresh/watch/rate/note/delete, TMDB → model mapping
     Services/LibraryService+Collections.swift  Spaces, tags, smart lists
     Services/WatchProgress.swift               Show status, progress, next episode
     Services/UpcomingService.swift             Upcoming releases and episodes
     Services/StatsService.swift                Stats periods, aggregation, activity buckets
     Services/Backup.swift                      JSON backup (export + merge import), CSV export
+    Services/LibrarySync.swift                 Three-way merge for Dropbox sync, applying a merged snapshot
+    Services/ListImport.swift                  Importing a plain-text list of titles
     Services/SpokenSummaries.swift             Sentences for Siri results
   Tests/ToWatchCoreTests/       Swift Testing suite + recorded TMDB JSON fixtures
 ToWatchDB/
   App/                          Entry point, AppState, appearance, debug tools, secret store (Keychain / Secure Enclave file)
   Views/                        All SwiftUI screens and components (see §5.5 and §5.6)
   Intents/                      App Intents: entities, queries, actions, App Shortcuts
+  Sync/                         Dropbox client (OAuth with PKCE, files) and the sync driver
   Resources/Assets.xcassets     AppIcon (coral), 9 alternate icons, 10 icon previews, AccentColor
   Info.plist, ToWatchDB.entitlements   Generated from project.yml
 Scripts/
@@ -115,7 +122,7 @@ Scripts/
 docs/CODEBASE.md                This file
 ```
 
-About 9,500 lines of Swift in total.
+About 14,000 lines of Swift in total (version 1.3.2).
 
 ---
 
@@ -128,7 +135,7 @@ About 9,500 lines of Swift in total.
 | Release builds | `Scripts/build-mac.sh`, `Scripts/install-ios.sh` | Mac: ad-hoc signed `dist/ToWatchDB.app`. iOS: free Apple ID team from Secrets, installed on a connected device. No `get-task-allow` in Release. |
 | Dropbox app key | `Config/Secrets.xcconfig` → `DROPBOX_APP_KEY` | Copied into Info.plist as `DropboxAppKey` in every configuration (it isn't a secret). Without it, Settings ▸ Dropbox Sync says sync is unavailable. |
 | Token override | Settings ▸ TMDB | Stored by `TokenStore` through `SecretStore`. It takes priority over the built-in token. |
-| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support, AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read. Macs without a Secure Enclave keep the Keychain. |
+| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support, AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read (looked for once per launch). Macs without a Secure Enclave keep the Keychain. The decrypted file is kept in memory until the next save. iOS items are readable after the first unlock, so a sync or Siri action on a locked iPhone can use them. `SecretStore.read` throws `Unreadable` when reading failed and returns nil only when nothing is saved: callers must not treat a failed read as "signed out". `load` is the non-throwing form. |
 | Signing | `Config/App.xcconfig` | Ad-hoc by default (`CODE_SIGN_IDENTITY = -`). Set `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY = Apple Development` in Secrets so App Intents run. |
 | Entitlements | `project.yml` | macOS sandbox: network client and user-selected file read/write. Not used on iOS (`CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` is empty). |
 | Alternate icons | `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=iphone*]` | iOS only. macOS swaps the Dock icon at runtime instead. |
@@ -277,8 +284,13 @@ one from `SharedLibrary.service`.
 ### 4.6 Backup and CSV
 
 - **Format:** `LibraryBackup` (version 1) is a self-contained JSON snapshot. It includes TMDB metadata, so a
-  restore works offline. `BackupCoding.decode` checks the version first, so a backup from a newer app gets a
-  clear message.
+  restore works offline. `BackupCoding.decode` parses the file once and checks its version; only if that fails
+  does it read the version alone, so a backup from a newer app gets a clear message. Exported backups are
+  indented (`BackupCoding.encoder`); the sync file and comparisons use `BackupCoding.compactEncoder`.
+- **Notes** are identified by their creation second (ISO 8601 drops fractions). `addNote` moves a new note to
+  the next free second on its title, so two notes added in one second stay apart.
+- **CSV:** fields that start like a formula (`=`, `+`, `-`, `@`) get a leading apostrophe. The app writes the
+  file with a UTF-8 byte-order mark so Excel reads accented titles correctly.
 - **Import is a merge (`importBackup`):**
   - Titles match by TMDB ID.
   - Flags (watched, backlog, favorite, abandoned) are kept if set on either side.
@@ -322,17 +334,23 @@ parameters whenever it becomes active.
 | `selectedTab: AppTab` | The current page. `AppTab` covers the fixed pages plus `.space/.tag/.smartList(UUID)`. |
 | `requestedLibraryScope` | Tab-bar layouts: asks the Library tab's scope picker to switch (for example, ⌘3 → Backlog) |
 | `collectionEditor`, `fileRequest` | App-wide requests, handled by whichever window is active (§8) |
-| `isShowingSettings` | iOS Settings sheet |
+| `isShowingSettings` | Asks for the iOS Settings sheet; the first window to see it presents it |
+| `errorMessage` | An error to show; the active window's alert takes it (`errorAlert`, §8) |
 | `mainWindowCount` | Lets menu commands reopen the main window on macOS when it's closed |
 | `trending` | Discover's lists, cached for 30 minutes per token and language |
 | `language`, `watchRegion` | Persisted in `UserDefaults` |
 | `token`, `client`, `library` | The TMDB token (saved override, else built-in), a client, and a `LibraryService` |
-| `perform(_:)` | Runs a throwing library operation and shows errors in the root alert |
+| `perform(_:)` | Runs a throwing library operation and shows errors through `errorMessage` |
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
 | `cached(_:_:)` | Memoizes derived data (stats) until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
+| `all(_:matching:)` | Fetches every model of a type (optionally filtered), for `cached` closures (§7, item 15) |
+| `libraryIDs`, `showProgress()` | Cached: the TMDB IDs in the library (Discover and Search badges), every show's progress |
+| `shortcutsContent` | Cached hash of the names and next episodes Siri is taught (§5.11) |
+| `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 
 `SharedLibrary` holds the on-disk container and a client factory. App Intents use the same container, so their
-changes appear in open windows immediately. `IntentRouter.shared` carries "go to this tab or title" requests
+changes appear in open windows immediately. In Debug sample-data runs `SharedLibrary.container` is the in-memory
+one, so Siri can't change the real library. `IntentRouter.shared` carries "go to this tab or title" requests
 from intents to `RootView`.
 
 ### 5.3 Navigation and layouts
@@ -421,7 +439,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 
 | File | What |
 |---|---|
-| `Components/RemoteImage.swift` | `ImageCache`, an in-memory `NSCache` of decoded `CGImage`s (256 MB). Decoding happens off the main thread. `RemoteImage` draws cached images on the first frame and fades in only fresh downloads. **Use it instead of `AsyncImage`.** |
+| `Components/RemoteImage.swift` | `ImageCache`, an in-memory `NSCache` of decoded `CGImage`s (256 MB). Decoding happens off the main thread. `RemoteImage` draws cached images on the first frame and fades in only fresh downloads, and ignores a download that finishes after its URL changed. **Use it instead of `AsyncImage`.** |
 | `Components/PosterImage.swift` | `PosterImage`, a 2:3 poster with a placeholder, and `BackdropImage` |
 | `Components/EmptyState.swift` | `.centeredEmptyState(isShown) { … }`. Every empty message is centered on the page, even over a scroll view with a header. |
 | `Components/PageHost.swift` | See §5.4 |
@@ -429,6 +447,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 | `Components/TitleReference.swift` | `TitleReference`, a `Transferable` title pointer. Also `titleInteractions` (drag, and lift on hover), `OpenInNewWindowButton`, and `TitleWindow`. |
 | `Components/StatusBadge.swift` | Status glyphs, `Chip`, and formatting helpers (`yearString`, `tmdbDayString`, `runtimeString`) |
 | `Components/RatingView.swift` | Five-star control with accessibility actions |
+| `Components/ErrorAlert.swift` | `.errorAlert(appState)`: shows `appState.errorMessage` in the active window only (main and title windows) |
 
 ### 5.7 Appearance: accent color, app icon, layout
 
@@ -493,7 +512,10 @@ the local date.
   snapshots. The base is what this device last synced. A field changed here since the base wins; otherwise the
   file's value is taken. Something in the base but missing on one side was deleted there (deletion beats an
   edit). With no base (first sync) nothing is deleted and sides combine like `importBackup`. Seasons and
-  episodes are metadata, so they're never deleted by a merge. Same-name tags settle on the smaller UUID.
+  episodes are metadata, so a merge never deletes one. One only the file has is taken only if it holds user
+  data (watched, rated, notes): otherwise a refresh here removed it because TMDB dropped it, and taking it back
+  restored phantom episodes. Each device's own refresh adds real new episodes. Same-name tags settle on the
+  smaller UUID.
   `applySyncedBackup` then makes the store match the merge exactly, writing only real changes. `sameContent`
   decides whether to upload by comparing only what the user owns (titles, watch data, ratings, notes,
   collections), not TMDB or IMDb details, which each device refreshes at its own times. An empty library whose
@@ -504,11 +526,34 @@ the local date.
   and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`. After applying
   a downloaded file it saves that file as the base, so a retry after a conflict merges against it. Unsaved
   changes from a batch (list import, refresh) are saved before applying, so the merge can't drop them.
+- **Skipping unchanged files:** the revision the base matches is kept (`syncedRev`, in `UserDefaults`). A sync
+  first asks Dropbox for the file's revision (`files/get_metadata`). If it's unchanged and nothing was saved
+  here, the sync stops. If only this device changed, it merges against the base instead of downloading.
+- **Signed out vs. can't read:** only a refresh token Dropbox rejects (`invalid_grant`) or one that isn't saved
+  disconnects. A secret that can't be read (a locked iPhone) fails the sync with `secretsUnavailable` and it
+  tries again later; `isConnected` is read again before the next sync if it couldn't be read at launch. A token
+  refresh that finishes after connecting or disconnecting is dropped, so it can't reach the new session.
 - **When:** `AppState.syncWithDropbox` runs when the app becomes active (at most once a minute), when it goes to
-  the background with unsynced changes (inside a background task on iOS), 5 s after the last save (from
+  the background with unsynced changes (inside a background task on iOS, which waits for a sync already
+  running), 5 s after the last save (from
   `AppState`'s save observer, so it works with the main window closed), and from Settings or Library ▸ Sync with
   Dropbox. In-memory (sample data) runs never sync.
 - **Deleted while open:** a sync can delete the title on screen, so the detail pages check `modelContext == nil`.
+
+### 5.10b Seerr requests
+
+- **Core (`SeerrClient.swift`):** signs in to a Seerr, Overseerr, or Jellyseerr server with a Jellyfin or Emby
+  account, a Seerr account (both keep a session cookie), or the server's API key. `title(_:tmdbID:)` reads a
+  title's availability, per-season state, and open requests; `request` and `deleteRequest` change them. Cookies
+  stay out of the shared cookie storage. `normalizedURL` cleans a typed address: without a scheme it uses
+  `http://` for home-network addresses (an IP, a `.local` or single-label name, which App Transport Security
+  allows over http) and `https://` for anything else.
+- **Settings ▸ Seerr** saves the server in `UserDefaults` and the sign-in in `SecretStore` (`SeerrAuthStore`).
+- **`SeerrRequestButton`** on each title page shows Request on Seerr (a season picker for shows), Requested on
+  Seerr, or Watch Now, with a Delete Request button per request. While a request is in progress it checks the
+  status every 30 seconds, but only on the visible page. After a request or deletion its buttons stay disabled
+  until the new status loads. The season sheet shows the status it was opened with, so a failed check can't
+  empty it.
 
 ### 5.11 Siri & Shortcuts (App Intents)
 
@@ -526,8 +571,9 @@ the local date.
 | Opening | Open List, Open Space/Smart List/Tag, Open Movie, Open TV Show, Search |
 
 - **Siri phrases:** `ToWatchShortcuts` has 9 App Shortcuts, for example "What's next in ToWatchDB" and "Mark
-  ⟨show⟩ watched in ToWatchDB". `updateAppShortcutParameters()` runs when the app becomes active, so Siri
-  learns your current show and movie names.
+  ⟨show⟩ watched in ToWatchDB". `updateAppShortcutParameters()` runs when the app becomes active and
+  `appState.shortcutsContent` (the title names and each show's next episode) changed, so Siri learns your
+  current show and movie names without walking every episode on each activation.
 - **Opening actions** set `IntentRouter.shared`, and `RootView` navigates.
 - **Signing:** the system only runs intents from apps signed with a team (§3).
 
@@ -609,16 +655,18 @@ To measure page switches, see §9.
 - **Inside pages hosted by `PageHost`, use `pageTitle` / `pageToolbar`** (§5.4). A raw `.toolbar` or
   `.navigationTitle` on a page shows up even while the page is hidden.
 - **App-wide requests are claimed by one window.**
-  - `appState.collectionEditor` and `appState.fileRequest` are global.
-  - `CollectionEditorPresenter` and `LibraryFileTransfers` present them only in the active window
-    (`appearsActive` on macOS), or in the first window that sees them on iPad.
+  - `appState.collectionEditor`, `appState.fileRequest`, `appState.errorMessage`, `appState.isShowingSettings`
+    and `IntentRouter.shared.title` are global.
+  - `CollectionEditorPresenter`, `LibraryFileTransfers`, `errorAlert`, and `RootView` present them only in the
+    active window (`appearsActive` on macOS), or in the first window that sees them on iPad.
   - They read the binding rather than the `onChange` value, so a second window sees the request is already taken.
 - **TMDB dates are UTC days; user dates are local.** Don't format a release date with the local time zone, or
   it can show a day early. Don't write a watch date as a UTC day.
 - **"Today" is the user's local day.** Compare TMDB dates against `TMDBDate.today(now)` (the local date as a UTC
   midnight), not against `now` or the UTC day; `hasAired`, `isReleased` and `UpcomingService` already do.
 - **Check `isLive` after an `await` before writing to a model.** The user or a Dropbox sync may have deleted it
-  meanwhile, and SwiftData can trap on a write to a deleted model.
+  meanwhile, and SwiftData can trap on a write to a deleted model. `LibraryService`'s watch, backlog, favorite,
+  abandon, and rating setters already skip deleted models.
 - **All writes go through `LibraryService`.** Writing to models directly skips the save and the side-effect
   rules.
 - **Never use `Color.accentColor` in views.** Use `.tint` or `\.themeColor`, so the user's color applies.
@@ -717,9 +765,9 @@ Tests keep their `ModelContainer`s alive (`liveContainers`). A context doesn't r
    handle older versions.
 4. Add a test.
 
-**Add a smart-list criterion.** Add an optional or defaulted property to `SmartListRules`, check it in
-`matchesCommon`, and add a control in `SmartListEditor`. Existing lists keep working because the rules are
-JSON with defaults.
+**Add a smart-list criterion.** Add an optional or defaulted property to `SmartListRules`, add it to its
+`CodingKeys`, `encode(to:)` and `init(from:)` (with `decodeIfPresent`, so stored rules without it keep the
+default), check it in `matchesCommon`, and add a control in `SmartListEditor`.
 
 **Add a Siri action.**
 1. Add an `AppIntent` in `Intents.swift`. Use `SharedLibrary.service` for writes, `IntentRouter` for

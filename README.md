@@ -1,100 +1,137 @@
-# ToWatchDB
+<p align="center">
+  <img src="docs/images/icon.png" width="128" height="128" alt="ToWatchDB icon">
+</p>
 
-A movie and TV tracker for macOS, iOS and iPadOS, built with SwiftUI + SwiftData on top of TMDB.
-One multiplatform target: on Mac and iPad, a permanent sidebar or a top tab bar (chosen in Settings); five compact tabs on iPhone.
-Settings also picks the accent color and the app icon color (iOS alternate icons; on macOS, the Dock icon while the app runs).
+<h1 align="center">ToWatchDB</h1>
 
-Organize with **spaces** (curated collections with an icon and color), **tags**, and **smart lists**
-(saved filters by type, status, genre, rating, year, tags, spaces, backlog, favorites). Create them from
-File ▸ New…, the Organize screen, or a title's "Spaces & Tags" menu; drop posters on a space or tag to file them.
+<p align="center">
+  Keep track of every movie and TV show you want to watch, are watching, and have watched.<br>
+  For Mac, iPhone, and iPad.
+</p>
 
-**Stats** show watch time, movies, episodes, and shows for a week, month, 30/90 days, a year, or all time,
-with monthly activity, top genres and actors, highlights, a comparison with another year, and a shareable
-**Year in Review** card. (Sidebar layout: its own entry; Mac top bar: a tab; iPhone and iPad top bar: the Stats chip in the Library tab.)
+<p align="center">
+  <a href="https://github.com/msk-mdi/ToWatchDB/releases"><b>Download</b></a>
+</p>
 
-**Where to Watch** on every title lists streaming, free, ad-supported, rent, and buy options for a country
-(default: your device's region; change it per title or in Settings). Availability powered by JustWatch via TMDB.
+![The ToWatchDB library on Mac: a grid of movie and TV show posters with their ratings, filters for type, status, genre, and sort order, and the Discover, Next to Watch, Upcoming, Library, and Stats tabs](docs/images/library.webp)
 
-**Backup** (Settings, or File ▸ Import/Export on Mac): export the whole library as JSON and import it on any
-device. Importing merges, so nothing is lost or duplicated. **Export as CSV** gives one row per title for
-spreadsheets (it opens correctly in Excel, accented titles included).
+## What it does
 
-**Dropbox Sync** (Settings ▸ Dropbox Sync): connect a Dropbox account and every device connected to it keeps
-the same library, backlog, watch history, ratings, notes, and collections. Changes sync when the app opens and a
-few seconds after each edit; removals and un-watching sync too. When nothing changed, a sync is one small request,
-and a locked iPhone waits and tries again rather than disconnecting. Needs a Dropbox app key (see Setup).
+**Find anything.** Search millions of movies and TV shows from [TMDB](https://www.themoviedb.org), or browse
+what's trending this week in **Discover**. Every title has its poster, story, cast, trailer, release dates,
+and TMDB and IMDb ratings.
 
-**Seerr requests** (Settings ▸ Seerr): sign in to a Seerr, Overseerr, or Jellyseerr server with a Jellyfin or
-Emby account, a Seerr account, or the server's API key. Every title page can then **Request on Seerr** (pick the
-seasons of a show), shows when it's requested, offers **Watch Now** once it's on your media server, and can
-delete a request. An address without `http://` uses http on the home network and https otherwise.
+**Track what you watch.** Add titles to your library and mark movies, single episodes, whole seasons, or a
+whole show as watched. Rate them, mark favorites, write notes, and keep a **Backlog** of what's next.
 
-**Siri & Shortcuts**: 18 actions (next episodes, upcoming, mark watched, rate, notes, backlog, stats, where to
-watch, open lists/collections/titles, search) and 9 ready-made Siri phrases such as "What's next in ToWatchDB"
-or "Mark Severance watched in ToWatchDB". The system only runs them for apps signed with a team: add a free Apple ID
-in Xcode ▸ Settings ▸ Accounts and set `DEVELOPMENT_TEAM` / `CODE_SIGN_IDENTITY` in `Config/Secrets.xcconfig`
-(see `Secrets.example.xcconfig`).
+**Never lose your place.** **Next to Watch** shows the next episode of every show you follow, most recent
+first. **Upcoming** lists new episodes and movie releases by date, so you know what's coming this week.
 
-On iPad and Mac, any title can open in its own window, posters drag into the library or backlog
-(or out to other apps as a TMDB link), and the Title menu acts on the title on screen:
-⇧⌘E mark watched / next episode, ⇧⌘B backlog, ⇧⌘L favorite, ⇧⌘R refresh.
+**See where to watch.** Every title lists where it streams, where it's free or on an ad-supported service,
+and where to rent or buy it, for your country.
 
-## Setup
+**Organize your way.**
+- **Spaces**: your own collections, each with an icon and a color ("Movie Night", "Watch with the kids").
+- **Tags**: labels you can put on any title.
+- **Smart lists**: saved filters that update themselves, such as "unwatched dramas from the 90s rated 8 or
+  more".
 
-1. `brew install xcodegen`
-2. `cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig` and paste your TMDB v4 read access token
-   (the file is gitignored; a token can also be set at runtime in Settings, stored in the Keychain on iPhone and iPad, and in a file encrypted by the Secure Enclave on Mac).
-   The Dropbox and Seerr sign-ins are stored the same way.
-   Only Debug builds use it: Release builds ship without a token.
-   Optionally add your signing team there too, so Siri & Shortcuts actions run.
-   For Dropbox Sync, create an app at <https://www.dropbox.com/developers/apps> (Scoped access, **App folder**,
-   named e.g. ToWatchDB), enable the `files.content.read` and `files.content.write` permissions, and put its
-   app key in `DROPBOX_APP_KEY`. The key isn't secret (sign-in uses PKCE), so Release builds keep it. While the
-   Dropbox app is in development mode, only your own account (plus up to 500 users you link) can connect.
-3. `xcodegen generate && open ToWatchDB.xcodeproj`
+Drag posters onto a space or tag to file them.
 
-The Xcode project is generated from `project.yml` — edit that, not the `.xcodeproj`.
+**Look back.** **Stats** show your watch time, movies, episodes, and shows for a week, a month, a year, or all
+time, with your top genres and actors. Compare two years, and share a **Year in Review** card.
 
-## Release builds
+**Request on Seerr.** If you run a Seerr, Overseerr, or Jellyseerr server, ask for a movie or a show's seasons
+right from its page, see when it's requested, and jump to **Watch Now** when it's on your media server.
 
-No paid Apple Developer account needed; these are for your own devices. Release builds have no built-in
-TMDB token: on first launch, paste your API Read Access Token (themoviedb.org ▸ Settings ▸ API) in Settings.
+**Sync your devices.** Connect Dropbox and every device shows the same library: watch history, backlog,
+ratings, notes, and collections. Changes sync on their own a few seconds after each edit.
 
-- **Mac:** `Scripts/build-mac.sh` builds `dist/ToWatchDB.app` (and a zip); drag it into Applications. It's signed
-  ad hoc, so it runs on the Mac that built it; on another Mac, right-click ▸ Open the first time.
-- **iPhone / iPad:** add a free Apple ID in Xcode ▸ Settings ▸ Accounts, put its team ID in
-  `Config/Secrets.xcconfig` (`DEVELOPMENT_TEAM = …`), connect the device (Developer Mode on), and run
-  `Scripts/install-ios.sh`. Free-account installs expire after 7 days; run the script again to renew.
-  Your library is kept.
+**Make it yours.** Choose an accent color and a matching app icon. On Mac and iPad, choose a sidebar or a tab
+bar along the top.
 
-- **`.ipa` (iPhone + iPad):** `Scripts/build-ipa.sh` builds an unsigned `dist/ToWatchDB.ipa`. Install it with a
-  sideloading tool such as AltStore or Sideloadly, which signs it with your free Apple ID (renewed every 7 days).
+### On Mac and iPad
+- Open any title in its own window.
+- Drag posters into your library or backlog, or out to other apps as a link.
+- Keyboard shortcuts:
 
-The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml` (currently 1.3.2, build 9).
-Releases are on the [GitHub releases page](https://github.com/msk-mdi/ToWatchDB/releases): `ToWatchDB.app.zip`
-for Mac and `ToWatchDB.ipa` for iPhone and iPad.
+| Shortcut | Action |
+|---|---|
+| ⌘N | Search |
+| ⌘1 to ⌘5 | Next to Watch, Upcoming, Backlog, All Titles, Stats |
+| ⌘R | Refresh the library |
+| ⇧⌘E | Mark the movie or next episode watched |
+| ⇧⌘B | Add to or remove from the backlog |
+| ⇧⌘L | Add to or remove from favorites |
+| ⇧⌘R | Refresh the title |
 
-## Layout
+### Siri & Shortcuts
+Ask "What's next in ToWatchDB", "Mark Severance watched in ToWatchDB", or "Where can I watch Arrival in
+ToWatchDB", or build your own shortcuts from 18 actions. Siri only runs actions for apps signed with an Apple
+ID: they work when you install on iPhone and iPad with a sideloading tool, but not with the Mac download.
 
-- `Packages/ToWatchCore` — TMDB, IMDb and Seerr clients, SwiftData models, library/watch-state/upcoming logic,
-  backup and sync merging. Tested with `swift test`.
-- `ToWatchDB/` — SwiftUI app (sidebar or tab bar layouts, detail views, settings, Dropbox sync, Siri actions).
-- `Scripts/generate-icons.swift` — redraws the themed app icons and their Settings previews.
-- `Scripts/snapshot-mac.sh` — debug visual pass: captures each screen's window on macOS.
+## Download and install
 
-**[docs/CODEBASE.md](docs/CODEBASE.md)** explains the whole codebase: architecture, data model, every screen,
-navigation and layouts, performance choices, rules to follow, debugging tools, and how-tos.
+Get the latest version from the [releases page](https://github.com/msk-mdi/ToWatchDB/releases).
 
-## Checks
+### Mac (macOS 15 or later)
+1. Download **ToWatchDB.app.zip** and open it.
+2. Drag **ToWatchDB** into your **Applications** folder.
+3. Open it. The app isn't from the App Store, so the first time macOS says it can't check it. Open
+   **System Settings ▸ Privacy & Security**, scroll down, and click **Open Anyway**.
 
-```bash
-cd Packages/ToWatchCore && swift test
-xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'platform=macOS' test
-xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'platform=iOS Simulator,name=iPhone 17' build
-# Debug builds: seed sample titles into a throwaway in-memory store (any platform)
-xcrun simctl launch booted com.mehdi.towatchdb -UISeedSampleData YES
-# macOS: visit each screen and capture its window (needs Screen Recording permission for the terminal)
-Scripts/snapshot-mac.sh -navigationLayout sidebar
-```
+To update, quit ToWatchDB and replace the app in Applications with the new one. Your library is kept.
 
-This product uses the TMDB API but is not endorsed or certified by TMDB.
+### iPhone and iPad (iOS and iPadOS 18 or later)
+1. Download **ToWatchDB.ipa**.
+2. Install it with a sideloading tool such as [AltStore](https://altstore.io) or
+   [Sideloadly](https://sideloadly.io), signed in with your free Apple ID.
+
+With a free Apple ID the app has to be renewed every 7 days; these tools do it for you. Your library is kept.
+
+## First launch: connect TMDB
+
+ToWatchDB gets its movie and show information from TMDB, which needs a free key:
+1. Create a free account at [themoviedb.org](https://www.themoviedb.org/signup).
+2. Go to **Settings ▸ API** on the TMDB website and request an API key (personal use).
+3. Copy the **API Read Access Token** (the long one).
+4. In ToWatchDB, open **Settings ▸ TMDB** and paste it.
+
+### Optional
+- **Dropbox Sync:** **Settings ▸ Dropbox Sync ▸ Connect Dropbox**, on each device. Your library is kept in
+  Dropbox ▸ Apps ▸ ToWatchDB.
+- **Seerr:** **Settings ▸ Seerr**: enter your server's address, then sign in with your Jellyfin or Emby account,
+  your Seerr account, or the server's API key.
+- **Where to Watch country:** **Settings ▸ TMDB** (it starts with your device's region).
+
+## Your data
+
+Your library stays on your device. There's no account and no tracking. The app only goes online to:
+- look up titles, posters, and streaming options on TMDB,
+- fetch IMDb ratings,
+- sync with your own Dropbox, if you connect it,
+- talk to your own Seerr server, if you set one up.
+
+Your TMDB token, Dropbox sign-in, and Seerr sign-in are kept in the Keychain on iPhone and iPad, and in a file
+encrypted by your Mac's Secure Enclave on Mac.
+
+**Back up** any time from **Settings** (or **File ▸ Export Backup** on Mac). A backup is one file you can
+import on any device; importing merges it with what's there, so nothing is lost or doubled. You can also
+**Export as CSV** for a spreadsheet, or **Import List of Titles** from a text file with one title per line,
+like "Arrival (2016)".
+
+## Questions
+
+**Where are the movie details from?** From TMDB. Streaming availability comes from JustWatch through TMDB, and
+ratings from TMDB and IMDb.
+
+**Can I use it without Dropbox?** Yes. Sync is optional; without it, each device keeps its own library.
+
+**Does it cost anything?** No. ToWatchDB is free, and so is a TMDB key for personal use.
+
+---
+
+<p align="center">
+  <sub>This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data by JustWatch.<br>
+  Building the app yourself? See the <a href="docs/DEVELOPMENT.md">development guide</a>.</sub>
+</p>

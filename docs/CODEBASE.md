@@ -7,7 +7,7 @@ Shortcuts actions.
 
 This document explains how the code is organized, how data moves through it, and the rules that keep the UI
 fast and stable. Read it before making non-trivial changes. For setup and a feature summary, see the
-[README](../README.md).
+[development guide](DEVELOPMENT.md).
 
 ---
 

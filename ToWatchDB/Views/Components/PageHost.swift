@@ -5,7 +5,7 @@ extension EnvironmentValues {
     /// search field, or Title-menu target into the window.
     @Entry var isActivePage = true
     /// Called by a page with its own Refresh button (a title's page) as it appears and disappears.
-    @Entry var reportsOwnRefreshButton: @MainActor @Sendable (Bool) -> Void = { _ in }
+    @Entry var reportsOwnRefreshButton = OwnRefreshReporter()
     /// True where the window shows no title (the Mac top bar), so a page names itself.
     @Entry var showsTitleInPage = false
 }
@@ -38,9 +38,9 @@ struct PageHost<Page: View>: View {
                 let isActive = tab == selected
                 NavigationStack(path: path(for: tab)) { page(tab) }
                     .environment(\.isActivePage, isActive)
-                    .environment(\.reportsOwnRefreshButton) { [$ownRefresh] shown in
+                    .environment(\.reportsOwnRefreshButton, OwnRefreshReporter(tab: tab) { [$ownRefresh] shown in
                         if shown { $ownRefresh.wrappedValue.insert(tab) } else { $ownRefresh.wrappedValue.remove(tab) }
-                    }
+                    })
                     .opacity(isActive ? 1 : 0)
                     .allowsHitTesting(isActive)
                     .accessibilityHidden(!isActive)
@@ -104,6 +104,17 @@ extension View {
     func hasOwnRefreshButton() -> some View {
         modifier(OwnRefreshButton())
     }
+}
+
+/// Reports a page's own Refresh button to its `PageHost`. Equal for the same page: a bare closure can't be
+/// compared, so every update of the host would have counted as a change and redrawn the page's views.
+struct OwnRefreshReporter: Equatable, Sendable {
+    var tab: AppTab?
+    var report: @MainActor @Sendable (Bool) -> Void = { _ in }
+
+    @MainActor func callAsFunction(_ shown: Bool) { report(shown) }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.tab == rhs.tab }
 }
 
 private struct OwnRefreshButton: ViewModifier {

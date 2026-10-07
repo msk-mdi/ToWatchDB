@@ -190,6 +190,7 @@ final class DropboxSync {
 
     /// Runs a request with a valid access token, refreshing it first if it expired. The token is checked to
     /// belong to `session`, since getting one can wait on the network.
+    @discardableResult
     private func authorized<T>(_ session: Int, _ request: (String) async throws -> T) async throws -> T {
         func token() async throws -> String {
             let token = try await validAccessToken()

@@ -33,7 +33,7 @@ struct PageHost<Page: View>: View {
     var body: some View {
         // The selected page is always included, so the first frame after a switch isn't empty.
         let pages = recent.contains(selected) ? recent : recent + [selected]
-        ZStack {
+        PageStack {
             ForEach(pages, id: \.self) { tab in
                 let isActive = tab == selected
                 NavigationStack(path: path(for: tab)) { page(tab) }
@@ -45,6 +45,7 @@ struct PageHost<Page: View>: View {
                     .allowsHitTesting(isActive)
                     .accessibilityHidden(!isActive)
                     .zIndex(isActive ? 1 : 0)
+                    .layoutValue(key: IsActivePageKey.self, value: isActive)
             }
         }
         .onChange(of: selected, initial: true) { _, tab in
@@ -61,6 +62,29 @@ struct PageHost<Page: View>: View {
     private func path(for tab: AppTab) -> Binding<NavigationPath> {
         Binding(get: { paths[tab] ?? NavigationPath() }, set: { paths[tab] = $0 })
     }
+}
+
+/// Stacks the pages like a `ZStack`, but sizes itself from the visible page only. A `ZStack` asks every page
+/// for its size, and AppKit asks again on each window layout pass (for the window's minimum size too), so the
+/// hidden pages (a title's long page, the poster grids) were measured over and over, and scrolling stalled
+/// for seconds after switching pages. Hidden pages are still placed at the full size, so they stay laid out.
+private struct PageStack: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let active = subviews.first(where: { $0[IsActivePageKey.self] }) ?? subviews.last else {
+            return proposal.replacingUnspecifiedDimensions()
+        }
+        return active.sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+}
+
+private struct IsActivePageKey: LayoutValueKey {
+    static let defaultValue = false
 }
 
 extension View {

@@ -2,8 +2,8 @@ import SwiftUI
 import ToWatchCore
 
 /// Requests the title on the user's Seerr server, or says where it stands there: Request on Seerr (or Request
-/// More Seasons), Requested on Seerr, or Watch Now once it's on the media server. A menu beside it deletes
-/// requests. Shows nothing until a server is set up in Settings, or while Seerr can't be reached. A movie is
+/// More Seasons), Requested on Seerr, or Watch Now once it's on the media server, with a Delete Request button
+/// beside it. Shows nothing until a server is set up in Settings, or while Seerr can't be reached. A movie is
 /// requested in one click; a show opens a season picker.
 struct SeerrRequestButton: View {
     @Environment(AppState.self) private var appState
@@ -23,10 +23,12 @@ struct SeerrRequestButton: View {
 
     var body: some View {
         if let seerr = appState.seerr {
-            HStack(spacing: isCompact ? 10 : 6) {
+            // iPhone: full-width buttons, one per line. Mac and iPad: one row.
+            let layout = isCompact ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 8))
+            layout {
                 if let status {
                     button(seerr, status)
-                    requestMenu(status)
+                    deleteButtons(status)
                 }
             }
             .fixedSize(horizontal: !isCompact, vertical: false)
@@ -58,8 +60,12 @@ struct SeerrRequestButton: View {
             Button {
                 if kind == .tv { isPickingSeasons = true } else { request(seerr, seasons: []) }
             } label: {
+                // The page's text color: dark with white text, or white with dark text in Dark Mode.
                 Label(requestLabel(status), systemImage: "tray.and.arrow.down")
+                    .foregroundStyle(.background)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.primary)
             .disabled(isRequesting)
             .help("Request “\(title)” on \(seerr.baseURL.host() ?? "Seerr")")
         } else if status.availability == .available || status.availability == .partiallyAvailable,
@@ -74,22 +80,16 @@ struct SeerrRequestButton: View {
         }
     }
 
-    /// Deletes the title's requests, one item each (a show can have several, for different seasons).
+    /// One red button per request (a show can have several, for different seasons).
     @ViewBuilder
-    private func requestMenu(_ status: SeerrTitle) -> some View {
-        if !status.requests.isEmpty {
-            Menu {
-                ForEach(status.requests) { request in
-                    Button(deleteLabel(request, among: status.requests), systemImage: "trash", role: .destructive) {
-                        deleting = request
-                    }
-                }
-            } label: {
-                Label("Request Options", systemImage: "ellipsis")
+    private func deleteButtons(_ status: SeerrTitle) -> some View {
+        ForEach(status.requests) { request in
+            Button { deleting = request } label: {
+                Label(deleteLabel(request, among: status.requests), systemImage: "trash")
+                    .foregroundStyle(.white)
             }
-            .labelStyle(.iconOnly)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
             .disabled(isRequesting)
             .help("Delete the request on Seerr")
         }

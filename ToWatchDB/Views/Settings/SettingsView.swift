@@ -17,6 +17,9 @@ struct SettingsView: View {
     @State private var fileRequest: LibraryFileRequest?
     @State private var testResult: String?
     @State private var isTesting = false
+    @State private var omdbKeyDraft = ""
+    @State private var omdbTestResult: String?
+    @State private var isTestingOMDb = false
     @State private var seerrServerDraft = ""
     @State private var seerrKeyDraft = ""
     @State private var seerrUserDraft = ""
@@ -96,6 +99,8 @@ struct SettingsView: View {
                 Link("Get a free API Read Access Token at themoviedb.org", destination: TMDBLinks.apiSettings)
             }
 
+            imdbSection
+
             seerrSection
 
             Section("Library") {
@@ -149,6 +154,10 @@ struct SettingsView: View {
                             .font(.callout)
                         Link("themoviedb.org", destination: URL(string: "https://www.themoviedb.org")!)
                             .font(.callout)
+                        Text("IMDb ratings are provided by OMDb.")
+                            .font(.callout)
+                        Link("omdbapi.com", destination: URL(string: "https://www.omdbapi.com")!)
+                            .font(.callout)
                     }
                 }
             }
@@ -171,6 +180,46 @@ struct SettingsView: View {
             }
         }
         #endif
+    }
+
+    private var imdbSection: some View {
+        Section {
+            LabeledContent("OMDb API Key") {
+                Text(appState.omdbKey == nil ? "Not set, IMDb ratings are off" : "Saved")
+                    .foregroundStyle(.secondary)
+            }
+            SecureField("OMDb API key", text: $omdbKeyDraft, prompt: Text("Paste your OMDb API key"))
+            HStack {
+                Button("Save Key") {
+                    appState.setOMDbKey(omdbKeyDraft)
+                    omdbKeyDraft = ""
+                    omdbTestResult = nil
+                    Task { await appState.library.refreshStaleIMDbRatings() }
+                }
+                .disabled(omdbKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                if appState.omdbKey != nil {
+                    Button("Remove Key", role: .destructive) {
+                        appState.setOMDbKey(nil)
+                        omdbTestResult = nil
+                    }
+                }
+                Spacer()
+                if isTestingOMDb { ProgressView().controlSize(.small) }
+                Button("Test Key") { testOMDb() }
+                    .disabled(appState.imdb == nil || isTestingOMDb)
+            }
+            .rowButtonStyle()
+            if let omdbTestResult {
+                Text(omdbTestResult).font(.callout).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("IMDb Ratings")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("IMDb ratings come from OMDb. A free key allows 1,000 lookups a day, enough to keep a library's ratings up to date.")
+                Link("Get a free API key at omdbapi.com", destination: URL(string: "https://www.omdbapi.com/apikey.aspx")!)
+            }
+        }
     }
 
     @ViewBuilder
@@ -370,6 +419,23 @@ struct SettingsView: View {
         }
         if appState.hasBundledToken { return "Built-in token" }
         return "Missing"
+    }
+
+    private func testOMDb() {
+        guard let imdb = appState.imdb else { return }
+        isTestingOMDb = true
+        omdbTestResult = nil
+        Task {
+            do {
+                // The Shawshank Redemption, a title that always has a rating.
+                let rating = try await imdb.ratings(for: ["tt0111161"])["tt0111161"] ?? nil
+                omdbTestResult = rating.map { "Connected. The Shawshank Redemption is rated \($0.value.ratingString) on IMDb." }
+                    ?? "Connected, but OMDb returned no rating."
+            } catch {
+                omdbTestResult = error.localizedDescription
+            }
+            isTestingOMDb = false
+        }
     }
 
     private func test() {

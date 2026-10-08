@@ -97,7 +97,7 @@ Packages/ToWatchCore/
     TMDB/TMDBClient.swift       HTTP client, errors, image URLs
     TMDB/TMDBModels.swift       Codable DTOs for TMDB JSON, date parsing
     TMDB/WatchProviders.swift   Where-to-watch DTOs and endpoints
-    TMDB/IMDbClient.swift       IMDb ratings, fetched in batches
+    TMDB/IMDbClient.swift       IMDb ratings from OMDb, with the user's own API key
     Seerr/SeerrClient.swift     Seerr / Overseerr / Jellyseerr: sign-in, title status, requests
     Services/LibraryService.swift              Add/refresh/watch/rate/note/delete, TMDB → model mapping
     Services/LibraryService+Collections.swift  Spaces, tags, smart lists
@@ -795,4 +795,5 @@ default), check it in `matchesCommon`, and add a control in `SmartListEditor`.
   Only revisits are fast (§5.4).
 - **Widgets aren't implemented.** They were dropped from the scope.
 - **TMDB terms.** The app must keep the attribution "This product uses the TMDB API but is not endorsed or
-  certified by TMDB" and credit JustWatch for streaming data.
+  certified by TMDB" and credit JustWatch for streaming data. IMDb ratings come from OMDb with each user's own
+  key (Settings ▸ IMDb Ratings), credited in Settings ▸ About; there are none without a key.

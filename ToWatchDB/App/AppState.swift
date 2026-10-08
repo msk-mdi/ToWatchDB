@@ -45,6 +45,8 @@ final class AppState {
     var errorMessage: String?
 
     private(set) var tokenOverride: String?
+    /// The user's OMDb API key; without one the app fetches no IMDb ratings.
+    private(set) var omdbKey: String?
 
     /// The Seerr server titles are requested on, and how the app signs in to it.
     private(set) var seerrServer: String = UserDefaults.standard.string(forKey: "seerrServer") ?? ""
@@ -141,6 +143,7 @@ final class AppState {
     private func loadSecrets() {
         do {
             tokenOverride = try TokenStore.read()
+            omdbKey = try OMDbKeyStore.read()
             seerrAuth = try SeerrAuthStore.read()
             secretsUnread = false
         } catch {
@@ -234,7 +237,10 @@ final class AppState {
 
     var client: TMDBClient? { SharedLibrary.makeClient(token: token, language: language) }
 
-    var library: LibraryService { LibraryService(context: container.mainContext, client: client, imdb: IMDbClient()) }
+    /// IMDb ratings client, if an OMDb key is saved.
+    var imdb: IMDbClient? { omdbKey.map { IMDbClient(apiKey: $0) } }
+
+    var library: LibraryService { LibraryService(context: container.mainContext, client: client, imdb: imdb) }
 
     func setTokenOverride(_ token: String?) {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -244,6 +250,17 @@ final class AppState {
         } else {
             TokenStore.save(trimmed)
             tokenOverride = trimmed
+        }
+    }
+
+    func setOMDbKey(_ key: String?) {
+        let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            OMDbKeyStore.delete()
+            omdbKey = nil
+        } else {
+            OMDbKeyStore.save(trimmed)
+            omdbKey = trimmed
         }
     }
 
@@ -400,7 +417,8 @@ enum SharedLibrary {
         return TMDBClient(token: token, language: language.isEmpty ? TMDBClient.language(for: .current) : language)
     }
 
-    static var service: LibraryService { LibraryService(context: container.mainContext, client: makeClient(), imdb: IMDbClient()) }
+    static var service: LibraryService { LibraryService(context: container.mainContext, client: makeClient(),
+                                          imdb: OMDbKeyStore.load().map { IMDbClient(apiKey: $0) }) }
 
     static var watchRegion: String {
         UserDefaults.standard.string(forKey: "watchRegion") ?? Locale.current.region?.identifier ?? "US"

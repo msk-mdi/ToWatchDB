@@ -203,7 +203,7 @@ public struct LibraryService {
         if changed { save() }
     }
 
-    /// Fetches the IMDb ratings of these titles (several per request) and saves once. A failed request leaves
+    /// Fetches the IMDb ratings of these titles and saves once. A failed request leaves
     /// the ratings as they were; returns how many titles were updated.
     @discardableResult
     public func refreshIMDbRatings(movies: [Movie] = [], shows: [TVShow] = [], now: Date = .now) async -> Int {
@@ -226,8 +226,8 @@ public struct LibraryService {
         return count
     }
 
-    /// `refreshIMDbRatings` without waiting for it. Adding or refreshing a title used to wait on IMDb, an
-    /// undocumented endpoint, so a slow answer kept the Add button spinning after the title was already saved.
+    /// `refreshIMDbRatings` without waiting for it. Adding or refreshing a title used to wait on the ratings,
+    /// so a slow answer kept the Add button spinning after the title was already saved.
     public func refreshIMDbRatingsLater(movies: [Movie] = [], shows: [TVShow] = []) {
         guard imdb != nil else { return }
         Task { await refreshIMDbRatings(movies: movies, shows: shows) }

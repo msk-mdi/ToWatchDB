@@ -19,7 +19,7 @@
 
 **Find anything.** Search millions of movies and TV shows from [TMDB](https://www.themoviedb.org), or browse
 what's trending this week in **Discover**. Every title has its poster, story, cast, trailer, release dates,
-and TMDB and IMDb ratings.
+and TMDB ratings, plus IMDb ratings if you add a free OMDb key.
 
 **Track what you watch.** Add titles to your library and mark movies, single episodes, whole seasons, or a
 whole show as watched. Rate them, mark favorites, write notes, and keep a **Backlog** of what's next.
@@ -103,17 +103,20 @@ ToWatchDB gets its movie and show information from TMDB, which needs a free key:
   folder, Dropbox ▸ Apps ▸ ToWatchDB, where your library is kept.
 - **Seerr:** **Settings ▸ Seerr**: enter your server's address, then sign in with your Jellyfin or Emby account,
   your Seerr account, or the server's API key.
+- **IMDb ratings:** get a free key at [omdbapi.com](https://www.omdbapi.com/apikey.aspx) (it's emailed to you;
+  click the activation link), then paste it in **Settings ▸ IMDb Ratings**. A free key allows 1,000 lookups a
+  day, which is plenty: ratings are only refreshed every few days.
 - **Where to Watch country:** **Settings ▸ TMDB** (it starts with your device's region).
 
 ## Your data
 
 Your library stays on your device. There's no account and no tracking. The app only goes online to:
 - look up titles, posters, and streaming options on TMDB,
-- fetch IMDb ratings,
+- fetch IMDb ratings from OMDb, if you add a key,
 - sync with your own Dropbox, if you connect it,
 - talk to your own Seerr server, if you set one up.
 
-Your TMDB token, Dropbox sign-in, and Seerr sign-in are kept in the Keychain on iPhone and iPad, and in a file
+Your TMDB token, OMDb key, Dropbox sign-in, and Seerr sign-in are kept in the Keychain on iPhone and iPad, and in a file
 encrypted by your Mac's Secure Enclave on Mac.
 
 **Back up** any time from **Settings** (or **File ▸ Export Backup** on Mac). A backup is one file you can
@@ -124,18 +127,19 @@ like "Arrival (2016)".
 ## Questions
 
 **Where are the movie details from?** From TMDB. Streaming availability comes from JustWatch through TMDB, and
-ratings from TMDB and IMDb.
+ratings from TMDB and from IMDb (through OMDb).
 
 **Can I use it without Dropbox?** Yes. Sync is optional; without it, each device keeps its own library.
 
 **Can ToWatchDB read my other Dropbox files?** No. It only has access to its own folder, Dropbox ▸ Apps ▸
 ToWatchDB.
 
-**Does it cost anything?** No. ToWatchDB is free, and so is a TMDB key for personal use.
+**Does it cost anything?** No. ToWatchDB is free, and so are TMDB and OMDb keys for personal use.
 
 ---
 
 <p align="center">
-  <sub>This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data by JustWatch.<br>
+  <sub>This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data by JustWatch. IMDb ratings by OMDb.<br>
+  ToWatchDB is open source under the <a href="LICENSE">MIT License</a>.<br>
   Building the app yourself? See the <a href="docs/DEVELOPMENT.md">development guide</a>.</sub>
 </p>

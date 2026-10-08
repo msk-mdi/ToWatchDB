@@ -76,28 +76,23 @@ private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
 }
 
 @Test func decodesIMDbRatings() throws {
-    let json = Data(#"""
-    {"data":{"t0":{"ratingsSummary":{"aggregateRating":8.8,"voteCount":2876809}},
-             "t1":{"ratingsSummary":{"aggregateRating":null,"voteCount":0}},"t2":null}}
-    """#.utf8)
-    let ratings = try IMDbClient.decode(json, ids: ["tt1375666", "tt9999999", "tt0000000", "tt0000001"])
-    // Titles IMDb answered for without a rating are explicit `nil`s; one it didn't answer for is left out.
-    #expect(ratings == ["tt1375666": IMDbRating(value: 8.8, votes: 2_876_809), "tt9999999": nil, "tt0000000": nil])
+    let rated = Data(#"{"Title":"Inception","imdbRating":"8.8","imdbVotes":"2,876,809","Response":"True"}"#.utf8)
+    #expect(try IMDbClient.decode(rated) == IMDbRating(value: 8.8, votes: 2_876_809))
+    // A title without a rating, and an ID OMDb doesn't know, are answered with no rating.
+    let unrated = Data(#"{"Title":"Upcoming","imdbRating":"N/A","imdbVotes":"N/A","Response":"True"}"#.utf8)
+    #expect(try IMDbClient.decode(unrated) == nil)
+    let unknown = Data(#"{"Response":"False","Error":"Incorrect IMDb ID."}"#.utf8)
+    #expect(try IMDbClient.decode(unknown) == nil)
 }
 
 @Test func imdbErrorsDontReadAsMissingRatings() throws {
-    // A rejected or limited query comes back with a 200 status, errors, and no data.
-    let rejected = Data(#"{"errors":[{"message":"Rate limited"}],"data":null}"#.utf8)
-    #expect(throws: (any Error).self) { try IMDbClient.decode(rejected, ids: ["tt1375666"]) }
-    let unscoped = Data(#"{"errors":[{"message":"Too complex"}],"data":{"t0":null}}"#.utf8)
-    #expect(throws: (any Error).self) { try IMDbClient.decode(unscoped, ids: ["tt1375666"]) }
-
-    // A field that failed comes back null like an unknown title; it's left out so its rating is kept.
-    let partial = Data(#"""
-    {"errors":[{"message":"Timeout","path":["t1","ratingsSummary"]}],
-     "data":{"t0":{"ratingsSummary":{"aggregateRating":7.1,"voteCount":10}},"t1":null}}
-    """#.utf8)
-    #expect(try IMDbClient.decode(partial, ids: ["tt1", "tt2"]) == ["tt1": IMDbRating(value: 7.1, votes: 10)])
+    // A wrong key or a used-up daily limit stops the lookups; other errors only leave that title out.
+    let limited = Data(#"{"Response":"False","Error":"Request limit reached!"}"#.utf8)
+    #expect(throws: IMDbClient.Rejected.self) { try IMDbClient.decode(limited) }
+    let invalidKey = Data(#"{"Response":"False","Error":"Invalid API key!"}"#.utf8)
+    #expect(throws: IMDbClient.Rejected.self) { try IMDbClient.decode(invalidKey) }
+    let failed = Data(#"{"Response":"False","Error":"Error getting data."}"#.utf8)
+    #expect(throws: URLError.self) { try IMDbClient.decode(failed) }
 }
 
 @Test func todayIsTheUsersLocalDay() throws {
@@ -116,12 +111,11 @@ private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
     #expect(TMDBClient.language(for: Locale(identifier: "fr")) == "fr")
 }
 
-@Test func imdbQueryOnlyTakesPlainIDs() {
+@Test func imdbLookupsOnlyTakePlainIDs() {
     #expect(IMDbClient.isValidID("tt1375666"))
     #expect(!IMDbClient.isValidID("tt"))
     #expect(!IMDbClient.isValidID("tt1\") { x }"))
     #expect(!IMDbClient.isValidID("nm0634240"))
-    #expect(IMDbClient.query(for: ["tt1"]) == #"{ t0: title(id: "tt1") { ratingsSummary { aggregateRating voteCount } } }"#)
 }
 
 // MARK: - Library

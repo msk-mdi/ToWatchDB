@@ -27,6 +27,20 @@ enum TokenStore {
     }
 }
 
+/// The user's OMDb API key, for IMDb ratings (see `SecretStore` for where).
+enum OMDbKeyStore {
+    private static let account = "omdb-api-key"
+
+    static func load() -> String? { SecretStore.load(account) }
+
+    static func read() throws -> String? { try SecretStore.read(account) }
+
+    @discardableResult
+    static func save(_ key: String) -> Bool { SecretStore.save(key, account: account) }
+
+    static func delete() { SecretStore.delete(account) }
+}
+
 /// The Seerr API key or sign-in session, kept with the other secrets (see `SecretStore`).
 enum SeerrAuthStore {
     private static let account = "seerr-auth"
@@ -46,7 +60,7 @@ enum SeerrAuthStore {
     static func delete() { SecretStore.delete(account) }
 }
 
-/// The app's secrets: the TMDB token, the Dropbox sign-in, and the Seerr API key.
+/// The app's secrets: the TMDB token, the OMDb key, the Dropbox sign-in, and the Seerr API key.
 ///
 /// iOS keeps them in the Keychain. On macOS the app is signed ad hoc, so the Keychain knows it only by the hash
 /// of one exact build and asked for the login password after every update. There they're kept in a file

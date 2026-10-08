@@ -126,9 +126,9 @@ private struct RemotePreview: View {
         case .movie: movie = try? await appState.cachedResponse("movie-\(id)") { try await client.movie(id: id) }
         case .tv: show = try? await appState.cachedResponse("tv-\(id)") { try await client.tvShow(id: id) }
         }
-        if let imdbID {
+        if let imdbID, let imdb = appState.imdb {
             imdbRating = try? await appState.cachedResponse("imdb-\(imdbID)") {
-                try await IMDbClient().ratings(for: [imdbID])[imdbID] ?? nil
+                try await imdb.ratings(for: [imdbID])[imdbID] ?? nil
             }
         }
     }

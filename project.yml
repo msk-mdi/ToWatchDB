@@ -11,8 +11,8 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "1.4.0"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "1.4.1"
+    CURRENT_PROJECT_VERSION: "11"
 packages:
   ToWatchCore:
     path: Packages/ToWatchCore

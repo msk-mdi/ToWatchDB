@@ -427,9 +427,9 @@ struct SettingsView: View {
         omdbTestResult = nil
         Task {
             do {
-                // The Shawshank Redemption, a title that always has a rating.
-                let rating = try await imdb.ratings(for: ["tt0111161"])["tt0111161"] ?? nil
-                omdbTestResult = rating.map { "Connected. The Shawshank Redemption is rated \($0.value.ratingString) on IMDb." }
+                // The Odyssey (2026), a title that always has a rating.
+                let rating = try await imdb.ratings(for: ["tt33764258"])["tt33764258"] ?? nil
+                omdbTestResult = rating.map { "Connected. The Odyssey is rated \($0.value.ratingString) on IMDb." }
                     ?? "Connected, but OMDb returned no rating."
             } catch {
                 omdbTestResult = error.localizedDescription

@@ -19,6 +19,7 @@ struct TVShowDetailView: View {
                                    description: Text("This title was removed on another device."))
         } else {
             page
+                .task(id: show.persistentModelID) { await appState.library.refreshIMDbRatingIfDue(show) }
         }
     }
 

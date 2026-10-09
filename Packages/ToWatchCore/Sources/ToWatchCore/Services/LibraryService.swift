@@ -183,6 +183,25 @@ public struct LibraryService {
         return await refreshIMDbRatings(movies: movies.filter(\.isLive), shows: shows, now: now)
     }
 
+    /// Fetches an opened movie's IMDb rating when it has none or it's older than `maxAge`.
+    public func refreshIMDbRatingIfDue(_ movie: Movie, maxAge: TimeInterval = 86400, now: Date = .now) async {
+        guard imdb != nil, Self.isIMDbRatingDue(movie, maxAge: maxAge, now: now) else { return }
+        await refreshIMDbRatings(movies: [movie], now: now)
+    }
+
+    /// Fetches an opened show's IMDb rating when it has none or it's older than `maxAge`, looking up its IMDb
+    /// ID first if it doesn't have one yet.
+    public func refreshIMDbRatingIfDue(_ show: TVShow, maxAge: TimeInterval = 86400, now: Date = .now) async {
+        guard imdb != nil, Self.isIMDbRatingDue(show, maxAge: maxAge, now: now) else { return }
+        if show.imdbID == nil { await lookUpIMDbIDs([show], now: now) }
+        guard show.isLive, show.imdbID != nil else { return }
+        await refreshIMDbRatings(shows: [show], now: now)
+    }
+
+    static func isIMDbRatingDue(_ title: some IMDbRated, maxAge: TimeInterval, now: Date) -> Bool {
+        title.imdbRating == nil || title.imdbRatingDate.map { now.timeIntervalSince($0) > maxAge } ?? true
+    }
+
     /// A show gets its IMDb ID from a full refresh, and only ongoing shows are refreshed on their own, so
     /// shows that had ended when they were added (or came from an older backup) look theirs up here.
     private func lookUpIMDbIDs(_ shows: [TVShow], now: Date) async {

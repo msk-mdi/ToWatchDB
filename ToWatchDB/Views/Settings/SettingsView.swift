@@ -184,7 +184,7 @@ struct SettingsView: View {
 
     private var imdbSection: some View {
         Section {
-            LabeledContent("OMDb API Key") {
+            LabeledContent("Status") {
                 Text(appState.omdbKey == nil ? "Not set, IMDb ratings are off" : "Saved")
                     .foregroundStyle(.secondary)
             }

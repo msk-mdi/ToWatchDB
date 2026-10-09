@@ -122,15 +122,17 @@ private struct HiddenTopScrollEdge: ViewModifier {
 }
 #endif
 
-/// Detail actions. Mac and iPad: one row. iPhone: a full-width primary button, equal-width toggles with the
-/// icon above the label, and the rating on its own line, like Apple's own apps (instead of a squeezed row).
-struct ActionBar<Primary: View, Toggles: View, Trailing: View>: View {
+/// Detail actions. Mac and iPad: one row, with the request button below it. iPhone: a full-width primary button,
+/// equal-width toggles with the icon above the label, the request button, then the rating on its own line, like
+/// Apple's own apps (instead of a squeezed row).
+struct ActionBar<Primary: View, Toggles: View, Trailing: View, Request: View>: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
     @ViewBuilder let primary: Primary
     @ViewBuilder let toggles: Toggles
     @ViewBuilder let trailing: Trailing
+    @ViewBuilder let request: Request
 
     var body: some View {
         #if os(iOS)
@@ -145,21 +147,28 @@ struct ActionBar<Primary: View, Toggles: View, Trailing: View>: View {
                     .toggleStyle(.button)
                     .buttonStyle(.bordered)
                     .controlSize(.large)
+                request
                 trailing.font(.title2)
             }
         } else {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    primary.fixedSize()
+                    toggles.toggleStyle(.button)
+                    trailing.font(.title3).padding(.leading, 8)
+                }
+                .buttonStyle(.bordered)
+                request
+            }
+        }
+        #else
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 primary.fixedSize()
                 toggles.toggleStyle(.button)
                 trailing.font(.title3).padding(.leading, 8)
             }
-            .buttonStyle(.bordered)
-        }
-        #else
-        HStack(spacing: 12) {
-            primary.fixedSize()
-            toggles.toggleStyle(.button)
-            trailing.font(.title3).padding(.leading, 8)
+            request
         }
         #endif
     }

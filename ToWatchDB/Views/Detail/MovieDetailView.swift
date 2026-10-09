@@ -46,8 +46,9 @@ struct MovieDetailView: View {
                     }
                 } trailing: {
                     RatingView(rating: movie.userRating) { appState.library.setRating(movie, $0) }
+                } request: {
+                    SeerrRequestButton(kind: .movie, tmdbID: movie.tmdbID, title: movie.title)
                 }
-                SeerrRequestButton(kind: .movie, tmdbID: movie.tmdbID, title: movie.title)
                 ExternalLinks(kind: .movie, tmdbID: movie.tmdbID, trailerKey: movie.trailerKey,
                               imdbID: movie.imdbID, homepage: movie.homepage)
             }

@@ -133,6 +133,7 @@ public struct SeerrClient: Sendable {
     /// A self-hosted server can be offline; don't leave a spinner up for URLSession's default minute.
     /// Cookies are off: the session cookie is sent by hand, so it can't leak into other requests or linger
     /// after signing out.
+    static let decoder = JSONDecoder()
     public static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
@@ -160,7 +161,7 @@ public struct SeerrClient: Sendable {
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            let message = (try? JSONDecoder().decode(SeerrErrorBody.self, from: data))?.message
+            let message = (try? Self.decoder.decode(SeerrErrorBody.self, from: data))?.message
             if (400..<500).contains(status) { throw SeerrError.signInFailed(message) }
             throw SeerrError.http(status: status, message: message)
         }
@@ -170,7 +171,7 @@ public struct SeerrClient: Sendable {
               let client = SeerrClient(server: url.absoluteString, auth: .session(cookie), session: session)
         else { throw SeerrError.noSession }
         do {
-            return (client, try JSONDecoder().decode(SeerrUser.self, from: data))
+            return (client, try Self.decoder.decode(SeerrUser.self, from: data))
         } catch {
             throw SeerrError.decoding(String(describing: error))
         }
@@ -248,7 +249,7 @@ public struct SeerrClient: Sendable {
         // request 4K). Checking who's signed in tells the two apart.
         if (status == 401 || status == 403) && path == "auth/me" { throw SeerrError.unauthorized }
         guard (200..<300).contains(status) else {
-            let message = (try? JSONDecoder().decode(SeerrErrorBody.self, from: data))?.message
+            let message = (try? Self.decoder.decode(SeerrErrorBody.self, from: data))?.message
             if status == 401 || status == 403 {
                 // Seerr refuses with these both when the sign-in expired and when the user isn't allowed (say,
                 // to delete someone else's request). Asking who's signed in tells the two apart.
@@ -259,7 +260,7 @@ public struct SeerrClient: Sendable {
         // Deleting answers 204 with no body.
         if data.isEmpty, let empty = SeerrEmpty() as? T { return empty }
         do {
-            return try JSONDecoder().decode(T.self, from: data)
+            return try Self.decoder.decode(T.self, from: data)
         } catch {
             throw SeerrError.decoding(String(describing: error))
         }

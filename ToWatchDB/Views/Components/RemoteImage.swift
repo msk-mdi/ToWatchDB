@@ -15,7 +15,11 @@ final class ImageCache: @unchecked Sendable {
 
     private let cache: NSCache<NSURL, Entry> = {
         let cache = NSCache<NSURL, Entry>()
+        #if os(iOS)
+        cache.totalCostLimit = 128 << 20
+        #else
         cache.totalCostLimit = 256 << 20
+        #endif
         return cache
     }()
 
@@ -28,18 +32,23 @@ final class ImageCache: @unchecked Sendable {
     }
 
     /// Downloads in progress, so views showing the same image (a title on two pages, an actor in two casts)
-    /// share one download and one decode.
-    private var inFlight: [URL: Task<Entry, Error>] = [:]
+    /// share one download and one decode. `waiters` counts the views waiting for it.
+    private var inFlight: [URL: (id: UUID, task: Task<Entry, Error>, waiters: Int)] = [:]
     private let lock = NSLock()
 
     /// Fetches (through the shared URL cache) and decodes off the main thread.
     func load(_ url: URL) async throws -> Entry {
         if let image = image(for: url) { return Entry(image) }
-        let task = lock.withLock {
-            if let task = inFlight[url] { return task }
+        let (id, task) = lock.withLock {
+            if let flight = inFlight[url] {
+                inFlight[url]?.waiters += 1
+                return (flight.id, flight.task)
+            }
+            let id = UUID()
             // Unstructured, so one view scrolling away (cancelling its wait) doesn't cancel the others'.
             let task = Task.detached(priority: .userInitiated) { [self] in
-                defer { lock.withLock { inFlight[url] = nil } }
+                // Only its own entry: a cancelled download's entry may already be replaced by a new one.
+                defer { lock.withLock { if inFlight[url]?.id == id { inFlight[url] = nil } } }
                 let (data, _) = try await URLSession.shared.data(from: url)
                 guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                       let image = CGImageSourceCreateImageAtIndex(
@@ -49,12 +58,24 @@ final class ImageCache: @unchecked Sendable {
                 store(entry, for: url)
                 return entry
             }
-            inFlight[url] = task
-            return task
+            inFlight[url] = (id, task, 1)
+            return (id, task)
         }
-        // A download that a view stops waiting for (scrolled away) still finishes into the cache, so scrolling
-        // back finds it.
-        return try await task.value
+        // A download every view stopped waiting for (scrolled past) is cancelled: when scrolling fast through a
+        // grid, finishing them all delayed the posters now on screen.
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            lock.withLock {
+                guard let flight = inFlight[url], flight.id == id else { return }
+                if flight.waiters > 1 {
+                    inFlight[url]?.waiters -= 1
+                } else {
+                    flight.task.cancel()
+                    inFlight[url] = nil
+                }
+            }
+        }
     }
 }
 

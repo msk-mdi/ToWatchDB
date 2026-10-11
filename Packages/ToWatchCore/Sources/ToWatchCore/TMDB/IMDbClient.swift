@@ -18,6 +18,7 @@ public struct IMDbClient: Sendable {
     public static let endpoint = URL(string: "https://www.omdbapi.com/")!
     /// Lookups running at once.
     static let concurrency = 4
+    static let decoder = JSONDecoder()
 
     private let apiKey: String
     private let session: URLSession
@@ -91,7 +92,7 @@ public struct IMDbClient: Sendable {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         // A wrong key or a used-up daily limit answers 401, with the reason in the body.
         if status == 401 {
-            throw Rejected(message: (try? JSONDecoder().decode(Response.self, from: data))?.error ?? "Invalid API key!")
+            throw Rejected(message: (try? Self.decoder.decode(Response.self, from: data))?.error ?? "Invalid API key!")
         }
         guard (200..<300).contains(status) else { throw URLError(.badServerResponse) }
         return try Self.decode(data)
@@ -100,7 +101,7 @@ public struct IMDbClient: Sendable {
     /// The rating in one OMDb answer: `nil` when the title has none or OMDb doesn't know the ID.
     /// Throws for any other error, so the title's stored rating is kept.
     static func decode(_ data: Data) throws -> IMDbRating? {
-        let body = try JSONDecoder().decode(Response.self, from: data)
+        let body = try Self.decoder.decode(Response.self, from: data)
         guard body.response == "True" else {
             let message = body.error ?? ""
             if message.localizedCaseInsensitiveContains("not found") || message.localizedCaseInsensitiveContains("incorrect imdb id") {

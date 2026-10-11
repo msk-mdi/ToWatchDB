@@ -22,8 +22,9 @@ struct ToWatchDBApp: App {
     @State private var shortcutsContent: Int?
 
     init() {
-        // Posters are requested constantly while scrolling; a larger shared cache keeps them local.
-        URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
+        // Posters are requested constantly while scrolling; a larger shared cache keeps them local. Mostly on disk:
+        // decoded images are kept by `ImageCache`, so their downloaded bytes in memory too were a second copy.
+        URLCache.shared = URLCache(memoryCapacity: 8 << 20, diskCapacity: 512 << 20)
     }
 
     var body: some Scene {

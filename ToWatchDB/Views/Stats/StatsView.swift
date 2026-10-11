@@ -199,11 +199,13 @@ private struct ActivityChart: View {
     @State private var selectedDate: Date?
 
     var body: some View {
+        // Found once per hover move, not twice per bar.
+        let selected = selectedBucket
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Activity").font(.title3.bold())
                 Spacer()
-                Text(readout).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                Text(readout(selected)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
             Chart {
                 ForEach(stats.activity) { bucket in
@@ -212,7 +214,7 @@ private struct ActivityChart: View {
                         y: .value("Hours", Double(bucket.minutes) / 60)
                     )
                     .cornerRadius(4)
-                    .foregroundStyle(isSelected(bucket) || selectedBucket == nil ? themeColor : themeColor.opacity(0.35))
+                    .foregroundStyle(selected == nil || bucket.start == selected?.start ? themeColor : themeColor.opacity(0.35))
                     .accessibilityLabel(label(for: bucket.start))
                     .accessibilityValue("\(bucket.minutes.watchTimeString), \(bucket.movies) movies, \(bucket.episodes) episodes")
                 }
@@ -250,8 +252,6 @@ private struct ActivityChart: View {
         return stats.activity.last { $0.start <= selectedDate }
     }
 
-    private func isSelected(_ bucket: ActivityBucket) -> Bool { bucket.start == selectedBucket?.start }
-
     private func label(for date: Date) -> String {
         switch stats.granularity {
         case .day: date.formatted(date: .abbreviated, time: .omitted)
@@ -260,8 +260,8 @@ private struct ActivityChart: View {
         }
     }
 
-    private var readout: String {
-        if let bucket = selectedBucket {
+    private func readout(_ selected: ActivityBucket?) -> String {
+        if let bucket = selected {
             var parts = ["\(label(for: bucket.start)): \(bucket.minutes.watchTimeString)"]
             if bucket.movies > 0 { parts.append("\(bucket.movies) movie\(bucket.movies == 1 ? "" : "s")") }
             if bucket.episodes > 0 { parts.append("\(bucket.episodes) episode\(bucket.episodes == 1 ? "" : "s")") }

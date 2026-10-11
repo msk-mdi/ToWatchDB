@@ -62,9 +62,7 @@ struct GetWatchStatsIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let context = SharedLibrary.container.mainContext
         let statsPeriod = period.period
-        let stats = StatsService.stats(movies: (try? context.fetch(FetchDescriptor<Movie>())) ?? [],
-                                       shows: (try? context.fetch(FetchDescriptor<TVShow>())) ?? [],
-                                       period: statsPeriod)
+        let stats = StatsService.stats(in: context, period: statsPeriod)
         let summary = SpokenSummaries.stats(stats, periodLabel: statsPeriod.label)
         return .result(value: summary, dialog: "\(summary)")
     }

@@ -34,7 +34,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        let progress = appState.showProgress(allowStale: !isActive)
+        let progress = appState.showProgress()
         let scoped = scopedSortedItems(progress)
         // Cached with the list it counts: typing in the filter field redraws the page on every keystroke.
         let genres = appState.cached("library-genres-\(scope)-\(String(describing: statusFilter))", allowStale: !isActive) {

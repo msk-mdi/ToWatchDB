@@ -432,7 +432,11 @@ private var utcCalendar: Calendar {
     #expect(all.totalMinutes == 148 + 100 + s1Minutes)
     #expect(all.posterPaths.first == show.posterPath, "most recent first")
 
-    #expect(StatsService.watchYears(movies: [movie, undated], shows: [show], calendar: calendar) == [2025, 2024])
+    #expect(StatsService.watchYears(in: library.context, calendar: calendar) == [2025, 2024])
+    for period in [StatsPeriod.year(2025), .year(2024), .allTime] {
+        #expect(StatsService.stats(in: library.context, period: period, now: now, calendar: calendar)
+                == StatsService.stats(movies: [movie, undated], shows: [show], period: period, now: now, calendar: calendar))
+    }
 }
 
 @Test func statsPeriodsAndRanking() {
@@ -511,6 +515,27 @@ private var utcCalendar: Calendar {
 
     let restoredList = try #require(try target.context.fetch(FetchDescriptor<SmartList>()).first)
     #expect(restoredList.rules.matches(restoredShow, now: now), "rules still point at the restored tag")
+}
+
+@MainActor @Test func syncSnapshotReadsBackCompressed() throws {
+    let library = try makeLibrary()
+    let show = try insertSeverance(into: library)
+    let s1e1 = try #require(show.regularEpisodes.first)
+    library.setWatched(s1e1, true, on: date("2025-01-02"))
+    library.addNote("Great pilot", to: s1e1)
+    library.save()
+
+    // As sync takes it: a context of its own, then compressed.
+    let snapshot = try LibraryService.makeBackup(in: ModelContext(library.context.container))
+    let data = try BackupCoding.compressed(BackupCoding.compactEncoder.encode(snapshot))
+    #expect(data.count < (try BackupCoding.compactEncoder.encode(snapshot)).count)
+    let decoded = try BackupCoding.decode(data)
+    #expect(LibrarySync.sameContent(decoded, try library.makeBackup()))
+    let seasons = try #require(decoded.shows.first?.seasons)
+    #expect(seasons.map(\.seasonNumber) == [0, 1, 2])
+    #expect(seasons.map(\.episodes.count) == show.sortedSeasons.map(\.sortedEpisodes.count))
+    #expect(seasons[1].episodes.map(\.episodeNumber) == Array(1...9))
+    #expect(seasons[1].episodes.first?.notes.map(\.text) == ["Great pilot"])
 }
 
 @MainActor @Test func backupImportMergesWithoutDuplicates() throws {

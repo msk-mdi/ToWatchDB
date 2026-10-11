@@ -119,16 +119,23 @@ final class AppState {
             // new data, or a redraw could store a value computed from stale data under the new version.
             forName: ModelContext.didSave, object: container.mainContext, queue: nil
         ) { [weak self] notification in
-            let deleted = notification.userInfo?[ModelContext.NotificationKey.deletedIdentifiers.rawValue]
-                as? [PersistentIdentifier]
+            func identifiers(_ key: ModelContext.NotificationKey) -> [PersistentIdentifier] {
+                notification.userInfo?[key.rawValue] as? [PersistentIdentifier] ?? []
+            }
+            let deleted = identifiers(.deletedIdentifiers)
+            let changed = identifiers(.insertedIdentifiers) + identifiers(.updatedIdentifiers)
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.libraryVersion += 1
-                if deleted?.isEmpty == false {
+                if !deleted.isEmpty {
                     self.lastDeletionVersion = self.libraryVersion
                     // Nothing cached before a deletion is served again, and it may hold the deleted models.
                     self.derivedCache.removeAll()
+                    self.progressCache = nil
+                } else {
+                    self.noteProgressChanges(changed)
                 }
+                if !self.isInMemory { self.dropbox.noteSave() }
                 // Here rather than in a view: on Mac, edits from a title window, Settings, or Siri with the main
                 // window closed weren't synced until it reopened.
                 if self.libraryVersion != self.dropbox.syncedVersion { self.syncWithDropbox(after: .seconds(5)) }
@@ -198,14 +205,49 @@ final class AppState {
     /// The TMDB IDs in the library, for Discover and Search badges.
     var libraryIDs: LibraryIDs { cached("library-ids") { LibraryIDs(movies: all(), shows: all()) } }
 
-    /// Every show's progress, computed once per library version and shared by the pages that need it
-    /// (library grids, Next to Watch): a show's progress walks all of its episodes. It fetches every show
-    /// itself, so a page whose query is narrower can't cache a partial map.
-    func showProgress(allowStale: Bool = false) -> [PersistentIdentifier: ShowProgress] {
+    /// Every show's progress, shared by the pages that need it (library grids, Next to Watch): a show's progress
+    /// walks all of its episodes. It fetches every show itself, so a page whose query is narrower can't cache a
+    /// partial map. Kept across saves: a save recomputes only the shows it changed, where recomputing every show
+    /// walked every episode in the library after each click.
+    func showProgress() -> [PersistentIdentifier: ShowProgress] {
+        _ = libraryVersion // Pages showing progress redraw after saves.
         let day = Calendar.current.startOfDay(for: .now)
-        return cached("show-progress-\(day)", allowStale: allowStale) {
-            let shows = (try? container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
-            return Dictionary(shows.map { ($0.persistentModelID, $0.progressSummary()) }) { first, _ in first }
+        let context = container.mainContext
+        guard var cache = progressCache, cache.day == day else {
+            let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
+            let progress = Dictionary(shows.map { ($0.persistentModelID, $0.progressSummary()) }) { first, _ in first }
+            progressCache = (day, progress)
+            progressChanges = []
+            return progress
+        }
+        guard !progressChanges.isEmpty else { return cache.progress }
+        var shows: [PersistentIdentifier: TVShow] = [:]
+        for id in progressChanges {
+            let show: TVShow? = switch context.model(for: id) {
+            case let show as TVShow: show
+            case let season as Season: season.show
+            case let episode as Episode: episode.season?.show
+            default: nil
+            }
+            if let show, show.isLive { shows[show.persistentModelID] = show }
+        }
+        for (id, show) in shows { cache.progress[id] = show.progressSummary() }
+        progressCache = cache
+        progressChanges = []
+        return cache.progress
+    }
+
+    /// `showProgress` as of `day`, and the shows, seasons, and episodes saved since, which it recomputes.
+    @ObservationIgnored private var progressCache: (day: Date, progress: [PersistentIdentifier: ShowProgress])?
+    @ObservationIgnored private var progressChanges: [PersistentIdentifier] = []
+
+    private func noteProgressChanges(_ changed: [PersistentIdentifier]) {
+        guard progressCache != nil else { return }
+        progressChanges += changed.filter { ["TVShow", "Season", "Episode"].contains($0.entityName) }
+        // A refresh of the whole library: computing everything again is cheaper than finding each show.
+        if progressChanges.count > 2000 {
+            progressCache = nil
+            progressChanges = []
         }
     }
 

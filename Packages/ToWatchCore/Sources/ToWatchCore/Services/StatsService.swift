@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// The time window stats cover. Watch dates are the user's own moments, so periods use the local calendar
 /// (unlike TMDB release dates, which are UTC calendar days).
@@ -96,6 +97,33 @@ public enum StatsService {
     @MainActor
     public static func stats(movies: [Movie], shows: [TVShow], period: StatsPeriod,
                              now: Date = .now, calendar: Calendar = StatsPeriod.calendar, topCount: Int = 10) -> WatchStats {
+        // Order doesn't matter for counting, so skip sorting seasons and episodes.
+        stats(movies: movies, shows: shows, watchedEpisodes: { show in
+            (show.seasons ?? []).flatMap { $0.episodes ?? [] }.filter(\.isWatched)
+        }, period: period, now: now, calendar: calendar, topCount: topCount)
+    }
+
+    /// Stats from the library in `context`. Reads only watched titles and episodes, each in one fetch: walking
+    /// every show's seasons and episodes ran a query per show and per season, and loaded every episode.
+    @MainActor
+    public static func stats(in context: ModelContext, period: StatsPeriod,
+                             now: Date = .now, calendar: Calendar = StatsPeriod.calendar, topCount: Int = 10) -> WatchStats {
+        let movies = (try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate { $0.isWatched }))) ?? []
+        let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
+        var episodes = FetchDescriptor<Episode>(predicate: #Predicate { $0.isWatched })
+        episodes.relationshipKeyPathsForPrefetching = [\.season]
+        var byShow: [PersistentIdentifier: [Episode]] = [:]
+        for episode in (try? context.fetch(episodes)) ?? [] {
+            if let show = episode.season?.show { byShow[show.persistentModelID, default: []].append(episode) }
+        }
+        return stats(movies: movies, shows: shows, watchedEpisodes: { byShow[$0.persistentModelID] ?? [] },
+                     period: period, now: now, calendar: calendar, topCount: topCount)
+    }
+
+    /// `watchedEpisodes` gives a show's watched episodes, in any order.
+    @MainActor
+    private static func stats(movies: [Movie], shows: [TVShow], watchedEpisodes: (TVShow) -> [Episode], period: StatsPeriod,
+                              now: Date, calendar: Calendar, topCount: Int) -> WatchStats {
         let interval = period.interval(now: now, calendar: calendar)
         let inPeriod: (Date?) -> Bool = { date in
             guard let interval else { return true }
@@ -126,8 +154,7 @@ public enum StatsService {
 
         // Episodes, grouped by show
         for show in shows {
-            // Order doesn't matter for counting, so skip sorting seasons and episodes.
-            let episodes = (show.seasons ?? []).flatMap { $0.episodes ?? [] }.filter(\.isWatched)
+            let episodes = watchedEpisodes(show)
             stats.undatedWatches += episodes.count { $0.watchedDate == nil }
             let watched = episodes.filter { inPeriod($0.watchedDate) }
             guard !watched.isEmpty else { continue }
@@ -164,11 +191,15 @@ public enum StatsService {
         return stats
     }
 
-    /// Years that have at least one dated watch, newest first.
+    /// Years that have at least one dated watch, newest first. Reads only the watch dates.
     @MainActor
-    public static func watchYears(movies: [Movie], shows: [TVShow], calendar: Calendar = StatsPeriod.calendar) -> [Int] {
-        let dates = movies.compactMap(\.watchedDate)
-            + shows.flatMap { ($0.seasons ?? []).flatMap { $0.episodes ?? [] } }.compactMap(\.watchedDate)
+    public static func watchYears(in context: ModelContext, calendar: Calendar = StatsPeriod.calendar) -> [Int] {
+        var movies = FetchDescriptor<Movie>(predicate: #Predicate { $0.watchedDate != nil })
+        movies.propertiesToFetch = [\.watchedDate]
+        var episodes = FetchDescriptor<Episode>(predicate: #Predicate { $0.watchedDate != nil })
+        episodes.propertiesToFetch = [\.watchedDate]
+        let dates = ((try? context.fetch(movies)) ?? []).compactMap(\.watchedDate)
+            + ((try? context.fetch(episodes)) ?? []).compactMap(\.watchedDate)
         return Set(dates.map { calendar.component(.year, from: $0) }).sorted(by: >)
     }
 

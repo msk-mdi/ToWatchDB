@@ -1,6 +1,7 @@
 import AuthenticationServices
 import Foundation
 import Observation
+import SwiftData
 import ToWatchCore
 
 /// Keeps the library in sync with a file in the user's Dropbox, so every device signed in to the same
@@ -33,10 +34,25 @@ final class DropboxSync {
     @ObservationIgnored private var syncedRev: String? = UserDefaults.standard.string(forKey: "dropboxSyncedRev") {
         didSet { UserDefaults.standard.set(syncedRev, forKey: "dropboxSyncedRev") }
     }
+    /// Whether a save since the last sync hasn't reached Dropbox, kept across launches. Without it every launch
+    /// ran a full sync (snapshotting the whole library) even when nothing had changed. Unknown (an update from a
+    /// version without it) counts as yes.
+    @ObservationIgnored private var hasUnsyncedEdits = UserDefaults.standard.object(forKey: "dropboxHasUnsyncedEdits") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(hasUnsyncedEdits, forKey: "dropboxHasUnsyncedEdits") }
+    }
     /// The sign-in couldn't be read when checked (a locked iPhone), so it's checked again before each sync.
     @ObservationIgnored private var isConnectionUnknown = false
 
-    init() { checkConnection() }
+    init() {
+        checkConnection()
+        // Nothing saved since the last sync: the library as launched (version 0) is what Dropbox holds.
+        if !hasUnsyncedEdits, syncedRev != nil { syncedVersion = 0 }
+    }
+
+    /// Called on every save of the library.
+    func noteSave() {
+        if !hasUnsyncedEdits { hasUnsyncedEdits = true }
+    }
 
     /// Reads the sign-in again if it couldn't be read before. Called before syncing.
     func checkConnectionIfNeeded() {
@@ -150,15 +166,19 @@ final class DropboxSync {
                 // Most syncs (each time the app comes to the front) find nothing new on either side. Checking the
                 // revision skips downloading, decoding and snapshotting the whole library for those.
                 let file: DropboxClient.File?
+                /// Whether `file` is the base: Dropbox still holds what the last sync uploaded or found.
+                var isBase = false
                 if attempt == 1, let syncedRev, let base = Self.loadBaseData(),
                    try await authorized(session, { try await client.revision(path: Self.path, accessToken: $0) }) == syncedRev {
                     try checkSession()
                     if syncedVersion == version() {
+                        hasUnsyncedEdits = false
                         lastSynced = .now
                         lastError = nil
                         return
                     }
                     file = DropboxClient.File(data: base, rev: syncedRev)
+                    isBase = true
                 } else {
                     file = try await authorized(session) { try await client.download(path: Self.path, accessToken: $0) }
                 }
@@ -167,24 +187,26 @@ final class DropboxSync {
                 // which froze scrolling after launch. Only reading and writing the models stays on it.
                 let remote = try await Self.offMain { try file.map { try BackupCoding.decode($0.data) } }
 
-                var service = library()
-                var local = try service.makeBackup()
-                if let remote {
+                var (local, localVersion) = try await snapshot(library: library, version: version)
+                // With the file still the base, merging gives back this device's library: skip merging and
+                // applying it. Unless the base isn't usable (a lost library), which merges as a first sync.
+                if let remote, !(isBase && LibrarySync.usableBase(remote, local: local) != nil) {
                     while true {
-                        let localVersion = version()
                         let merged = try await Self.offMain { [local] in LibrarySync.merge(base: LibrarySync.usableBase(Self.loadBase(), local: local), local: local, remote: remote) }
                         try checkSession()
-                        service = library()
+                        let service = library()
                         // A batch (a list import, a refresh) changes models and saves only when it's done, so its
-                        // changes made while merging aren't in `local` and applying would delete or undo them.
-                        // Save them, which counts as an edit below.
+                        // changes aren't in `local` (a snapshot of what's saved) and applying would delete or
+                        // undo them. Save them, which counts as an edit below.
                         if service.context.hasChanges { service.save() }
-                        // An edit saved while merging isn't in `local`; applying would undo it, so merge again.
+                        // An edit saved since the snapshot isn't in `local`; applying would undo it, so merge again.
                         guard version() == localVersion else {
-                            local = try service.makeBackup()
+                            (local, localVersion) = try await snapshot(library: library, version: version)
                             continue
                         }
-                        if try service.applySyncedBackup(merged) { local = try service.makeBackup() }
+                        if try service.applySyncedBackup(merged) {
+                            (local, localVersion) = try await snapshot(library: library, version: version)
+                        }
                         break
                     }
                     // The library now holds everything in this file, so the file is the new common ancestor. With
@@ -192,9 +214,10 @@ final class DropboxSync {
                     // this merge brought in for edits made here, and overwrote newer edits from other devices.
                     if let file { saveBase(file.data, rev: file.rev) }
                 }
-                let snapshotVersion = version()
+                let snapshotVersion = localVersion
                 let (data, changed) = try await Self.offMain { [local] in
-                    (try BackupCoding.compactEncoder.encode(local), remote.map { !LibrarySync.sameContent($0, local) } ?? true)
+                    (try BackupCoding.compressed(BackupCoding.compactEncoder.encode(local)),
+                     remote.map { !LibrarySync.sameContent($0, local) } ?? true)
                 }
 
                 var rev = file?.rev
@@ -207,6 +230,7 @@ final class DropboxSync {
                 try checkSession()
                 saveBase(data, rev: rev)
                 syncedVersion = snapshotVersion
+                if snapshotVersion == version() { hasUnsyncedEdits = false }
                 lastSynced = .now
                 lastError = nil
                 return
@@ -231,6 +255,18 @@ final class DropboxSync {
                 lastError = error.localizedDescription
                 return
             }
+        }
+    }
+
+    /// The library as saved, with its version. Snapshotting walks every title and episode, so it runs off the
+    /// main thread with a context of its own. A save landing meanwhile could leave it half old, half new, so
+    /// it's taken again then.
+    private func snapshot(library: () -> LibraryService, version: () -> Int) async throws -> (LibraryBackup, Int) {
+        while true {
+            let snapshotVersion = version()
+            let container = library().context.container
+            let backup = try await Self.offMain { try LibraryService.makeBackup(in: ModelContext(container)) }
+            if version() == snapshotVersion { return (backup, snapshotVersion) }
         }
     }
 

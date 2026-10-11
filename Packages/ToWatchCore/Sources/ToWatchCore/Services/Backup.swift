@@ -193,7 +193,17 @@ public enum BackupCoding {
         return decoder
     }()
 
+    /// LZFSE-compressed JSON, for the sync file: the whole library, uploaded after edits, is several times
+    /// smaller compressed. `decode` reads it as well as plain JSON.
+    public static func compressed(_ data: Data) throws -> Data {
+        try (data as NSData).compressed(using: .lzfse) as Data
+    }
+
+    /// LZFSE streams start with this; JSON starts with `{`.
+    private static let lzfseMagic = Data("bvx".utf8)
+
     public static func decode(_ data: Data) throws -> LibraryBackup {
+        let data = data.starts(with: lzfseMagic) ? try (data as NSData).decompressed(using: .lzfse) as Data : data
         // The whole file is parsed once; only when that fails is the version read, so a newer format gets a
         // clear message rather than a decoding error.
         struct Header: Decodable { let version: Int }
@@ -224,14 +234,33 @@ struct NotesByOwner {
 
 public extension LibraryService {
     func makeBackup() throws -> LibraryBackup {
+        try Self.makeBackup(in: context)
+    }
+
+    /// Nonisolated so sync can snapshot with a context of its own off the main thread: it walks every title and
+    /// episode in the library.
+    nonisolated static func makeBackup(in context: ModelContext) throws -> LibraryBackup {
         var backup = LibraryBackup()
-        let notes = notesByOwner()
+        let notes = notesByOwner(in: context)
         var movies = FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])
         movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
-        backup.movies = try context.fetch(movies).map { Self.record($0, notes: notes) }
+        backup.movies = try context.fetch(movies).map { record($0, notes: notes) }
         var shows = FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)])
         shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
-        backup.shows = try context.fetch(shows).map { Self.record($0, notes: notes) }
+        let showModels = try context.fetch(shows)
+        // Every season and episode in one fetch each, after the shows so their parents are already loaded.
+        // Reading `show.seasons` and `season.episodes` ran a query per show and per season.
+        var seasonsByShow: [PersistentIdentifier: [Season]] = [:]
+        for season in try context.fetch(FetchDescriptor<Season>()) {
+            if let show = season.show { seasonsByShow[show.persistentModelID, default: []].append(season) }
+        }
+        var episodesBySeason: [PersistentIdentifier: [Episode]] = [:]
+        for episode in try context.fetch(FetchDescriptor<Episode>()) {
+            if let season = episode.season { episodesBySeason[season.persistentModelID, default: []].append(episode) }
+        }
+        backup.shows = showModels.map {
+            record($0, seasons: seasonsByShow[$0.persistentModelID] ?? [], episodes: episodesBySeason, notes: notes)
+        }
         // Collections in a stable order, so an unchanged library writes an identical file.
         backup.spaces = try context.fetch(FetchDescriptor<Space>(sortBy: [SortDescriptor(\.createdAt)])).map {
             .init(uuid: $0.uuid, name: $0.name, symbolName: $0.symbolName, colorName: $0.colorName, createdAt: $0.createdAt)
@@ -248,6 +277,10 @@ public extension LibraryService {
     /// Every title's and episode's notes from one fetch. Reading `episode.notes` or `movie.notes` runs a query
     /// per model, and backups and syncs visit every title and episode in the library.
     internal func notesByOwner() -> NotesByOwner {
+        Self.notesByOwner(in: context)
+    }
+
+    internal nonisolated static func notesByOwner(in context: ModelContext) -> NotesByOwner {
         let notes = (try? context.fetch(FetchDescriptor<Note>())) ?? []
         var result = NotesByOwner()
         for note in notes {
@@ -266,17 +299,17 @@ public extension LibraryService {
         try BackupCoding.encoder.encode(makeBackup())
     }
 
-    private static func notes(_ notes: [Note]?) -> [LibraryBackup.NoteRecord] {
+    private nonisolated static func notes(_ notes: [Note]?) -> [LibraryBackup.NoteRecord] {
         (notes ?? []).sorted { $0.createdAt < $1.createdAt }
             .map { .init(text: $0.text, createdAt: $0.createdAt, updatedAt: $0.updatedAt) }
     }
 
     /// Sorted, because relationship order isn't stable: unsorted, sync saw a change on every pass.
-    private static func sortedIDs(_ ids: [UUID]) -> [UUID] {
+    private nonisolated static func sortedIDs(_ ids: [UUID]) -> [UUID] {
         ids.sorted { $0.uuidString < $1.uuidString }
     }
 
-    private static func record(_ movie: Movie, notes byOwner: NotesByOwner) -> LibraryBackup.MovieRecord {
+    private nonisolated static func record(_ movie: Movie, notes byOwner: NotesByOwner) -> LibraryBackup.MovieRecord {
         .init(tmdbID: movie.tmdbID, title: movie.title, originalTitle: movie.originalTitle, overview: movie.overview,
               tagline: movie.tagline, posterPath: movie.posterPath, backdropPath: movie.backdropPath,
               releaseDate: movie.releaseDate, runtime: movie.runtime, genres: movie.genres,
@@ -288,7 +321,9 @@ public extension LibraryService {
               notes: notes(byOwner.movies[movie.persistentModelID]), spaceIDs: sortedIDs((movie.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((movie.tags ?? []).map(\.uuid)))
     }
 
-    private static func record(_ show: TVShow, notes byOwner: NotesByOwner) -> LibraryBackup.ShowRecord {
+    /// `seasons` are the show's; `episodes` are every season's, by season.
+    private nonisolated static func record(_ show: TVShow, seasons: [Season], episodes: [PersistentIdentifier: [Episode]],
+                                           notes byOwner: NotesByOwner) -> LibraryBackup.ShowRecord {
         .init(tmdbID: show.tmdbID, name: show.name, originalName: show.originalName, overview: show.overview,
               tagline: show.tagline, posterPath: show.posterPath, backdropPath: show.backdropPath,
               firstAirDate: show.firstAirDate, lastAirDate: show.lastAirDate, showStatus: show.showStatus,
@@ -299,10 +334,10 @@ public extension LibraryService {
               cast: show.cast, creators: show.creators, addedDate: show.addedDate, userRating: show.userRating,
               isInBacklog: show.isInBacklog, isFavorite: show.isFavorite, isAbandoned: show.isAbandoned,
               notes: notes(byOwner.shows[show.persistentModelID]), spaceIDs: sortedIDs((show.spaces ?? []).map(\.uuid)), tagIDs: sortedIDs((show.tags ?? []).map(\.uuid)),
-              seasons: show.sortedSeasons.map { season in
+              seasons: seasons.sorted { $0.seasonNumber < $1.seasonNumber }.map { season in
                   .init(tmdbID: season.tmdbID, seasonNumber: season.seasonNumber, name: season.name,
                         overview: season.overview, posterPath: season.posterPath, airDate: season.airDate,
-                        episodes: season.sortedEpisodes.map { episode in
+                        episodes: (episodes[season.persistentModelID] ?? []).sorted { $0.episodeNumber < $1.episodeNumber }.map { episode in
                             .init(tmdbID: episode.tmdbID, episodeNumber: episode.episodeNumber, name: episode.name,
                                   overview: episode.overview, airDate: episode.airDate, runtime: episode.runtime,
                                   stillPath: episode.stillPath, isWatched: episode.isWatched,

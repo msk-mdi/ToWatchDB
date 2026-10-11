@@ -21,10 +21,10 @@ struct StatsView: View {
         // Cached until the library changes, so coming back to Stats doesn't recompute everything.
         // A hidden page (kept alive on Mac) shows its last stats instead of recomputing after every save.
         let stats = appState.cached(Self.cacheKey(period), allowStale: !isActive) {
-            StatsService.stats(movies: appState.all(), shows: appState.all(), period: period)
+            StatsService.stats(in: appState.container.mainContext, period: period)
         }
         let years = appState.cached("watch-years", allowStale: !isActive) {
-            StatsService.watchYears(movies: appState.all(), shows: appState.all())
+            StatsService.watchYears(in: appState.container.mainContext)
         }
         let showsCompare = if case let .year(year) = period { years.contains { $0 != year } } else { false }
         // With nothing else on the page, the empty state is centered like every other screen's.
@@ -389,7 +389,7 @@ private struct CompareSection: View {
         let other = comparedYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first { $0 < year } ?? years[0]
         // The page's key: comparing against a year already shown (or showing the compared year) reuses its stats.
         let previous = appState.cached(StatsView.cacheKey(.year(other)), allowStale: !isActive) {
-            StatsService.stats(movies: appState.all(), shows: appState.all(), period: .year(other))
+            StatsService.stats(in: appState.container.mainContext, period: .year(other))
         }
 
         VStack(alignment: .leading, spacing: 12) {

@@ -5,6 +5,7 @@ import ToWatchCore
 /// Searches TMDB for movies or TV shows.
 struct SearchView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
 
     @State private var query = ""
     @State private var kind: MediaSummary.Kind = .movie
@@ -15,7 +16,7 @@ struct SearchView: View {
 
     var body: some View {
         // Rebuilt once per save, not on every keystroke.
-        let ids = appState.libraryIDs
+        let ids = appState.libraryIDs(allowStale: !isActive)
         ScrollView {
             kindPicker
                 #if os(macOS)

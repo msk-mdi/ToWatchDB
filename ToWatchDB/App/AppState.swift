@@ -12,6 +12,9 @@ enum AppTab: Hashable {
 /// App-wide state: the model container, TMDB configuration, navigation, and background refresh.
 @Observable @MainActor
 final class AppState {
+    /// The app's state, for Siri and Shortcuts actions, when its library is the one they use.
+    static weak var shared: AppState?
+
     let container: ModelContainer
 
     var selectedTab: AppTab = .discover
@@ -142,6 +145,7 @@ final class AppState {
             }
         }
         loadSecrets()
+        if container === SharedLibrary.container { Self.shared = self }
         #if os(macOS)
         AppDelegate.appState = self
         #endif
@@ -202,8 +206,18 @@ final class AppState {
         }
     }
 
-    /// The TMDB IDs in the library, for Discover and Search badges.
-    var libraryIDs: LibraryIDs { cached("library-ids") { LibraryIDs(movies: all(), shows: all()) } }
+    /// The TMDB IDs in the library, for Discover and Search badges. Reads only the IDs. Hidden pages (kept alive
+    /// on Mac) pass `allowStale` so a save doesn't refetch them for a page nobody sees.
+    func libraryIDs(allowStale: Bool = false) -> LibraryIDs {
+        cached("library-ids", allowStale: allowStale) {
+            var movies = FetchDescriptor<Movie>()
+            movies.propertiesToFetch = [\.tmdbID]
+            var shows = FetchDescriptor<TVShow>()
+            shows.propertiesToFetch = [\.tmdbID]
+            let context = container.mainContext
+            return LibraryIDs(movies: (try? context.fetch(movies)) ?? [], shows: (try? context.fetch(shows)) ?? [])
+        }
+    }
 
     /// Every show's progress, shared by the pages that need it (library grids, Next to Watch): a show's progress
     /// walks all of its episodes. It fetches every show itself, so a page whose query is narrower can't cache a

@@ -5,6 +5,7 @@ import ToWatchCore
 /// Trending movies and shows this week.
 struct DiscoverView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.isActivePage) private var isActive
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -14,7 +15,7 @@ struct DiscoverView: View {
 
     var body: some View {
         let loadError = appState.trendingError
-        let ids = appState.libraryIDs
+        let ids = appState.libraryIDs(allowStale: !isActive)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if appState.client != nil && loadError == nil {

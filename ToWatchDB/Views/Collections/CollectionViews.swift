@@ -12,10 +12,14 @@ struct CollectionMenus: View {
     let tags: [MediaTag]
 
     var body: some View {
-        let library = appState.library
+        // Memberships read once, and the library service made only when a toggle runs: macOS draws these for
+        // every poster in a grid.
+        let inSpaces = Set(title.spaces.map(\.persistentModelID))
+        let inTags = Set(title.tags.map(\.persistentModelID))
         Menu("Spaces", systemImage: "square.stack") {
             ForEach(spaces) { space in
-                Toggle(isOn: Binding(get: { library.isIn(title, space) }, set: { _ in library.toggle(title, in: space) })) {
+                Toggle(isOn: Binding(get: { inSpaces.contains(space.persistentModelID) },
+                                     set: { _ in appState.library.toggle(title, in: space) })) {
                     Label(space.name, systemImage: space.symbolName)
                 }
             }
@@ -24,7 +28,8 @@ struct CollectionMenus: View {
         }
         Menu("Tags", systemImage: "tag") {
             ForEach(tags) { tag in
-                Toggle(tag.name, isOn: Binding(get: { library.isTagged(title, tag) }, set: { _ in library.toggle(tag, on: title) }))
+                Toggle(tag.name, isOn: Binding(get: { inTags.contains(tag.persistentModelID) },
+                                               set: { _ in appState.library.toggle(tag, on: title) }))
             }
             if !tags.isEmpty { Divider() }
             Button("New Tag…", systemImage: "plus") { appState.collectionEditor = .newTag(assigning: title) }

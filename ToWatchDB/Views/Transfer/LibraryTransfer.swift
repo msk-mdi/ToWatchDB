@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 import ToWatchCore
 import UniformTypeIdentifiers
@@ -93,10 +94,23 @@ private struct LibraryFileTransfers: ViewModifier {
         do {
             switch request {
             case .exportBackup:
-                document = ExportFile(data: try appState.library.exportBackupData())
-                contentType = .json
-                filename = "ToWatchDB Backup \(today).json"
-                isExporting = true
+                // Snapshotted and encoded off the main thread, from what's saved: it walks every title and episode.
+                let library = appState.library
+                if library.context.hasChanges { library.save() }
+                let container = appState.container
+                Task {
+                    do {
+                        let data = try await Task.detached(priority: .userInitiated) {
+                            try BackupCoding.encoder.encode(LibraryService.makeBackup(in: ModelContext(container)))
+                        }.value
+                        document = ExportFile(data: data)
+                        contentType = .json
+                        filename = "ToWatchDB Backup \(today).json"
+                        isExporting = true
+                    } catch {
+                        showError(error.localizedDescription)
+                    }
+                }
             case .exportCSV:
                 // The byte-order mark makes Excel read the file as UTF-8 rather than garbling accented titles.
                 document = ExportFile(data: Data(("\u{FEFF}" + (try appState.library.exportCSV())).utf8))
@@ -138,14 +152,19 @@ private struct LibraryFileTransfers: ViewModifier {
     }
 
     private func importBackup(from url: URL) {
-        // Files picked in the open panel are outside the sandbox until explicitly accessed.
-        let isScoped = url.startAccessingSecurityScopedResource()
-        defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let data = try Data(contentsOf: url)
-            message = ("Import Complete", try appState.library.importBackup(data: data).description)
-        } catch {
-            showError(error.localizedDescription)
+        Task {
+            // Files picked in the open panel are outside the sandbox until explicitly accessed.
+            let isScoped = url.startAccessingSecurityScopedResource()
+            defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                // Reading and decoding the whole library happens off the main thread; only applying it stays on it.
+                let backup = try await Task.detached(priority: .userInitiated) {
+                    try BackupCoding.decode(Data(contentsOf: url))
+                }.value
+                message = ("Import Complete", appState.library.importBackup(backup).description)
+            } catch {
+                showError(error.localizedDescription)
+            }
         }
     }
 }

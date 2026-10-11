@@ -69,6 +69,22 @@ private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
     #expect(search.results.first?.name == "Severance")
 }
 
+@Test func decodesSeasonsAppendedToShowDetail() throws {
+    func json(_ name: String) throws -> [String: Any] {
+        let url = try #require(Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures"))
+        return try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+    var detail = try json("tv_severance")
+    detail["season/1"] = try json("season_1")
+    detail["season/2"] = ["success": false, "status_message": "Not found"]
+    let data = try JSONSerialization.data(withJSONObject: detail)
+    let show: TMDBTVDetail = try TMDBClient.decode(data)
+    #expect(show.name == "Severance")
+    let appended = try TMDBClient.decoder.decode(TMDBClient.AppendedSeasons.self, from: data).seasons
+    #expect(appended.map(\.seasonNumber) == [1], "an entry that isn't a season is skipped")
+    #expect(appended.first?.episodes.count == 9)
+}
+
 @Test func parsesTMDBDates() {
     #expect(TMDBDate.parse("") == nil)
     #expect(TMDBDate.parse(nil) == nil)

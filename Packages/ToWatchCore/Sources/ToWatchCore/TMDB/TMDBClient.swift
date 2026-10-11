@@ -73,7 +73,12 @@ public struct TMDBClient: Sendable {
     }
 
     public func tvShow(id: Int) async throws -> TMDBTVDetail {
-        try await get("tv/\(id)", ["append_to_response": "credits,videos,external_ids", "include_video_language": videoLanguages])
+        try await get("tv/\(id)", tvShowQuery())
+    }
+
+    private func tvShowQuery(appending extra: [String] = []) -> [String: String] {
+        ["append_to_response": (["credits", "videos", "external_ids"] + extra).joined(separator: ","),
+         "include_video_language": videoLanguages]
     }
 
     /// A show's IDs on other sites, such as IMDb.
@@ -92,16 +97,43 @@ public struct TMDBClient: Sendable {
         try await get("tv/\(showID)/season/\(seasonNumber)")
     }
 
-    /// Show detail plus every season's episode list, fetched concurrently.
+    /// Show detail plus every season's episode list. Seasons 0–16 come in the detail request itself (TMDB takes
+    /// 20 appended items and leaves out seasons that don't exist): a request per season made refreshing a
+    /// library hundreds of requests, enough to hit TMDB's rate limit. Any other season is fetched on its own.
     public func tvShowWithSeasons(id: Int) async throws -> (TMDBTVDetail, [TMDBSeasonDetail]) {
-        let detail = try await tvShow(id: id)
-        return (detail, try await seasons(of: detail))
+        let data = try await data("tv/\(id)", tvShowQuery(appending: (0..<17).map { "season/\($0)" }))
+        let detail: TMDBTVDetail = try Self.decode(data)
+        let appended = (try? Self.decoder.decode(AppendedSeasons.self, from: data))?.seasons ?? []
+        let have = Set(appended.map(\.seasonNumber))
+        let missing = (detail.seasons ?? []).map(\.seasonNumber).filter { !have.contains($0) }
+        let seasons = appended + (try await seasons(numbered: missing, showID: id))
+        return (detail, seasons.sorted { $0.seasonNumber < $1.seasonNumber })
+    }
+
+    /// The `season/N` entries of a show detail with seasons appended.
+    struct AppendedSeasons: Decodable {
+        let seasons: [TMDBSeasonDetail]
+
+        private struct Key: CodingKey {
+            let stringValue: String
+            init(stringValue: String) { self.stringValue = stringValue }
+            var intValue: Int? { nil }
+            init?(intValue: Int) { nil }
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: Key.self)
+            seasons = container.allKeys.filter { $0.stringValue.hasPrefix("season/") }
+                .compactMap { try? container.decode(TMDBSeasonDetail.self, forKey: $0) }
+        }
     }
 
     /// Every season's episode list for an already-fetched show, fetched concurrently.
     public func seasons(of detail: TMDBTVDetail) async throws -> [TMDBSeasonDetail] {
-        let id = detail.id
-        let numbers = (detail.seasons ?? []).map(\.seasonNumber)
+        try await seasons(numbered: (detail.seasons ?? []).map(\.seasonNumber), showID: detail.id)
+    }
+
+    private func seasons(numbered numbers: [Int], showID id: Int) async throws -> [TMDBSeasonDetail] {
         // At most 6 at a time: a long-running show has dozens of seasons, and a burst of requests that size
         // (times the titles refreshed together) can hit TMDB's rate limit, which fails the whole show.
         let seasons = try await withThrowingTaskGroup(of: TMDBSeasonDetail.self) { group in
@@ -125,6 +157,18 @@ public struct TMDBClient: Sendable {
     // MARK: Transport
 
     func get<T: Decodable>(_ path: String, _ query: [String: String] = [:]) async throws -> T {
+        try Self.decode(try await data(path, query))
+    }
+
+    static func decode<T: Decodable>(_ data: Data) throws -> T {
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw TMDBError.decoding(String(describing: error))
+        }
+    }
+
+    func data(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
         guard !token.isEmpty else { throw TMDBError.missingToken }
 
         var components = URLComponents(url: Self.baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
@@ -150,11 +194,7 @@ public struct TMDBClient: Sendable {
             let body = try? Self.decoder.decode(TMDBErrorBody.self, from: data)
             throw TMDBError.http(status: status, message: body?.statusMessage)
         }
-        do {
-            return try Self.decoder.decode(T.self, from: data)
-        } catch {
-            throw TMDBError.decoding(String(describing: error))
-        }
+        return data
     }
 }
 

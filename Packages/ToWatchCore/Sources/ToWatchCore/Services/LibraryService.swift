@@ -130,10 +130,14 @@ public struct LibraryService {
     @discardableResult
     public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async -> Int {
         let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
-        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate { !$0.isAbandoned }))) ?? [])
-            .filter { $0.isOngoing && isStale($0.lastRefreshed) }
-        let movies = ((try? context.fetch(FetchDescriptor<Movie>())) ?? [])
-            .filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
+        // The store narrows it down (this runs at every launch and activation); the checks after are exact.
+        let cutoff = now.addingTimeInterval(-maxAge), today = TMDBDate.today(now)
+        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate {
+            !$0.isAbandoned && ($0.lastRefreshed == nil || $0.lastRefreshed! < cutoff)
+        }))) ?? []).filter { $0.isOngoing && isStale($0.lastRefreshed) }
+        let movies = ((try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate {
+            ($0.releaseDate == nil || $0.releaseDate! > today) && ($0.lastRefreshed == nil || $0.lastRefreshed! < cutoff)
+        }))) ?? []).filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
 
         guard let client, !shows.isEmpty || !movies.isEmpty else { return 0 }
 
@@ -174,9 +178,14 @@ public struct LibraryService {
         let isStale: (any IMDbRated) -> Bool = { title in
             title.imdbRatingDate.map { now.timeIntervalSince($0) > (title.imdbRatingIsImported ? importedMaxAge : maxAge) } ?? true
         }
-        let movies = ((try? context.fetch(FetchDescriptor<Movie>())) ?? [])
-            .filter { $0.imdbID != nil && isStale($0) }
-        let allShows = ((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).filter(isStale)
+        // The store narrows it down to ratings older than the shorter age; `isStale` is exact.
+        let cutoff = now.addingTimeInterval(-min(maxAge, importedMaxAge))
+        let movies = ((try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate {
+            $0.imdbID != nil && ($0.imdbRatingDate == nil || $0.imdbRatingDate! < cutoff)
+        }))) ?? []).filter(isStale)
+        let allShows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate {
+            $0.imdbRatingDate == nil || $0.imdbRatingDate! < cutoff
+        }))) ?? []).filter(isStale)
         await lookUpIMDbIDs(allShows.filter { $0.imdbID == nil }, now: now)
         // The lookup awaited the network: a title deleted meanwhile (by the user or a sync) can't be read.
         let shows = allShows.filter { $0.isLive && $0.imdbID != nil }

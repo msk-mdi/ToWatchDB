@@ -521,26 +521,25 @@ struct LibraryPosterCard: View {
 
     @ViewBuilder
     private func menu(next: Episode?) -> some View {
-        let library = appState.library
         switch item {
         case let .movie(movie):
             Button(movie.isWatched ? "Mark as Not Watched" : "Mark as Watched",
                    systemImage: movie.isWatched ? "circle" : "checkmark.circle") {
-                library.setWatched(movie, !movie.isWatched)
+                appState.library.setWatched(movie, !movie.isWatched)
             }
             .disabled(!movie.isWatched && !movie.isReleased())
             Button(movie.isInBacklog ? "Remove from Backlog" : "Move to Backlog", systemImage: "tray.full") {
-                library.setBacklog(movie, !movie.isInBacklog)
+                appState.library.setBacklog(movie, !movie.isInBacklog)
             }
         case let .show(show):
             if let next {
-                Button("Mark \(next.code) as Watched", systemImage: "checkmark.circle") { library.setWatched(next, true) }
+                Button("Mark \(next.code) as Watched", systemImage: "checkmark.circle") { appState.library.setWatched(next, true) }
             }
             Button(show.isInBacklog ? "Remove from Backlog" : "Move to Backlog", systemImage: "tray.full") {
-                library.setBacklog(show, !show.isInBacklog)
+                appState.library.setBacklog(show, !show.isInBacklog)
             }
             Button(show.isAbandoned ? "Resume Watching" : "Abandon", systemImage: "xmark.circle") {
-                library.setAbandoned(show, !show.isAbandoned)
+                appState.library.setAbandoned(show, !show.isAbandoned)
             }
         }
         Divider()

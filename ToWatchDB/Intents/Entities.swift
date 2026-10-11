@@ -95,9 +95,15 @@ struct ShowQuery: EntityStringQuery {
     func suggestedEntities() async throws -> [ShowEntity] {
         await MainActor.run {
             let shows = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
-            // Each show's next episode found once, not twice per comparison.
+            // The app's progress map, when the app is running (updating the shortcut parameters at launch asks
+            // for these), so every show's episodes aren't walked again. Each show's next episode found once, not
+            // twice per comparison.
+            let progress = AppState.shared?.showProgress()
             return shows
-                .map { (show: $0, next: $0.nextEpisodeToWatch()) }
+                .map { show in
+                    let next: Episode? = if let progress { progress[show.persistentModelID]?.nextEpisode } else { show.nextEpisodeToWatch() }
+                    return (show: show, next: next)
+                }
                 .sorted { ($0.next != nil ? 0 : 1, $0.show.name) < ($1.next != nil ? 0 : 1, $1.show.name) }
                 .prefix(30)
                 .map { ShowEntity($0.show, next: $0.next) }

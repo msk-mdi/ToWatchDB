@@ -208,7 +208,7 @@ header on the **v3 API**. The `language` parameter is sent with every request.
 | `trendingMovies`, `trendingTVShows` | `trending/{movie,tv}/week` |
 | `movie(id:)`, `tvShow(id:)` | `movie/{id}`, `tv/{id}` with `append_to_response=credits,videos` and `include_video_language` |
 | `season(showID:seasonNumber:)` | `tv/{id}/season/{n}` |
-| `tvShowWithSeasons(id:)` | Detail, then every season concurrently (task group) |
+| `tvShowWithSeasons(id:)` | Detail with seasons 0–16 appended in one request (TMDB takes 20 appended items and leaves out seasons that don't exist); any other season fetched concurrently (task group, 6 at a time) |
 | `watchProviders(movieID:)`, `watchProviders(showID:)` | `…/watch/providers` (JustWatch data, which must be credited) |
 
 - **Dates:** `TMDBDate.parse` reads TMDB's `yyyy-MM-dd` strings as UTC midnights. TMDB dates are calendar
@@ -348,7 +348,7 @@ parameters whenever it becomes active.
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
 | `cached(_:_:)` | Memoizes derived data (stats) until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
 | `all(_:matching:)` | Fetches every model of a type (optionally filtered), for `cached` closures (§7, item 15) |
-| `libraryIDs`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached; every show's progress, kept across saves (§7, item 8) |
+| `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |
 | `shortcutsContent` | Cached hash of the names and next episodes Siri is taught (§5.11) |
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 
@@ -644,7 +644,7 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     macOS and keeps `List` (and swipe actions) on iOS.
 15. **No whole-table `@Query` feeding a cache.** A `@Query` refetches after every save, hidden pages included,
     even when `appState.cached` reuses its value. Pages fetch titles inside the `cached` closure instead
-    (`appState.all(_:matching:)`, `appState.libraryIDs`); `@Query` stays for small tables and filtered lookups.
+    (`appState.all(_:matching:)`, `appState.libraryIDs()`); `@Query` stays for small tables and filtered lookups.
 16. **Sync skips unchanged files.** `DropboxSync` keeps the revision its base matches: when the file is still
     at it, a sync with no local changes stops after one metadata request, and one with changes merges against
     the base without downloading. The sync file is compact JSON (`BackupCoding.compactEncoder`).

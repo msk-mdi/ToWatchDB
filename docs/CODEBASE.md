@@ -122,7 +122,7 @@ Scripts/
 docs/CODEBASE.md                This file
 ```
 
-About 14,000 lines of Swift in total (version 1.4.2).
+About 14,000 lines of Swift in total (version 1.5.0).
 
 ---
 
@@ -274,11 +274,11 @@ one from `SharedLibrary.service`.
 - **`UpcomingService`:** movies and unwatched episodes dated today or later (UTC day), soonest first.
   Abandoned shows are excluded.
 - **`StatsService`:**
-  - `stats(movies:shows:period:)` returns `WatchStats`: counts, minutes, top genres and actors, a most-watched
+  - `stats(in:period:)` (or `stats(movies:shows:period:)`) returns `WatchStats`: counts, minutes, top genres and actors, a most-watched
     show, the longest movie, activity buckets (day, month, or year depending on the range), poster paths for
-    Year in Review, and undated watches.
+    Year in Review, and undated watches. `stats(in:)` fetches only watched movies and episodes, one query each.
   - `StatsPeriod` covers all time, a year, this week, this month, and the last N days, on the local calendar.
-  - `watchYears` lists the years that have watch history.
+  - `watchYears(in:)` lists the years that have watch history, fetching only watch dates.
 - **`SpokenSummaries`:** builds the sentences Siri speaks. They live in the core package so they can be tested.
 
 ### 4.6 Backup and CSV
@@ -286,7 +286,11 @@ one from `SharedLibrary.service`.
 - **Format:** `LibraryBackup` (version 1) is a self-contained JSON snapshot. It includes TMDB metadata, so a
   restore works offline. `BackupCoding.decode` parses the file once and checks its version; only if that fails
   does it read the version alone, so a backup from a newer app gets a clear message. Exported backups are
-  indented (`BackupCoding.encoder`); the sync file and comparisons use `BackupCoding.compactEncoder`.
+  indented (`BackupCoding.encoder`); the sync file and comparisons use `BackupCoding.compactEncoder`. The sync
+  file is also LZFSE-compressed (`BackupCoding.compressed`); `decode` reads compressed and plain files alike.
+- **Snapshot:** `LibraryService.makeBackup(in:)` is nonisolated, so sync runs it off the main thread with a
+  context of its own. It fetches shows, seasons, and episodes once each and groups them, rather than following
+  relationships (a query per show and per season).
 - **Notes** are identified by their creation second (ISO 8601 drops fractions). `addNote` moves a new note to
   the next free second on its title, so two notes added in one second stay apart.
 - **CSV:** fields that start like a formula (`=`, `+`, `-`, `@`) get a leading apostrophe. The app writes the
@@ -344,7 +348,7 @@ parameters whenever it becomes active.
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
 | `cached(_:_:)` | Memoizes derived data (stats) until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
 | `all(_:matching:)` | Fetches every model of a type (optionally filtered), for `cached` closures (§7, item 15) |
-| `libraryIDs`, `showProgress()` | Cached: the TMDB IDs in the library (Discover and Search badges), every show's progress |
+| `libraryIDs`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached; every show's progress, kept across saves (§7, item 8) |
 | `shortcutsContent` | Cached hash of the names and next episodes Siri is taught (§5.11) |
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 
@@ -526,9 +530,13 @@ the local date.
   and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`. After applying
   a downloaded file it saves that file as the base, so a retry after a conflict merges against it. Unsaved
   changes from a batch (list import, refresh) are saved before applying, so the merge can't drop them.
+- **Snapshots** are taken off the main thread (`DropboxSync.snapshot`), from what's saved, and taken again if a
+  save lands meanwhile. The upload is compressed (§4.6), so devices on 1.4.2 or older can't read the file.
 - **Skipping unchanged files:** the revision the base matches is kept (`syncedRev`, in `UserDefaults`). A sync
   first asks Dropbox for the file's revision (`files/get_metadata`). If it's unchanged and nothing was saved
-  here, the sync stops. If only this device changed, it merges against the base instead of downloading.
+  here, the sync stops. If only this device changed, merging against the base would give back this library, so
+  it uploads without merging (unless `usableBase` rejects the base). `hasUnsyncedEdits` (in `UserDefaults`, set
+  by every save) survives relaunches: without it, the first sync after each launch snapshotted the library.
 - **Signed out vs. can't read:** only a refresh token Dropbox rejects (`invalid_grant`) or one that isn't saved
   disconnects. A secret that can't be read (a locked iPhone) fails the sync with `secretsUnavailable` and it
   tries again later; `isConnected` is read again before the next sync if it couldn't be read at launch. A token
@@ -614,8 +622,10 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
 6. **Discover's trending lists** are cached in `AppState` for 30 minutes.
 7. **Don't sort to walk episodes.** `regularEpisodes` sorts every season and episode; use
    `forEachRegularEpisode` (unsorted) or `progressSummary()`, which also returns `lastWatched`.
-8. **Share per-show progress.** `appState.progress(of: shows)` computes every show's `ShowProgress` once per
-   save; the library grids and Next to Watch read it instead of walking episodes themselves.
+8. **Share per-show progress.** `appState.showProgress()` keeps every show's `ShowProgress`; the library grids
+   and Next to Watch read it instead of walking episodes themselves. A save recomputes only the shows whose
+   show, season, or episode it inserted or updated. A deletion, a new day, or more than 2,000 changes rebuild
+   it all.
 9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
    save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.

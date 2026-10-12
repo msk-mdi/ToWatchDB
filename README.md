@@ -82,6 +82,9 @@ Get the latest version from the [releases page](https://github.com/msk-mdi/ToWat
 
 To update, quit ToWatchDB and replace the app in Applications with the new one. Your library is kept.
 
+Or install it with [Homebrew](https://brew.sh): `brew install msk-mdi/tap/towatchdb`. It opens without the
+Privacy & Security step, and `brew upgrade` updates it.
+
 ### iPhone and iPad (iOS and iPadOS 18 or later)
 1. Download **ToWatchDB.ipa**.
 2. Install it with a sideloading tool such as [AltStore](https://altstore.io) or

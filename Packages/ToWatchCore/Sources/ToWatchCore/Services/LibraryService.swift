@@ -410,28 +410,44 @@ public struct LibraryService {
 
     @discardableResult
     public func addNote(_ text: String, to movie: Movie) -> Note? {
-        movie.isLive ? insertNote(text, besides: movie.notes) { $0.movie = movie } : nil
+        movie.isLive ? insertNote(text) { $0.movie = movie } : nil
     }
     @discardableResult
     public func addNote(_ text: String, to show: TVShow) -> Note? {
-        show.isLive ? insertNote(text, besides: show.notes) { $0.show = show } : nil
+        show.isLive ? insertNote(text) { $0.show = show } : nil
     }
     @discardableResult
     public func addNote(_ text: String, to episode: Episode) -> Note? {
-        episode.isLive ? insertNote(text, besides: episode.notes) { $0.episode = episode } : nil
+        episode.isLive ? insertNote(text) { $0.episode = episode } : nil
     }
 
-    private func insertNote(_ text: String, besides existing: [Note]?, attach: (Note) -> Void) -> Note? {
+    private func insertNote(_ text: String, attach: (Note) -> Void) -> Note? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let note = Note(text: trimmed)
-        // Sync and import tell a title's notes apart by their creation second; two in one second became one.
-        let taken = Set((existing ?? []).map { LibrarySync.noteKey($0.createdAt) })
-        while taken.contains(LibrarySync.noteKey(note.createdAt)) { note.createdAt += 1 }
+        let note = Note(text: trimmed) // With its own ID: two notes from one second stay apart in sync.
         context.insert(note)
         attach(note)
         save()
         return note
+    }
+
+    /// Gives an ID to each older note that shares one with another note of its title or episode: two from one
+    /// second, which an import could add. Sync kept only one of them.
+    public func separateNotesSharingAnID() {
+        struct Key: Hashable {
+            let owner: PersistentIdentifier?
+            let id: UUID
+        }
+        guard let notes = try? context.fetch(FetchDescriptor<Note>(predicate: #Predicate { $0.uuid == nil })) else { return }
+        var seen = Set<Key>()
+        var changed = false
+        for note in notes.sorted(by: { $0.createdAt < $1.createdAt }) {
+            let owner = note.movie?.persistentModelID ?? note.show?.persistentModelID ?? note.episode?.persistentModelID
+            guard !seen.insert(Key(owner: owner, id: note.noteID)).inserted else { continue }
+            note.uuid = UUID()
+            changed = true
+        }
+        if changed { save() }
     }
 
     public func update(_ note: Note, text: String) {

@@ -220,16 +220,24 @@ public enum LibrarySync {
         return result
     }
 
-    /// Notes are identified by creation time; an edit changes the text and `updatedAt`.
+    /// Notes are identified by `noteID`; an edit changes the text and `updatedAt`.
     static func notes(_ base: [LibraryBackup.NoteRecord]?, _ local: [LibraryBackup.NoteRecord],
                       _ remote: [LibraryBackup.NoteRecord]) -> [LibraryBackup.NoteRecord] {
-        keyed(base, local, remote, key: { noteKey($0.createdAt) }) { m in
+        keyed(base, local, remote, key: \.noteID) { m in
             m.pick({ $0 }) { local, remote in remote.updatedAt > local.updatedAt ? remote : local }
         }
         .sorted { $0.createdAt < $1.createdAt }
     }
 
     static func noteKey(_ createdAt: Date) -> Int { Int(createdAt.timeIntervalSince1970.rounded(.down)) }
+
+    /// A note's ID: its `uuid`, or for a note from before notes had one, an ID made from its creation second.
+    /// That second is what told notes apart then, and every device makes the same ID from it.
+    static func noteID(_ uuid: UUID?, createdAt: Date) -> UUID {
+        if let uuid { return uuid }
+        let seconds = UInt64(bitPattern: Int64(noteKey(createdAt))) & 0xFFFF_FFFF_FFFF
+        return UUID(uuidString: String(format: "00000000-0000-0000-0000-%012llX", seconds))!
+    }
 
     /// Seasons and episodes are TMDB metadata, so one missing here isn't a deletion: the file's is kept if it
     /// holds user data. One without any isn't taken: a refresh here removed it because TMDB dropped it, and
@@ -448,10 +456,10 @@ public extension LibraryService {
                           attach: (Note) -> Void) {
         let notes = existing() ?? []
         guard !records.isEmpty || !notes.isEmpty else { return }
-        let wanted = Dictionary(records.map { (LibrarySync.noteKey($0.createdAt), $0) }) { first, _ in first }
-        var present = Set<Int>()
+        let wanted = Dictionary(records.map { ($0.noteID, $0) }) { first, _ in first }
+        var present = Set<UUID>()
         for note in notes {
-            let key = LibrarySync.noteKey(note.createdAt)
+            let key = note.noteID
             guard let record = wanted[key], present.insert(key).inserted else {
                 context.delete(note)
                 continue
@@ -461,6 +469,7 @@ public extension LibraryService {
         }
         for (key, record) in wanted where !present.contains(key) {
             let note = Note(text: record.text)
+            note.uuid = record.id // Nil stays nil, so the note keeps the ID it has on other devices.
             note.createdAt = record.createdAt
             note.updatedAt = record.updatedAt
             context.insert(note)
@@ -502,4 +511,12 @@ public extension LibraryService {
     private func assign<Root: AnyObject>(_ object: Root, _ keyPath: ReferenceWritableKeyPath<Root, Date>, _ value: Date) {
         if LibrarySync.noteKey(object[keyPath: keyPath]) != LibrarySync.noteKey(value) { object[keyPath: keyPath] = value }
     }
+}
+
+extension Note {
+    var noteID: UUID { LibrarySync.noteID(uuid, createdAt: createdAt) }
+}
+
+extension LibraryBackup.NoteRecord {
+    var noteID: UUID { LibrarySync.noteID(id, createdAt: createdAt) }
 }

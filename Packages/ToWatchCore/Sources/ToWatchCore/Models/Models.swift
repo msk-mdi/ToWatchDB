@@ -236,6 +236,10 @@ public final class Note {
     public var text: String = ""
     public var createdAt: Date = Date.now
     public var updatedAt: Date = Date.now
+    /// Tells notes apart in sync and import. Nil for notes from before it existed, which go by their creation
+    /// second instead (`noteID`). Optional: a migration fills a new attribute's default into every existing row,
+    /// so `= UUID()` would have given them all the same ID.
+    public var uuid: UUID?
 
     public var movie: Movie?
     public var show: TVShow?
@@ -243,6 +247,7 @@ public final class Note {
 
     public init(text: String) {
         self.text = text
+        self.uuid = UUID()
     }
 }
 

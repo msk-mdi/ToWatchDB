@@ -5,7 +5,8 @@ import SwiftData
 // so a restore works offline and doesn't refetch hundreds of titles.
 
 public struct LibraryBackup: Codable, Sendable {
-    public static let currentVersion = 1
+    /// 2: notes carry an ID. A version 1 app would drop it from the synced file, so it's refused there instead.
+    public static let currentVersion = 2
 
     public var version = LibraryBackup.currentVersion
     public var exportedAt = Date.now
@@ -19,6 +20,8 @@ public struct LibraryBackup: Codable, Sendable {
         public var text: String
         public var createdAt: Date
         public var updatedAt: Date
+        /// The note's `uuid`; nil in version 1 files and for notes made before it existed.
+        public var id: UUID? = nil
     }
 
     public struct MovieRecord: Codable, Sendable {
@@ -308,7 +311,7 @@ public extension LibraryService {
 
     private nonisolated static func notes(_ notes: [Note]?) -> [LibraryBackup.NoteRecord] {
         (notes ?? []).sorted { $0.createdAt < $1.createdAt }
-            .map { .init(text: $0.text, createdAt: $0.createdAt, updatedAt: $0.updatedAt) }
+            .map { .init(text: $0.text, createdAt: $0.createdAt, updatedAt: $0.updatedAt, id: $0.uuid) }
     }
 
     /// Sorted, because relationship order isn't stable: unsorted, sync saw a change on every pass.
@@ -632,11 +635,16 @@ public extension LibraryService {
     private func mergeNotes(_ records: [LibraryBackup.NoteRecord], into existing: @autoclosure () -> [Note]?,
                             attach: (Note) -> Void) {
         guard !records.isEmpty else { return }
-        let present = Set((existing() ?? []).map { NoteKey(text: $0.text, createdAt: $0.createdAt) })
+        let notes = existing() ?? []
+        let present = Set(notes.map { NoteKey(text: $0.text, createdAt: $0.createdAt) })
+        var ids = Set(notes.map(\.noteID))
         for record in records where !present.contains(NoteKey(text: record.text, createdAt: record.createdAt)) {
             let note = Note(text: record.text)
             note.createdAt = record.createdAt
             note.updatedAt = record.updatedAt
+            // A different note with the same ID (two older notes from one second) gets its own, or sync kept one.
+            if !ids.contains(record.noteID) { note.uuid = record.id }
+            ids.insert(note.noteID)
             context.insert(note)
             attach(note)
         }

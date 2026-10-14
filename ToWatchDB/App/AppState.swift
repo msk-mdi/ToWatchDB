@@ -148,6 +148,7 @@ final class AppState {
         if container === SharedLibrary.container {
             Self.shared = self
             errorMessage = SharedLibrary.openFailure
+            library.separateNotesSharingAnID()
         }
         #if os(macOS)
         AppDelegate.appState = self

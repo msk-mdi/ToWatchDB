@@ -771,8 +771,62 @@ private final class SyncDevice {
     let movie = library.insertMovie(try fixture("movie_inception"))
     library.addNote("One", to: movie)
     library.addNote("Two", to: movie)
-    let keys = Set((movie.notes ?? []).map { LibrarySync.noteKey($0.createdAt) })
+    let keys = Set((movie.notes ?? []).map(\.noteID))
     #expect(keys.count == 2)
+}
+
+@MainActor @Test func notesAddedOnTwoDevicesInOneSecondBothSync() throws {
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    try mac.sync(&file)
+    try phone.sync(&file)
+    let phoneMovie = try #require(phone.library.movie(tmdbID: movie.tmdbID))
+
+    let second = date("2025-03-01")
+    try #require(mac.library.addNote("From the Mac", to: movie)).createdAt = second
+    try #require(phone.library.addNote("From the phone", to: phoneMovie)).createdAt = second
+    try mac.sync(&file)
+    try phone.sync(&file)
+    try mac.sync(&file)
+    #expect(Set((movie.notes ?? []).map(\.text)) == ["From the Mac", "From the phone"])
+    #expect(Set((phoneMovie.notes ?? []).map(\.text)) == ["From the Mac", "From the phone"])
+}
+
+@MainActor @Test func notesWithoutIDsStillMatchAcrossDevices() throws {
+    // Notes from before notes had IDs, and files from format 1, go by their creation second.
+    let mac = try SyncDevice(), phone = try SyncDevice()
+    var file: LibraryBackup?
+    let movie = mac.library.insertMovie(try fixture("movie_inception"))
+    let note = try #require(mac.library.addNote("Old note", to: movie))
+    note.uuid = nil
+    try mac.sync(&file)
+    #expect(file?.movies.first?.notes.first?.id == nil)
+    try phone.sync(&file)
+    let phoneMovie = try #require(phone.library.movie(tmdbID: movie.tmdbID))
+    #expect(phoneMovie.notes?.map(\.uuid) == [nil])
+
+    phone.library.update(try #require(phoneMovie.notes?.first), text: "Edited")
+    try phone.sync(&file)
+    try mac.sync(&file)
+    #expect(movie.notes?.map(\.text) == ["Edited"])
+}
+
+@MainActor @Test func importKeepsADifferentNoteFromTheSameSecondApart() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let note = try #require(library.addNote("Mine", to: movie))
+    note.uuid = nil
+    var backup = try library.makeBackup()
+    backup.movies[0].notes = [.init(text: "Theirs", createdAt: note.createdAt, updatedAt: note.createdAt)]
+    try library.importBackup(backup)
+    #expect(Set((movie.notes ?? []).map(\.noteID)).count == 2)
+
+    // Two such notes already in a library get IDs of their own.
+    for note in movie.notes ?? [] { note.uuid = nil }
+    library.separateNotesSharingAnID()
+    #expect(Set((movie.notes ?? []).map(\.noteID)).count == 2)
+    #expect(movie.notes?.contains { $0.uuid == nil } == true)
 }
 
 @Test func smartListRulesMissingFieldsTakeDefaults() throws {

@@ -13,7 +13,7 @@ struct MovieDetailView: View {
 
     var body: some View {
         // A sync can delete the title while it's open; a deleted model can't be read.
-        if movie.modelContext == nil {
+        if !movie.isLive {
             ContentUnavailableView("Removed from Library", systemImage: "trash",
                                    description: Text("This title was removed on another device."))
         } else {

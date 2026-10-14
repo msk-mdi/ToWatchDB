@@ -145,7 +145,10 @@ final class AppState {
             }
         }
         loadSecrets()
-        if container === SharedLibrary.container { Self.shared = self }
+        if container === SharedLibrary.container {
+            Self.shared = self
+            errorMessage = SharedLibrary.openFailure
+        }
         #if os(macOS)
         AppDelegate.appState = self
         #endif
@@ -457,13 +460,51 @@ enum SharedLibrary {
     #endif
     static let container = makeContainer(inMemory: isInMemory)
 
+    /// Why the library on disk couldn't be opened at launch, for an alert once the app is up.
+    private(set) static var openFailure: String?
+
     static func makeContainer(inMemory: Bool) -> ModelContainer {
+        let schema = Schema(ToWatchSchema.models)
+        let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
         do {
-            let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
-            return try ModelContainer(for: Schema(ToWatchSchema.models), configurations: configuration)
+            return try ModelContainer(for: schema, configurations: configuration)
         } catch {
-            fatalError("Couldn't open the library database: \(error)")
+            // A store that exists but can't be read yet (an iPhone launched in the background before its first
+            // unlock) is fine on the next launch: moving it aside would lose it.
+            let url = configuration.url
+            let isLocked = FileManager.default.fileExists(atPath: url.path()) && (try? FileHandle(forReadingFrom: url)) == nil
+            guard !inMemory, !isLocked else {
+                fatalError("Couldn't open the library database: \(error)")
+            }
+            // Crashing here crashed every launch, with no way back (a schema change without a migration, a
+            // downgrade, a damaged file). The store is kept aside and the app starts with an empty library, which
+            // a Dropbox sync or a backup fills again.
+            let folder = moveAside(url)
+            DropboxSync.forgetBase()
+            openFailure = "The library couldn't be opened (\(error.localizedDescription)), so an empty one was started."
+                + (folder.map { " The old one was moved to “\($0.path())”." } ?? "")
+                + " With Dropbox sync on, the library comes back with the next sync."
+            if let container = try? ModelContainer(for: schema, configurations: configuration) { return container }
+            do {
+                return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            } catch {
+                fatalError("Couldn't open the library database: \(error)")
+            }
         }
+    }
+
+    /// Moves the store and its journal files into a new folder next to it, returning the folder.
+    private static func moveAside(_ store: URL) -> URL? {
+        let manager = FileManager.default
+        let folder = store.deletingLastPathComponent()
+            .appending(path: "ToWatchDB Unreadable \(Date.now.ISO8601Format().replacing(":", with: "."))")
+        guard (try? manager.createDirectory(at: folder, withIntermediateDirectories: true)) != nil else { return nil }
+        for suffix in ["", "-shm", "-wal"] {
+            let file = URL(filePath: store.path() + suffix)
+            guard manager.fileExists(atPath: file.path()) else { continue }
+            try? manager.moveItem(at: file, to: folder.appending(path: file.lastPathComponent))
+        }
+        return folder
     }
 
     /// TMDB client from the saved token and language, for code that runs outside the UI.

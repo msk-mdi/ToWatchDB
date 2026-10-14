@@ -408,11 +408,17 @@ public struct LibraryService {
     static func clampRating(_ value: Double) -> Double { min(max(value, 0), 10) }
 
     @discardableResult
-    public func addNote(_ text: String, to movie: Movie) -> Note? { insertNote(text, besides: movie.notes) { $0.movie = movie } }
+    public func addNote(_ text: String, to movie: Movie) -> Note? {
+        movie.isLive ? insertNote(text, besides: movie.notes) { $0.movie = movie } : nil
+    }
     @discardableResult
-    public func addNote(_ text: String, to show: TVShow) -> Note? { insertNote(text, besides: show.notes) { $0.show = show } }
+    public func addNote(_ text: String, to show: TVShow) -> Note? {
+        show.isLive ? insertNote(text, besides: show.notes) { $0.show = show } : nil
+    }
     @discardableResult
-    public func addNote(_ text: String, to episode: Episode) -> Note? { insertNote(text, besides: episode.notes) { $0.episode = episode } }
+    public func addNote(_ text: String, to episode: Episode) -> Note? {
+        episode.isLive ? insertNote(text, besides: episode.notes) { $0.episode = episode } : nil
+    }
 
     private func insertNote(_ text: String, besides existing: [Note]?, attach: (Note) -> Void) -> Note? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -428,6 +434,7 @@ public struct LibraryService {
     }
 
     public func update(_ note: Note, text: String) {
+        guard note.isLive else { return }
         note.text = text
         note.updatedAt = .now
         save()
@@ -439,8 +446,25 @@ public struct LibraryService {
         save()
     }
 
-    public func save() {
-        do { try context.save() } catch { assertionFailure("SwiftData save failed: \(error)") }
+    /// Saves for an edit the UI can't report. A failed save is rolled back: left pending, its changes were saved
+    /// later with an unrelated edit, or made every later save fail too.
+    @discardableResult
+    public func save() -> Bool {
+        do {
+            try commit()
+            return true
+        } catch {
+            assertionFailure("SwiftData save failed: \(error)")
+            return false
+        }
+    }
+
+    /// Saves, rolling back the unsaved changes if that fails, for callers that must not go on as if it worked.
+    public func commit() throws {
+        do { try context.save() } catch {
+            context.rollback()
+            throw error
+        }
     }
 }
 

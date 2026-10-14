@@ -175,7 +175,8 @@ struct AppCommands: Commands {
     private var titleCommands: some View {
         let library = appState.library
         switch title {
-        case let .movie(movie):
+        // The focused title can be deleted (by a sync, say) before its window redraws; a deleted model can't be read.
+        case let .movie(movie) where movie.isLive:
             Button(movie.isWatched ? "Mark as Not Watched" : "Mark as Watched") { library.setWatched(movie, !movie.isWatched) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(!movie.isWatched && !movie.isReleased())
@@ -186,7 +187,7 @@ struct AppCommands: Commands {
             Divider()
             Button("Refresh Title") { Task { await appState.perform { try await $0.refresh(movie) } } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-        case let .show(show):
+        case let .show(show) where show.isLive:
             let next = show.nextEpisodeToWatch()
             Button(next.map { "Mark \($0.code) as Watched" } ?? "Mark Next Episode as Watched") {
                 if let next { library.setWatched(next, true) }
@@ -201,7 +202,7 @@ struct AppCommands: Commands {
             Divider()
             Button("Refresh Title") { Task { await appState.perform { try await $0.refresh(show) } } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-        case nil:
+        default:
             Text("Open a movie or show to use these commands")
         }
     }

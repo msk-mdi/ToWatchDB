@@ -423,7 +423,7 @@ public extension LibraryService {
     /// - Notes are added unless the same text with the same creation date already exists.
     /// - Spaces, tags, and smart lists match by ID (tags also by name); memberships are unioned.
     @discardableResult
-    func importBackup(_ backup: LibraryBackup) -> ImportSummary {
+    func importBackup(_ backup: LibraryBackup) throws -> ImportSummary {
         var summary = ImportSummary()
 
         var spaces: [UUID: Space] = [:]
@@ -510,12 +510,12 @@ public extension LibraryService {
             mergeSeasons(record.seasons, into: show)
         }
 
-        save()
+        try commit()
         return summary
     }
 
     func importBackup(data: Data) throws -> ImportSummary {
-        importBackup(try BackupCoding.decode(data))
+        try importBackup(BackupCoding.decode(data))
     }
 
     func makeMovie(_ record: LibraryBackup.MovieRecord) -> Movie {

@@ -14,7 +14,7 @@ struct TVShowDetailView: View {
 
     var body: some View {
         // A sync can delete the title while it's open; a deleted model can't be read.
-        if show.modelContext == nil {
+        if !show.isLive {
             ContentUnavailableView("Removed from Library", systemImage: "trash",
                                    description: Text("This title was removed on another device."))
         } else {
@@ -301,16 +301,23 @@ private struct EpisodeNotesSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(episode.show?.name ?? "").font(.caption).foregroundStyle(.secondary)
-                Text("\(episode.code) · \(episode.name ?? "")").font(.headline)
-            }
-            HStack {
-                Text("Rating")
-                RatingView(rating: episode.userRating) { appState.library.setRating(episode, $0) }
-            }
-            ScrollView {
-                NotesSection(notes: episode.notes ?? []) { appState.library.addNote($0, to: episode) }
+            // A refresh or sync can delete the episode while this is open (TMDB renumbered an upcoming one, say);
+            // a deleted model can't be read.
+            if episode.isLive {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(episode.show?.name ?? "").font(.caption).foregroundStyle(.secondary)
+                    Text("\(episode.code) · \(episode.name ?? "")").font(.headline)
+                }
+                HStack {
+                    Text("Rating")
+                    RatingView(rating: episode.userRating) { appState.library.setRating(episode, $0) }
+                }
+                ScrollView {
+                    NotesSection(notes: episode.notes ?? []) { appState.library.addNote($0, to: episode) }
+                }
+            } else {
+                ContentUnavailableView("Episode Removed", systemImage: "trash",
+                                       description: Text("This episode is no longer in the library."))
             }
             HStack {
                 Spacer()

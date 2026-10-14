@@ -161,7 +161,7 @@ private struct LibraryFileTransfers: ViewModifier {
                 let backup = try await Task.detached(priority: .userInitiated) {
                     try BackupCoding.decode(Data(contentsOf: url))
                 }.value
-                message = ("Import Complete", appState.library.importBackup(backup).description)
+                message = ("Import Complete", try appState.library.importBackup(backup).description)
             } catch {
                 showError(error.localizedDescription)
             }

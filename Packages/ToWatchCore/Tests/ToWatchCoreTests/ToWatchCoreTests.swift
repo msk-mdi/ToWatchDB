@@ -672,7 +672,7 @@ private var utcCalendar: Calendar {
 
     let target = try makeLibrary()
     let localTag = try #require(target.createTag(name: "rewatch"))
-    target.importBackup(backup)
+    try target.importBackup(backup)
     let imported = try #require(try target.context.fetch(FetchDescriptor<SmartList>()).first)
     #expect(imported.rules.tagIDs == [localTag.uuid])
 }
@@ -859,13 +859,13 @@ private final class SyncDevice {
     var stale = try #require(file)
     stale.movies[0].imdbRating = 1
     stale.movies[0].imdbRatingDate = date("2026-01-02")
-    phone.library.importBackup(stale)
+    try phone.library.importBackup(stale)
     #expect(phoneMovie.imdbRating == 9.0 && !phoneMovie.imdbRatingIsImported)
 
     // Importing a backup takes a newer rating too.
     let restored = try makeLibrary()
     restored.insertMovie(try fixture("movie_inception"))
-    restored.importBackup(try phone.library.makeBackup())
+    try restored.importBackup(phone.library.makeBackup())
     let restoredMovie = try #require(restored.movie(tmdbID: movie.tmdbID))
     #expect(restoredMovie.imdbRating == 9.0 && restoredMovie.imdbRatingIsImported)
 }

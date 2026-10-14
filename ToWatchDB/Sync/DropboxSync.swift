@@ -198,7 +198,7 @@ final class DropboxSync {
                         // A batch (a list import, a refresh) changes models and saves only when it's done, so its
                         // changes aren't in `local` (a snapshot of what's saved) and applying would delete or
                         // undo them. Save them, which counts as an edit below.
-                        if service.context.hasChanges { service.save() }
+                        if service.context.hasChanges { try service.commit() }
                         // An edit saved since the snapshot isn't in `local`; applying would undo it, so merge again.
                         guard version() == localVersion else {
                             (local, localVersion) = try await snapshot(library: library, version: version)
@@ -311,6 +311,13 @@ final class DropboxSync {
     /// Runs pure data work on a background thread.
     private nonisolated static func offMain<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
         try await Task.detached(priority: .userInitiated, operation: work).value
+    }
+
+    /// Makes the next sync a first sync, which brings the file's library in rather than merging against the last
+    /// sync: for a library that was lost, every title would look deleted here and be deleted on every device.
+    nonisolated static func forgetBase() {
+        try? FileManager.default.removeItem(at: Self.baseURL)
+        UserDefaults.standard.removeObject(forKey: "dropboxSyncedRev")
     }
 
     private nonisolated static func loadBaseData() -> Data? { try? Data(contentsOf: Self.baseURL) }

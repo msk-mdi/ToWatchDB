@@ -19,6 +19,13 @@ public enum LibraryTitle {
         case let .show(show): show.tags ?? []
         }
     }
+
+    public var isLive: Bool {
+        switch self {
+        case let .movie(movie): movie.isLive
+        case let .show(show): show.isLive
+        }
+    }
 }
 
 public extension LibraryService {
@@ -55,6 +62,7 @@ public extension LibraryService {
 
     /// Adds the title to the space, or removes it if it's already there.
     func toggle(_ title: LibraryTitle, in space: Space) {
+        guard title.isLive, space.isLive else { return } // Deleted by a sync while its menu was open, say.
         switch title {
         case let .movie(movie): movie.spaces = Self.toggled(space, in: movie.spaces)
         case let .show(show): show.spaces = Self.toggled(space, in: show.spaces)
@@ -110,6 +118,7 @@ public extension LibraryService {
 
     /// Adds the tag to the title, or removes it if it's already there.
     func toggle(_ tag: MediaTag, on title: LibraryTitle) {
+        guard title.isLive, tag.isLive else { return }
         switch title {
         case let .movie(movie): movie.tags = Self.toggled(tag, in: movie.tags)
         case let .show(show): show.tags = Self.toggled(tag, in: show.tags)

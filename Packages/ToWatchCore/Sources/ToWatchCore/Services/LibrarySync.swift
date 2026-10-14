@@ -336,6 +336,14 @@ public extension LibraryService {
     /// left alone, except for IMDb ratings newer than this device's. Returns whether anything changed.
     @discardableResult
     func applySyncedBackup(_ backup: LibraryBackup) throws -> Bool {
+        // Half applied, the changes stayed pending and were saved with the next unrelated edit.
+        do { return try applyUnsaved(backup) } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    private func applyUnsaved(_ backup: LibraryBackup) throws -> Bool {
         let notes = notesByOwner()
         let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
                                 modelKey: \.uuid) { record in
@@ -409,7 +417,7 @@ public extension LibraryService {
         }
 
         guard context.hasChanges else { return false }
-        save()
+        try commit()
         return true
     }
 

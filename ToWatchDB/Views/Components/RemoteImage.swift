@@ -97,17 +97,27 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
         }
         loaded = nil
         failed = false
-        do {
-            let entry = try await ImageCache.shared.load(url)
-            // Waiting on the shared download ignores cancellation: the URL changed meanwhile, and this older
-            // image would replace the new one.
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.15)) { loaded = entry.image }
-        } catch is CancellationError {
-        } catch let error as URLError where error.code == .cancelled {
-            // Scrolled away or the page closed; not a failure.
-        } catch {
-            failed = true
+        // Offline or timed out: tried again while the image is on screen. It stayed a placeholder until its page
+        // was rebuilt, which on Mac (pages kept alive) could be never.
+        for retryDelay in [10, 30, 120, nil] as [Int?] {
+            do {
+                let entry = try await ImageCache.shared.load(url)
+                // Waiting on the shared download ignores cancellation: the URL changed meanwhile, and this older
+                // image would replace the new one.
+                guard !Task.isCancelled else { return }
+                failed = false
+                withAnimation(.easeOut(duration: 0.15)) { loaded = entry.image }
+                return
+            } catch is CancellationError {
+                return
+            } catch let error as URLError where error.code == .cancelled {
+                // Scrolled away or the page closed; not a failure.
+                return
+            } catch {
+                failed = true
+            }
+            guard let retryDelay else { return }
+            do { try await Task.sleep(for: .seconds(retryDelay)) } catch { return }
         }
     }
 }

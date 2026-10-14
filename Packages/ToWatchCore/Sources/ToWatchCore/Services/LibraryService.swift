@@ -194,14 +194,14 @@ public struct LibraryService {
 
     /// Fetches an opened movie's IMDb rating when it has none or it's older than `maxAge`.
     public func refreshIMDbRatingIfDue(_ movie: Movie, maxAge: TimeInterval = 86400, now: Date = .now) async {
-        guard imdb != nil, Self.isIMDbRatingDue(movie, maxAge: maxAge, now: now) else { return }
+        guard imdb != nil, movie.isLive, Self.isIMDbRatingDue(movie, maxAge: maxAge, now: now) else { return }
         await refreshIMDbRatings(movies: [movie], now: now)
     }
 
     /// Fetches an opened show's IMDb rating when it has none or it's older than `maxAge`, looking up its IMDb
     /// ID first if it doesn't have one yet.
     public func refreshIMDbRatingIfDue(_ show: TVShow, maxAge: TimeInterval = 86400, now: Date = .now) async {
-        guard imdb != nil, Self.isIMDbRatingDue(show, maxAge: maxAge, now: now) else { return }
+        guard imdb != nil, show.isLive, Self.isIMDbRatingDue(show, maxAge: maxAge, now: now) else { return }
         if show.imdbID == nil { await lookUpIMDbIDs([show], now: now) }
         guard show.isLive, show.imdbID != nil else { return }
         await refreshIMDbRatings(shows: [show], now: now)
@@ -235,7 +235,8 @@ public struct LibraryService {
     /// the ratings as they were; returns how many titles were updated.
     @discardableResult
     public func refreshIMDbRatings(movies: [Movie] = [], shows: [TVShow] = [], now: Date = .now) async -> Int {
-        let ids = movies.compactMap(\.imdbID) + shows.compactMap(\.imdbID)
+        // Deleted before this ran (it can be started without waiting, see `refreshIMDbRatingsLater`): can't be read.
+        let ids = movies.filter(\.isLive).compactMap(\.imdbID) + shows.filter(\.isLive).compactMap(\.imdbID)
         guard let imdb, !ids.isEmpty, let ratings = try? await imdb.ratings(for: ids) else { return 0 }
         var count = 0
         // Titles deleted while the request ran (by the user or a sync) are skipped: writing to them can trap.

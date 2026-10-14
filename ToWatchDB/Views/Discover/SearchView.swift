@@ -82,14 +82,16 @@ struct SearchView: View {
         guard let client = appState.client, !text.isEmpty else {
             results = []
             searchError = nil
+            isSearching = false
             return
         }
-        // Debounce: a newer keystroke cancels this task during the sleep.
-        do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-
+        // Searching from the keystroke on: set after the debounce, "No Results" showed while it ran.
         isSearching = true
         searchError = nil
-        defer { isSearching = false }
+        // Debounce: a newer keystroke cancels this task during the sleep.
+        do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+        // A cancelled search leaves it to the newer one, which is searching already.
+        defer { if !Task.isCancelled { isSearching = false } }
         do {
             let found = switch kind {
             case .movie: try await client.searchMovies(text).results.map(MediaSummary.init)

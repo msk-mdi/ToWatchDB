@@ -306,10 +306,10 @@ final class AppState {
     func setTokenOverride(_ token: String?) {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
-            TokenStore.delete()
+            noteSecretFailure(TokenStore.delete())
             tokenOverride = nil
         } else {
-            TokenStore.save(trimmed)
+            noteSecretFailure(TokenStore.save(trimmed))
             tokenOverride = trimmed
         }
     }
@@ -317,12 +317,17 @@ final class AppState {
     func setOMDbKey(_ key: String?) {
         let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
-            OMDbKeyStore.delete()
+            noteSecretFailure(OMDbKeyStore.delete())
             omdbKey = nil
         } else {
-            OMDbKeyStore.save(trimmed)
+            noteSecretFailure(OMDbKeyStore.save(trimmed))
             omdbKey = trimmed
         }
+    }
+
+    /// The change still applies until the app quits; without the alert, it looked saved and was gone after a relaunch.
+    private func noteSecretFailure(_ succeeded: Bool) {
+        if !succeeded { errorMessage = "The change couldn't be saved on this device, so it will be undone when the app restarts." }
     }
 
     /// Seerr client for requesting titles, if a server is set up.
@@ -334,14 +339,14 @@ final class AppState {
         if let client {
             defaults.set(client.baseURL.absoluteString, forKey: "seerrServer")
             defaults.set(userName, forKey: "seerrUserName")
-            SeerrAuthStore.save(client.auth)
+            noteSecretFailure(SeerrAuthStore.save(client.auth))
             seerrServer = client.baseURL.absoluteString
             seerrAuth = client.auth
             seerrUserName = userName
         } else {
             defaults.removeObject(forKey: "seerrServer")
             defaults.removeObject(forKey: "seerrUserName")
-            SeerrAuthStore.delete()
+            noteSecretFailure(SeerrAuthStore.delete())
             seerrServer = ""
             seerrAuth = nil
             seerrUserName = nil

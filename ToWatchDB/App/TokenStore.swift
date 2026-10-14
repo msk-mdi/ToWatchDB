@@ -17,7 +17,8 @@ enum TokenStore {
     @discardableResult
     static func save(_ token: String) -> Bool { SecretStore.save(token, account: account) }
 
-    static func delete() { SecretStore.delete(account) }
+    @discardableResult
+    static func delete() -> Bool { SecretStore.delete(account) }
 
     /// Token baked in at build time from `Config/Secrets.xcconfig`, if any.
     static var bundledToken: String? {
@@ -38,7 +39,8 @@ enum OMDbKeyStore {
     @discardableResult
     static func save(_ key: String) -> Bool { SecretStore.save(key, account: account) }
 
-    static func delete() { SecretStore.delete(account) }
+    @discardableResult
+    static func delete() -> Bool { SecretStore.delete(account) }
 }
 
 /// The Seerr API key or sign-in session, kept with the other secrets (see `SecretStore`).
@@ -57,7 +59,8 @@ enum SeerrAuthStore {
         return SecretStore.save(String(decoding: data, as: UTF8.self), account: account)
     }
 
-    static func delete() { SecretStore.delete(account) }
+    @discardableResult
+    static func delete() -> Bool { SecretStore.delete(account) }
 }
 
 /// The app's secrets: the TMDB token, the OMDb key, the Dropbox sign-in, and the Seerr API key.
@@ -101,12 +104,15 @@ enum SecretStore {
         return Keychain.save(value, account: account)
     }
 
-    static func delete(_ account: String) {
-        #if os(macOS)
-        if EnclaveSecrets.isAvailable { EnclaveSecrets.set(nil, for: account) }
-        #endif
+    /// Whether the value is gone. It can stay when the secrets can't be written right now (a locked iPhone).
+    @discardableResult
+    static func delete(_ account: String) -> Bool {
         // On macOS, also an item an earlier version saved and never moved.
-        Keychain.delete(account)
+        let isKeychainClear = Keychain.delete(account)
+        #if os(macOS)
+        if EnclaveSecrets.isAvailable { return EnclaveSecrets.set(nil, for: account) }
+        #endif
+        return isKeychainClear
     }
 }
 
@@ -259,7 +265,9 @@ private enum Keychain {
         return SecItemAdd(query(account).merging(attributes) { $1 } as CFDictionary, nil) == errSecSuccess
     }
 
-    static func delete(_ account: String) {
-        SecItemDelete(query(account) as CFDictionary)
+    @discardableResult
+    static func delete(_ account: String) -> Bool {
+        let status = SecItemDelete(query(account) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

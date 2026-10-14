@@ -138,6 +138,9 @@ struct SeerrRequestButton: View {
                 status = try await seerr.title(kind == .movie ? .movie : .tv, tmdbID: tmdbID)
             } catch is CancellationError {
                 return
+            } catch let error as URLError where error.code == .cancelled {
+                // The task was replaced (after a request, say); the new one sets the status and buttons.
+                return
             } catch {
                 status = nil
                 isRequesting = false

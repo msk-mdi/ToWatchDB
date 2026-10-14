@@ -181,6 +181,10 @@ struct TVShowDetailView: View {
                     .frame(maxWidth: 900)
                 }
             }
+            // A refresh or sync can remove the selected season; the page then had no episodes and no valid pick.
+            .onChange(of: season == nil, initial: true) { _, isGone in
+                if isGone { selectedSeason = (seasons.first { $0.seasonNumber > 0 } ?? seasons.first)?.seasonNumber }
+            }
         }
     }
 

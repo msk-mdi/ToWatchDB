@@ -93,6 +93,10 @@ struct RootView: View {
                 if !ids.contains(id) { appState.selectedTab = .all }
             default: break
             }
+            // And close one Siri opened in a sheet: it stayed up as an empty list.
+            if case let .scope(.space(id)) = intentSheet, !ids.contains(id) { intentSheet = nil }
+            if case let .scope(.tag(id)) = intentSheet, !ids.contains(id) { intentSheet = nil }
+            if case let .scope(.smartList(id)) = intentSheet, !ids.contains(id) { intentSheet = nil }
         }
         #if os(iOS)
         .onChange(of: appState.isShowingSettings, initial: true) { _, requested in

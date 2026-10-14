@@ -289,6 +289,7 @@ extension LibraryService {
                 episode.watchedDate = nil
             }
             show.isInBacklog = false
+            show.isAbandoned = false
         case .backlog:
             show.isInBacklog = true
         }

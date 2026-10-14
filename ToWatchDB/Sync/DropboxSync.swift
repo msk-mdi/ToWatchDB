@@ -104,7 +104,10 @@ final class DropboxSync {
             lastError = nil
             isConnectionUnknown = false
             isConnected = true
-            accountEmail = try? await client.accountEmail(accessToken: tokens.accessToken)
+            let signIn = session
+            let email = try? await client.accountEmail(accessToken: tokens.accessToken)
+            // Disconnected (or signed in again) meanwhile: the email belongs to a sign-in that's gone.
+            if session == signIn { accountEmail = email }
         } catch {
             // Closing the sign-in sheet isn't an error worth showing.
             if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin || error is CancellationError { return }
@@ -125,14 +128,15 @@ final class DropboxSync {
                 if let token { await client.revoke(accessToken: token) }
             }
         }
-        SecretStore.delete(Self.refreshTokenAccount)
+        let isForgotten = SecretStore.delete(Self.refreshTokenAccount)
         try? FileManager.default.removeItem(at: Self.baseURL)
         syncedRev = nil
         isConnectionUnknown = false
         accessToken = nil
         accountEmail = nil
         lastSynced = nil
-        lastError = nil
+        // Left on the device, the sign-in was found at the next launch and syncing started again.
+        lastError = isForgotten ? nil : "The Dropbox sign-in couldn't be removed from this device, so sync may turn back on when the app restarts."
         syncedVersion = nil
         isConnected = false
     }
@@ -212,6 +216,7 @@ final class DropboxSync {
                     // The library now holds everything in this file, so the file is the new common ancestor. With
                     // the old base, a retry after a conflict (or the next sync after a failed upload) took what
                     // this merge brought in for edits made here, and overwrote newer edits from other devices.
+                    try checkSession()
                     if let file { saveBase(file.data, rev: file.rev) }
                 }
                 let snapshotVersion = localVersion

@@ -45,12 +45,16 @@ struct ToWatchDBApp: App {
                     // Teach Siri the current show and movie names for phrases like "Mark Severance watched".
                     // On Mac the app becomes active every time it comes to the front, so only when what Siri is
                     // taught changed: updating walks every show's episodes, and most saves (a refresh, a sync)
-                    // change neither the names nor the next episodes.
+                    // change neither the names nor the next episodes. After a moment, so the hash (which
+                    // also walks the episodes) doesn't hold up the first frame.
                     if phase == .active {
-                        let content = appState.shortcutsContent
-                        if shortcutsContent != content {
-                            shortcutsContent = content
-                            ToWatchShortcuts.updateAppShortcutParameters()
+                        Task {
+                            try? await Task.sleep(for: .seconds(1))
+                            let content = appState.shortcutsContent
+                            if shortcutsContent != content {
+                                shortcutsContent = content
+                                ToWatchShortcuts.updateAppShortcutParameters()
+                            }
                         }
                     }
                     appState.syncWithDropbox(for: phase)

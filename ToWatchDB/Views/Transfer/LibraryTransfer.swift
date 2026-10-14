@@ -112,11 +112,24 @@ private struct LibraryFileTransfers: ViewModifier {
                     }
                 }
             case .exportCSV:
-                // The byte-order mark makes Excel read the file as UTF-8 rather than garbling accented titles.
-                document = ExportFile(data: Data(("\u{FEFF}" + (try appState.library.exportCSV())).utf8))
-                contentType = .commaSeparatedText
-                filename = "ToWatchDB \(today).csv"
-                isExporting = true
+                // Off the main thread, from what's saved, like the backup: it walks every show's episodes.
+                let library = appState.library
+                if library.context.hasChanges { library.save() }
+                let container = appState.container
+                Task {
+                    do {
+                        let csv = try await Task.detached(priority: .userInitiated) {
+                            try LibraryService.exportCSV(in: ModelContext(container))
+                        }.value
+                        // The byte-order mark makes Excel read the file as UTF-8 rather than garbling accented titles.
+                        document = ExportFile(data: Data(("\u{FEFF}" + csv).utf8))
+                        contentType = .commaSeparatedText
+                        filename = "ToWatchDB \(today).csv"
+                        isExporting = true
+                    } catch {
+                        showError(error.localizedDescription)
+                    }
+                }
             case .importBackup, .importList:
                 if request == .importList, appState.client == nil {
                     showError("Add your TMDB token in Settings first: titles in the list are looked up on TMDB.")

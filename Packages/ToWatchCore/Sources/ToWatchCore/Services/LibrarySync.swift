@@ -345,6 +345,7 @@ public extension LibraryService {
 
     private func applyUnsaved(_ backup: LibraryBackup) throws -> Bool {
         let notes = notesByOwner()
+        let stored = try Self.seasonsAndEpisodes(in: context)
         let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
                                 modelKey: \.uuid) { record in
             let space = Space(name: record.name, symbolName: record.symbolName, colorName: record.colorName)
@@ -413,7 +414,7 @@ public extension LibraryService {
             setNotes(record.notes, on: notes.shows[show.persistentModelID]) { $0.show = show }
             if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }
-            setEpisodes(record.seasons, on: show, notes: notes.episodes)
+            setEpisodes(record.seasons, on: show, existing: stored, notes: notes.episodes)
         }
 
         guard context.hasChanges else { return false }
@@ -468,13 +469,15 @@ public extension LibraryService {
     }
 
     /// Creates seasons and episodes this device doesn't have yet, and sets each listed episode's user state.
+    /// `existing` is every season and episode before the apply, from `seasonsAndEpisodes(in:)`.
     private func setEpisodes(_ records: [LibraryBackup.SeasonRecord], on show: TVShow,
+                             existing: (seasons: [PersistentIdentifier: [Season]], episodes: [PersistentIdentifier: [Episode]]),
                              notes episodeNotes: [PersistentIdentifier: [Note]]) {
-        var seasons = Dictionary((show.seasons ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
+        var seasons = Dictionary((existing.seasons[show.persistentModelID] ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
         for record in records {
             let season = seasons[record.seasonNumber] ?? makeSeason(record, in: show)
             seasons[record.seasonNumber] = season
-            var episodes = Dictionary((season.episodes ?? []).map { ($0.episodeNumber, $0) }) { first, _ in first }
+            var episodes = Dictionary((existing.episodes[season.persistentModelID] ?? []).map { ($0.episodeNumber, $0) }) { first, _ in first }
             for episodeRecord in record.episodes {
                 let episode = episodes[episodeRecord.episodeNumber] ?? makeEpisode(episodeRecord, in: season)
                 episodes[episodeRecord.episodeNumber] = episode

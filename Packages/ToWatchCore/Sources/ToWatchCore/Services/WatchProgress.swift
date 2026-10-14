@@ -30,11 +30,15 @@ public extension TVShow {
     func progressSummary(asOf now: Date = .now) -> ShowProgress {
         var aired = 0, watchedAired = 0, watchedAny = 0
         var next: Episode?
+        var nextToAir: Episode?
         var lastWatched: Date?
         forEachRegularEpisode { episode in
             if episode.isWatched { watchedAny += 1 }
             if let date = episode.watchedDate, date > lastWatched ?? .distantPast { lastWatched = date }
-            guard episode.hasAired(asOf: now) else { return }
+            guard episode.hasAired(asOf: now) else {
+                if episode.airDate != nil, nextToAir.map({ episode.airsBefore($0) }) ?? true { nextToAir = episode }
+                return
+            }
             aired += 1
             if episode.isWatched {
                 watchedAired += 1
@@ -50,7 +54,7 @@ public extension TVShow {
             watchedAired == aired ? .watched : .watching
         }
         return ShowProgress(status: status, fraction: aired == 0 ? 0 : Double(watchedAired) / Double(aired),
-                            nextEpisode: next, airedCount: aired, watchedAiredCount: watchedAired,
+                            nextEpisode: next, nextEpisodeToAir: nextToAir, airedCount: aired, watchedAiredCount: watchedAired,
                             lastWatched: lastWatched)
     }
 
@@ -104,6 +108,8 @@ public struct ShowProgress {
     public let fraction: Double
     /// The first aired, unwatched regular episode.
     public let nextEpisode: Episode?
+    /// The next regular episode that hasn't aired yet.
+    public let nextEpisodeToAir: Episode?
     public let airedCount: Int
     public let watchedAiredCount: Int
     /// Most recent date any regular episode was marked watched.

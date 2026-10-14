@@ -199,7 +199,9 @@ final class AppState {
     var shortcutsContent: Int {
         cached("shortcuts-content") {
             var hasher = Hasher()
-            for movie in all(Movie.self) { hasher.combine(movie.title) }
+            var movies = FetchDescriptor<Movie>()
+            movies.propertiesToFetch = [\.title]
+            for movie in (try? container.mainContext.fetch(movies)) ?? [] { hasher.combine(movie.title) }
             let progress = showProgress()
             for show in all(TVShow.self) {
                 hasher.combine(show.name)

@@ -11,6 +11,7 @@ struct TVShowDetailView: View {
     @State private var confirmDelete = false
     @State private var isRefreshing = false
     @State private var notesEpisode: Episode?
+    @State private var credits = DecodedCredits()
 
     var body: some View {
         // A sync can delete the title while it's open; a deleted model can't be read.
@@ -29,6 +30,7 @@ struct TVShowDetailView: View {
         // redraws on every episode toggle.
         let progress = show.progressSummary()
         let seasons = show.sortedSeasons
+        let _ = credits.update(for: show)
         DetailLayout(
             title: show.name,
             subtitle: subtitle,
@@ -38,7 +40,7 @@ struct TVShowDetailView: View {
             overview: show.overview,
             genres: show.genres,
             facts: facts,
-            cast: show.cast
+            cast: credits.cast
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 progressSummary(progress)
@@ -140,7 +142,7 @@ struct TVShowDetailView: View {
                 .tint(status.tint)
             if let next = progress.nextEpisode {
                 Text("Up next: \(next.code) · \(next.name ?? "")").font(.callout)
-            } else if let upcoming = show.nextEpisodeToAir(), let date = upcoming.airDate {
+            } else if let upcoming = progress.nextEpisodeToAir, let date = upcoming.airDate {
                 Text("Next episode \(upcoming.code) airs \(date.tmdbDayString)").font(.callout)
             }
         }
@@ -214,7 +216,7 @@ struct TVShowDetailView: View {
         var facts: [(String, String)] = []
         if let status = show.showStatus { facts.append(("Status", status)) }
         if !show.networks.isEmpty { facts.append(("Network", show.networks.formatted())) }
-        let creators = show.creators.map(\.name)
+        let creators = credits.creators.map(\.name)
         if !creators.isEmpty { facts.append(("Created by", creators.formatted())) }
         if let runtime = show.episodeRuntime { facts.append(("Episode Length", runtime.runtimeString)) }
         if let original = show.originalName, original != show.name { facts.append(("Original Title", original)) }
@@ -228,6 +230,25 @@ struct TVShowDetailView: View {
             await appState.perform { try await $0.refresh(show) }
             isRefreshing = false
         }
+    }
+}
+
+/// Cast and creators, decoded only when their data changes: the page redraws on every episode toggle.
+/// Not observed, so updating it from `body` doesn't trigger another redraw.
+private final class DecodedCredits {
+    private var castData: Data?
+    private var creatorsData: Data?
+    private var isLoaded = false
+    private(set) var cast: [PersonCredit] = []
+    private(set) var creators: [PersonCredit] = []
+
+    func update(for show: TVShow) {
+        guard !isLoaded || show.castData != castData || show.creatorsData != creatorsData else { return }
+        isLoaded = true
+        castData = show.castData
+        creatorsData = show.creatorsData
+        cast = show.cast
+        creators = show.creators
     }
 }
 

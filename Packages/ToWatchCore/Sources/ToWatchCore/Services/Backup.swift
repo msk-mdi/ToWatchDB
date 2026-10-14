@@ -248,16 +248,8 @@ public extension LibraryService {
         var shows = FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)])
         shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
         let showModels = try context.fetch(shows)
-        // Every season and episode in one fetch each, after the shows so their parents are already loaded.
-        // Reading `show.seasons` and `season.episodes` ran a query per show and per season.
-        var seasonsByShow: [PersistentIdentifier: [Season]] = [:]
-        for season in try context.fetch(FetchDescriptor<Season>()) {
-            if let show = season.show { seasonsByShow[show.persistentModelID, default: []].append(season) }
-        }
-        var episodesBySeason: [PersistentIdentifier: [Episode]] = [:]
-        for episode in try context.fetch(FetchDescriptor<Episode>()) {
-            if let season = episode.season { episodesBySeason[season.persistentModelID, default: []].append(episode) }
-        }
+        // After the shows so their parents are already loaded.
+        let (seasonsByShow, episodesBySeason) = try seasonsAndEpisodes(in: context)
         backup.shows = showModels.map {
             record($0, seasons: seasonsByShow[$0.persistentModelID] ?? [], episodes: episodesBySeason, notes: notes)
         }
@@ -272,6 +264,21 @@ public extension LibraryService {
             .init(uuid: $0.uuid, name: $0.name, symbolName: $0.symbolName, colorName: $0.colorName, createdAt: $0.createdAt, rules: $0.rules)
         }
         return backup
+    }
+
+    /// Every season grouped by show and every episode grouped by season, in one fetch each.
+    /// Reading `show.seasons` and `season.episodes` ran a query per show and per season.
+    internal nonisolated static func seasonsAndEpisodes(in context: ModelContext) throws
+        -> (seasons: [PersistentIdentifier: [Season]], episodes: [PersistentIdentifier: [Episode]]) {
+        var seasonsByShow: [PersistentIdentifier: [Season]] = [:]
+        for season in try context.fetch(FetchDescriptor<Season>()) {
+            if let show = season.show { seasonsByShow[show.persistentModelID, default: []].append(season) }
+        }
+        var episodesBySeason: [PersistentIdentifier: [Episode]] = [:]
+        for episode in try context.fetch(FetchDescriptor<Episode>()) {
+            if let season = episode.season { episodesBySeason[season.persistentModelID, default: []].append(episode) }
+        }
+        return (seasonsByShow, episodesBySeason)
     }
 
     /// Every title's and episode's notes from one fetch. Reading `episode.notes` or `movie.notes` runs a query
@@ -469,6 +476,7 @@ public extension LibraryService {
         // One fetch each instead of one per record (which also had to search the growing unsaved inserts).
         var moviesByID = Dictionary(((try? context.fetch(FetchDescriptor<Movie>())) ?? []).map { ($0.tmdbID, $0) }) { first, _ in first }
         var showsByID = Dictionary(((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).map { ($0.tmdbID, $0) }) { first, _ in first }
+        let stored = try Self.seasonsAndEpisodes(in: context)
 
         for record in backup.movies {
             let existing = moviesByID[record.tmdbID]
@@ -507,7 +515,7 @@ public extension LibraryService {
             mergeNotes(record.notes, into: show.notes) { $0.show = show }
             if let merged = union(show.spaces, record.spaceIDs.compactMap { spaces[$0] }) { show.spaces = merged }
             if let merged = union(show.tags, record.tagIDs.compactMap { tags[$0] }) { show.tags = merged }
-            mergeSeasons(record.seasons, into: show)
+            mergeSeasons(record.seasons, into: show, existing: stored)
         }
 
         try commit()
@@ -574,12 +582,14 @@ public extension LibraryService {
         return show
     }
 
-    private func mergeSeasons(_ records: [LibraryBackup.SeasonRecord], into show: TVShow) {
-        var seasons = Dictionary((show.seasons ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
+    /// `existing` is every season and episode before the import, from `seasonsAndEpisodes(in:)`.
+    private func mergeSeasons(_ records: [LibraryBackup.SeasonRecord], into show: TVShow,
+                              existing: (seasons: [PersistentIdentifier: [Season]], episodes: [PersistentIdentifier: [Episode]])) {
+        var seasons = Dictionary((existing.seasons[show.persistentModelID] ?? []).map { ($0.seasonNumber, $0) }) { first, _ in first }
         for record in records {
             let season = seasons[record.seasonNumber] ?? makeSeason(record, in: show)
             seasons[record.seasonNumber] = season
-            var episodes = Dictionary((season.episodes ?? []).map { ($0.episodeNumber, $0) }) { first, _ in first }
+            var episodes = Dictionary((existing.episodes[season.persistentModelID] ?? []).map { ($0.episodeNumber, $0) }) { first, _ in first }
             for episodeRecord in record.episodes {
                 let episode = episodes[episodeRecord.episodeNumber] ?? makeEpisode(episodeRecord, in: season)
                 episodes[episodeRecord.episodeNumber] = episode
@@ -662,6 +672,11 @@ private struct NoteKey: Hashable {
 public extension LibraryService {
     /// One row per title, for spreadsheets. Export only; restore uses the JSON backup.
     func exportCSV(now: Date = .now, timeZone: TimeZone = .current) throws -> String {
+        try Self.exportCSV(in: context, now: now, timeZone: timeZone)
+    }
+
+    /// Nonisolated so export can run with a context of its own off the main thread: it walks every episode.
+    nonisolated static func exportCSV(in context: ModelContext, now: Date = .now, timeZone: TimeZone = .current) throws -> String {
         let header = ["Type", "TMDB ID", "Title", "Year", "Status", "Watched Date", "Rating (0-10)", "Backlog", "Favorite",
                       "Episodes Watched", "Episodes Aired", "Genres", "Spaces", "Tags", "Added"]
         var calendar = Calendar(identifier: .gregorian)
@@ -697,7 +712,7 @@ public extension LibraryService {
     /// RFC 4180: quote fields containing commas, quotes, or line breaks; double embedded quotes. A field that
     /// starts like a formula gets a leading apostrophe, so a title or tag such as `=HYPERLINK(…)` stays text
     /// in Excel and Sheets.
-    static func csvField(_ value: String) -> String {
+    nonisolated static func csvField(_ value: String) -> String {
         var value = value
         if let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) { value = "'" + value }
         // Scalars, not Characters: "\r\n" is one Character, so a lone "\n" didn't match it.

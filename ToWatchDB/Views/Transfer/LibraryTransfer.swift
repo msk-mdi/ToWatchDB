@@ -91,55 +91,51 @@ private struct LibraryFileTransfers: ViewModifier {
 
     private func start(_ request: LibraryFileRequest) {
         let today = Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
-        do {
-            switch request {
-            case .exportBackup:
-                // Snapshotted and encoded off the main thread, from what's saved: it walks every title and episode.
-                let library = appState.library
-                if library.context.hasChanges { library.save() }
-                let container = appState.container
-                Task {
-                    do {
-                        let data = try await Task.detached(priority: .userInitiated) {
-                            try BackupCoding.encoder.encode(LibraryService.makeBackup(in: ModelContext(container)))
-                        }.value
-                        document = ExportFile(data: data)
-                        contentType = .json
-                        filename = "ToWatchDB Backup \(today).json"
-                        isExporting = true
-                    } catch {
-                        showError(error.localizedDescription)
-                    }
+        switch request {
+        case .exportBackup:
+            // Snapshotted and encoded off the main thread, from what's saved: it walks every title and episode.
+            let library = appState.library
+            if library.context.hasChanges { library.save() }
+            let container = appState.container
+            Task {
+                do {
+                    let data = try await Task.detached(priority: .userInitiated) {
+                        try BackupCoding.encoder.encode(LibraryService.makeBackup(in: ModelContext(container)))
+                    }.value
+                    document = ExportFile(data: data)
+                    contentType = .json
+                    filename = "ToWatchDB Backup \(today).json"
+                    isExporting = true
+                } catch {
+                    showError(error.localizedDescription)
                 }
-            case .exportCSV:
-                // Off the main thread, from what's saved, like the backup: it walks every show's episodes.
-                let library = appState.library
-                if library.context.hasChanges { library.save() }
-                let container = appState.container
-                Task {
-                    do {
-                        let csv = try await Task.detached(priority: .userInitiated) {
-                            try LibraryService.exportCSV(in: ModelContext(container))
-                        }.value
-                        // The byte-order mark makes Excel read the file as UTF-8 rather than garbling accented titles.
-                        document = ExportFile(data: Data(("\u{FEFF}" + csv).utf8))
-                        contentType = .commaSeparatedText
-                        filename = "ToWatchDB \(today).csv"
-                        isExporting = true
-                    } catch {
-                        showError(error.localizedDescription)
-                    }
-                }
-            case .importBackup, .importList:
-                if request == .importList, appState.client == nil {
-                    showError("Add your TMDB token in Settings first: titles in the list are looked up on TMDB.")
-                    return
-                }
-                importKind = request
-                isImporting = true
             }
-        } catch {
-            showError(error.localizedDescription)
+        case .exportCSV:
+            // Off the main thread, from what's saved, like the backup: it walks every show's episodes.
+            let library = appState.library
+            if library.context.hasChanges { library.save() }
+            let container = appState.container
+            Task {
+                do {
+                    let csv = try await Task.detached(priority: .userInitiated) {
+                        try LibraryService.exportCSV(in: ModelContext(container))
+                    }.value
+                    // The byte-order mark makes Excel read the file as UTF-8 rather than garbling accented titles.
+                    document = ExportFile(data: Data(("\u{FEFF}" + csv).utf8))
+                    contentType = .commaSeparatedText
+                    filename = "ToWatchDB \(today).csv"
+                    isExporting = true
+                } catch {
+                    showError(error.localizedDescription)
+                }
+            }
+        case .importBackup, .importList:
+            if request == .importList, appState.client == nil {
+                showError("Add your TMDB token in Settings first: titles in the list are looked up on TMDB.")
+                return
+            }
+            importKind = request
+            isImporting = true
         }
     }
 

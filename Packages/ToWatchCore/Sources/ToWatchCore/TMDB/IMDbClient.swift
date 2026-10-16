@@ -51,20 +51,21 @@ public struct IMDbClient: Sendable {
         var ratings: [String: IMDbRating?] = [:]
         var lastError: (any Error)?
         var answered = false
+        let lookUp: @Sendable (String) async -> (String, Result<IMDbRating?, any Error>) = { id in
+            do { return (id, .success(try await fetch(id))) } catch { return (id, .failure(error)) }
+        }
+        // Children are added inline rather than from a local function capturing `group`: the launch refresh
+        // crashed in the runtime as a child finished into its group.
         try await withThrowingTaskGroup(of: (String, Result<IMDbRating?, any Error>).self) { group in
-            func startNext() {
-                guard let id = pending.popFirst() else { return }
-                group.addTask {
-                    do { return (id, .success(try await fetch(id))) } catch { return (id, .failure(error)) }
-                }
+            for _ in 0..<Self.concurrency {
+                guard let id = pending.popFirst() else { break }
+                group.addTask { await lookUp(id) }
             }
-            for _ in 0..<Self.concurrency { startNext() }
             while let (id, result) = try await group.next() {
                 switch result {
                 case let .success(rating):
                     ratings.updateValue(rating, forKey: id)
                     answered = true
-                    startNext()
                 case .failure(is CancellationError):
                     throw CancellationError()
                 case let .failure(error as Rejected):
@@ -73,7 +74,9 @@ public struct IMDbClient: Sendable {
                     pending = []
                 case let .failure(error):
                     lastError = error
-                    startNext()
+                }
+                if let next = pending.popFirst() {
+                    group.addTask { await lookUp(next) }
                 }
             }
         }

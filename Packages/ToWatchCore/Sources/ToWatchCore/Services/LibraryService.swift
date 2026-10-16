@@ -270,15 +270,18 @@ public struct LibraryService {
         apply: (Int, Value) -> Void
     ) async {
         await withTaskGroup(of: (Int, Value).self) { group in
+            // Children are added inline rather than from a local function capturing `group`: the launch refresh
+            // crashed in the runtime as a child finished into its group.
             var pending = ids.makeIterator()
-            func startNext() {
-                guard let id = pending.next() else { return }
+            for _ in 0..<limit {
+                guard let id = pending.next() else { break }
                 group.addTask { (id, await fetch(id)) }
             }
-            for _ in 0..<limit { startNext() }
             while let (id, value) = await group.next() {
                 apply(id, value)
-                startNext()
+                if let next = pending.next() {
+                    group.addTask { (next, await fetch(next)) }
+                }
             }
         }
     }

@@ -352,7 +352,7 @@ public extension LibraryService {
     }
 
     private func applyUnsaved(_ backup: LibraryBackup) throws -> Bool {
-        let notes = notesByOwner()
+        let notes = try notesByOwner()
         let stored = try Self.seasonsAndEpisodes(in: context)
         let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
                                 modelKey: \.uuid) { record in

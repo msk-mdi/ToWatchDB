@@ -244,7 +244,7 @@ public extension LibraryService {
     /// episode in the library.
     nonisolated static func makeBackup(in context: ModelContext) throws -> LibraryBackup {
         var backup = LibraryBackup()
-        let notes = notesByOwner(in: context)
+        let notes = try notesByOwner(in: context)
         var movies = FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])
         movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
         backup.movies = try context.fetch(movies).map { record($0, notes: notes) }
@@ -286,12 +286,13 @@ public extension LibraryService {
 
     /// Every title's and episode's notes from one fetch. Reading `episode.notes` or `movie.notes` runs a query
     /// per model, and backups and syncs visit every title and episode in the library.
-    internal func notesByOwner() -> NotesByOwner {
-        Self.notesByOwner(in: context)
+    internal func notesByOwner() throws -> NotesByOwner {
+        try Self.notesByOwner(in: context)
     }
 
-    internal nonisolated static func notesByOwner(in context: ModelContext) -> NotesByOwner {
-        let notes = (try? context.fetch(FetchDescriptor<Note>())) ?? []
+    /// Throws rather than returning no notes: a sync would take the missing notes for deletions.
+    internal nonisolated static func notesByOwner(in context: ModelContext) throws -> NotesByOwner {
+        let notes = try context.fetch(FetchDescriptor<Note>())
         var result = NotesByOwner()
         for note in notes {
             if let episode = note.episode {
@@ -435,6 +436,11 @@ public extension LibraryService {
     @discardableResult
     func importBackup(_ backup: LibraryBackup) throws -> ImportSummary {
         var summary = ImportSummary()
+        // One fetch each instead of one per record (which also had to search the growing unsaved inserts).
+        // Before any insert, so a failed fetch leaves nothing pending.
+        var moviesByID = Dictionary(try context.fetch(FetchDescriptor<Movie>()).map { ($0.tmdbID, $0) }) { first, _ in first }
+        var showsByID = Dictionary(try context.fetch(FetchDescriptor<TVShow>()).map { ($0.tmdbID, $0) }) { first, _ in first }
+        let stored = try Self.seasonsAndEpisodes(in: context)
 
         var spaces: [UUID: Space] = [:]
         for record in backup.spaces {
@@ -475,11 +481,6 @@ public extension LibraryService {
             context.insert(list)
             summary.collectionsAdded += 1
         }
-
-        // One fetch each instead of one per record (which also had to search the growing unsaved inserts).
-        var moviesByID = Dictionary(((try? context.fetch(FetchDescriptor<Movie>())) ?? []).map { ($0.tmdbID, $0) }) { first, _ in first }
-        var showsByID = Dictionary(((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).map { ($0.tmdbID, $0) }) { first, _ in first }
-        let stored = try Self.seasonsAndEpisodes(in: context)
 
         for record in backup.movies {
             let existing = moviesByID[record.tmdbID]

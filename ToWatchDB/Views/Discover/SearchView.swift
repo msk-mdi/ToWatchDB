@@ -46,7 +46,8 @@ struct SearchView: View {
                 isSearchFocused = true
             }
         }
-        .task(id: "\(kind.rawValue):\(trimmedQuery)") { await search() }
+        // Again once a token is added (the page said "No Results" until the query changed) or the language changes.
+        .task(id: [kind.rawValue, trimmedQuery, appState.token ?? "", appState.language]) { await search() }
     }
 
     private var showsPlaceholder: Bool {

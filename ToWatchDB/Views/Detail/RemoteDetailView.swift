@@ -88,8 +88,8 @@ private struct RemotePreview: View {
             WhereToWatchSection(kind: summary.kind, tmdbID: summary.tmdbID)
         }
         .pageTitle(summary.title)
-        // Again once a token is added: without one, the page stayed empty.
-        .task(id: appState.token) { await load() }
+        // Again once a token is added (without one, the page stayed empty) or the language changes.
+        .task(id: [appState.token ?? "", appState.language]) { await load() }
     }
 
     private var links: some View {

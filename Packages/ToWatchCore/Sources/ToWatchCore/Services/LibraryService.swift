@@ -192,13 +192,13 @@ public struct LibraryService {
         return await refreshIMDbRatings(movies: movies.filter(\.isLive), shows: shows, now: now)
     }
 
-    /// Fetches an opened movie's IMDb rating when it has none or it's older than `maxAge`.
+    /// Fetches an opened movie's IMDb rating when it was never fetched or it's older than `maxAge`.
     public func refreshIMDbRatingIfDue(_ movie: Movie, maxAge: TimeInterval = 86400, now: Date = .now) async {
         guard imdb != nil, movie.isLive, Self.isIMDbRatingDue(movie, maxAge: maxAge, now: now) else { return }
         await refreshIMDbRatings(movies: [movie], now: now)
     }
 
-    /// Fetches an opened show's IMDb rating when it has none or it's older than `maxAge`, looking up its IMDb
+    /// Fetches an opened show's IMDb rating when it was never fetched or it's older than `maxAge`, looking up its IMDb
     /// ID first if it doesn't have one yet.
     public func refreshIMDbRatingIfDue(_ show: TVShow, maxAge: TimeInterval = 86400, now: Date = .now) async {
         guard imdb != nil, show.isLive, Self.isIMDbRatingDue(show, maxAge: maxAge, now: now) else { return }
@@ -207,8 +207,9 @@ public struct LibraryService {
         await refreshIMDbRatings(shows: [show], now: now)
     }
 
+    /// By date alone: a title OMDb (or TMDB) has no rating for keeps none, and was asked again at every opening.
     static func isIMDbRatingDue(_ title: some IMDbRated, maxAge: TimeInterval, now: Date) -> Bool {
-        title.imdbRating == nil || title.imdbRatingDate.map { now.timeIntervalSince($0) > maxAge } ?? true
+        title.imdbRatingDate.map { now.timeIntervalSince($0) > maxAge } ?? true
     }
 
     /// A show gets its IMDb ID from a full refresh, and only ongoing shows are refreshed on their own, so

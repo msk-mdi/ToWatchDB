@@ -58,6 +58,7 @@ struct ToWatchDBApp: App {
                         }
                     }
                     appState.syncWithDropbox(for: phase)
+                    if phase == .active { Task { await appState.refreshLibraryIfDue() } }
                 }
                 .onChange(of: appIcon, initial: true) { _, icon in icon.applyAsAppIcon() }
         }
@@ -217,6 +218,13 @@ struct AppCommands: Commands {
 /// just before quitting reached other devices only after the next launch.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor static weak var appState: AppState?
+
+    /// Switching apps leaves the scene phase alone on Mac (only hiding the app changes it).
+    @MainActor
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard let appState = Self.appState else { return }
+        Task { await appState.refreshLibraryIfDue() }
+    }
 
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

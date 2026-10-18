@@ -96,6 +96,8 @@ final class AppState {
     @ObservationIgnored private var dropboxDelay: Task<Void, Never>?
     /// Whether a sync was put off until the running refresh ends.
     @ObservationIgnored private var syncsAfterRefresh = false
+    /// When `refreshLibrary` last started.
+    @ObservationIgnored private var lastRefresh: Date?
     #if os(iOS)
     @ObservationIgnored private var backgroundSync: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -460,10 +462,19 @@ final class AppState {
     }
     #endif
 
+    /// Refreshes when the app comes back to the front, at most hourly (on Mac, that's every app switch): titles
+    /// otherwise refreshed only at launch, so an app left running for days never got new episodes. Not before
+    /// launch's own refresh, which this ran twice.
+    func refreshLibraryIfDue() async {
+        guard let lastRefresh, Date.now.timeIntervalSince(lastRefresh) > 3600 else { return }
+        await refreshLibrary()
+    }
+
     /// Picks up new episodes and release-date changes. `force` ignores the 12-hour freshness window.
     func refreshLibrary(force: Bool = false) async {
         guard client != nil, !isRefreshing else { return }
         isRefreshing = true
+        lastRefresh = .now
         defer {
             isRefreshing = false
             if syncsAfterRefresh {

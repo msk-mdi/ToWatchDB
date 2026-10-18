@@ -67,7 +67,9 @@ struct PageHost<Page: View>: View {
 /// Stacks the pages like a `ZStack`, but sizes itself from the visible page only. A `ZStack` asks every page
 /// for its size, and AppKit asks again on each window layout pass (for the window's minimum size too), so the
 /// hidden pages (a title's long page, the poster grids) were measured over and over, and scrolling stalled
-/// for seconds after switching pages. Hidden pages are still placed at the full size, so they stay laid out.
+/// for seconds after switching pages. Hidden pages are still placed at the full size, so they stay laid out,
+/// but beside the window rather than under the visible page: AppKit sent trackpad swipes to a hidden page's
+/// scroll view despite `allowsHitTesting(false)`, so Discover's shelves stopped scrolling after a page switch.
 private struct PageStack: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let active = subviews.first(where: { $0[IsActivePageKey.self] }) ?? subviews.last else {
@@ -78,7 +80,8 @@ private struct PageStack: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         for subview in subviews {
-            subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+            let origin = subview[IsActivePageKey.self] ? bounds.origin : CGPoint(x: bounds.maxX + 100, y: bounds.minY)
+            subview.place(at: origin, proposal: ProposedViewSize(bounds.size))
         }
     }
 }

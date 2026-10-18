@@ -67,19 +67,25 @@ final class AppState {
         if !force, trending?.isFresh(token: token, language: language) == true { return }
         trendingError = nil
         let language = language, started = Date.now
+        // Two loads can overlap (the page and the Refresh button, or a token or language change). One counts only
+        // if it's still for the current settings and no newer one landed meanwhile.
+        func isLatest() -> Bool {
+            token == self.token && language == self.language && (trending.map { $0.loadedAt <= started } ?? true)
+        }
         do {
             async let movies = client.trendingMovies()
             async let shows = client.trendingTVShows()
             let loaded = Trending(movies: try await movies.results.map(MediaSummary.init),
                                   shows: try await shows.results.map(MediaSummary.init),
                                   token: token, language: language, loadedAt: started)
-            // Two loads can overlap (the page and the Refresh button, or a token or language change). Keep a
-            // result only if it's still for the current settings and no newer one landed meanwhile.
-            guard token == self.token, language == self.language,
-                  (trending.map { $0.loadedAt <= started } ?? true) else { return }
+            guard isLatest() else { return }
             trending = loaded
+            trendingError = nil
         } catch is CancellationError {
+        } catch let error as URLError where error.code == .cancelled {
         } catch {
+            // A failed older load mustn't hide what a newer one loaded.
+            guard isLatest() else { return }
             trendingError = error.localizedDescription
         }
     }

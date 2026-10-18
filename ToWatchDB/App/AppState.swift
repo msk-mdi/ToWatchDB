@@ -472,6 +472,14 @@ enum SharedLibrary {
     private(set) static var openFailure: String?
 
     static func makeContainer(inMemory: Bool) -> ModelContainer {
+        let container = openContainer(inMemory: inMemory)
+        // Every change is saved explicitly. Autosave also saved batches (a refresh, a list import) halfway,
+        // each save redrawing every page and scheduling a Dropbox sync.
+        container.mainContext.autosaveEnabled = false
+        return container
+    }
+
+    private static func openContainer(inMemory: Bool) -> ModelContainer {
         let schema = Schema(ToWatchSchema.models)
         let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
         do {

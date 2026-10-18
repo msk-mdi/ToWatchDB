@@ -196,6 +196,7 @@ final class DropboxSync {
                 // applying it. Unless the base isn't usable (a lost library), which merges as a first sync.
                 if let remote, !(isBase && LibrarySync.usableBase(remote, local: local) != nil) {
                     while true {
+                        try Task.checkCancellation()
                         let merged = try await Self.offMain { [local] in LibrarySync.merge(base: LibrarySync.usableBase(Self.loadBase(), local: local), local: local, remote: remote) }
                         try checkSession()
                         let service = library()
@@ -268,6 +269,8 @@ final class DropboxSync {
     /// it's taken again then.
     private func snapshot(library: () -> LibraryService, version: () -> Int) async throws -> (LibraryBackup, Int) {
         while true {
+            // Saves can keep landing (a list import), and quitting waits for the sync only so long.
+            try Task.checkCancellation()
             let snapshotVersion = version()
             let container = library().context.container
             let backup = try await Self.offMain { try LibraryService.makeBackup(in: ModelContext(container)) }

@@ -88,6 +88,8 @@ final class AppState {
     /// Sample-data and snapshot runs use a throwaway library, which must never reach Dropbox.
     private let isInMemory: Bool
     @ObservationIgnored private var dropboxDelay: Task<Void, Never>?
+    /// Whether a sync was put off until the running refresh ends.
+    @ObservationIgnored private var syncsAfterRefresh = false
     #if os(iOS)
     @ObservationIgnored private var backgroundSync: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -376,6 +378,12 @@ final class AppState {
                 // The sync that ran meanwhile may have covered these changes (its own save bumps the version too).
                 guard !Task.isCancelled, libraryVersion != dropbox.syncedVersion else { return }
             }
+            // A merge saves a refresh's changes so far, which makes it snapshot and merge again, once per title
+            // the refresh updates meanwhile. The refresh syncs when it's done instead.
+            guard !isRefreshing else {
+                syncsAfterRefresh = true
+                return
+            }
             // Its own task, so a later call's cancel can't interrupt a sync midway.
             Task { await dropbox.sync(library: { self.library }, version: { self.libraryVersion }) }
         }
@@ -450,7 +458,15 @@ final class AppState {
     func refreshLibrary(force: Bool = false) async {
         guard client != nil, !isRefreshing else { return }
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if syncsAfterRefresh {
+                syncsAfterRefresh = false
+                syncWithDropbox()
+            }
+        }
+        // Same as a sync starting during a refresh, the other way around (both start at launch).
+        while dropbox.isSyncing { try? await Task.sleep(for: .milliseconds(100)) }
         await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
         await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400, importedMaxAge: force ? 0 : 7 * 86400)
     }

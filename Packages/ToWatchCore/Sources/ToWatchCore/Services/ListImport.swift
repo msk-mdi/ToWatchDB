@@ -291,7 +291,7 @@ extension LibraryService {
             show.isInBacklog = false
             show.isAbandoned = false
         case .backlog:
-            show.isInBacklog = true
+            if show.watchStatus() != .watched { show.isInBacklog = true }
         }
     }
 }

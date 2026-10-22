@@ -122,7 +122,7 @@ Scripts/
 docs/CODEBASE.md                This file
 ```
 
-About 14,000 lines of Swift in total (version 1.5.3).
+About 14,750 lines of Swift in total (version 2.0.3).
 
 ---
 
@@ -693,7 +693,7 @@ To measure page switches, see §9.
 
 ### Unit tests
 
-There are 27 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/ToWatchCoreTests.swift`, written with
+There are 59 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/ToWatchCoreTests.swift`, written with
 Swift Testing. They cover:
 - decoding the recorded fixtures
 - date parsing

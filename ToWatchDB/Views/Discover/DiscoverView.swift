@@ -49,7 +49,7 @@ struct DiscoverView: View {
         }
         #endif
         .settingsToolbarButton(appState)
-        .task(id: "\(appState.token ?? "")|\(appState.language)") { await appState.loadTrending() }
+        .task(id: "\(appState.tokenVersion)|\(appState.language)") { await appState.loadTrending() }
     }
 
     private func shelf(_ title: String, _ items: [MediaSummary], _ ids: LibraryIDs) -> some View {

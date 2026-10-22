@@ -47,7 +47,12 @@ final class AppState {
     private(set) var isRefreshing = false
     var errorMessage: String?
 
-    private(set) var tokenOverride: String?
+    private(set) var tokenOverride: String? {
+        didSet { tokenVersion += 1 }
+    }
+    /// Bumped whenever the TMDB token changes. Views that must load again then key their tasks on this, not on
+    /// the token itself: a secret has no place in view identity.
+    private(set) var tokenVersion = 0
     /// The user's OMDb API key; without one the app fetches no IMDb ratings.
     private(set) var omdbKey: String?
 

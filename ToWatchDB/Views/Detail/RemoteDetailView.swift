@@ -89,7 +89,7 @@ private struct RemotePreview: View {
         }
         .pageTitle(summary.title)
         // Again once a token is added (without one, the page stayed empty) or the language changes.
-        .task(id: [appState.token ?? "", appState.language]) { await load() }
+        .task(id: [String(appState.tokenVersion), appState.language]) { await load() }
     }
 
     private var links: some View {

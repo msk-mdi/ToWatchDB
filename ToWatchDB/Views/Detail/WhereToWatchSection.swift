@@ -48,7 +48,7 @@ struct WhereToWatchSection: View {
         }
         .frame(maxWidth: 760, alignment: .leading)
         // Again once a token is added: without one, the section stayed "Couldn't load".
-        .task(id: [String(tmdbID), appState.token]) { await load() }
+        .task(id: [tmdbID, appState.tokenVersion]) { await load() }
     }
 
     /// The chosen country stays in the picker even when this title has no offers there.

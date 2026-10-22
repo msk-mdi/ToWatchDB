@@ -47,7 +47,7 @@ struct SearchView: View {
             }
         }
         // Again once a token is added (the page said "No Results" until the query changed) or the language changes.
-        .task(id: [kind.rawValue, trimmedQuery, appState.token ?? "", appState.language]) { await search() }
+        .task(id: [kind.rawValue, trimmedQuery, String(appState.tokenVersion), appState.language]) { await search() }
     }
 
     private var showsPlaceholder: Bool {

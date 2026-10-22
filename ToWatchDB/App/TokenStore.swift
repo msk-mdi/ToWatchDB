@@ -231,7 +231,8 @@ private enum Keychain {
 
     #if os(iOS)
     /// Readable after the first unlock, so a sync or Siri action while the iPhone is locked can use the secrets.
-    private static var accessibility: [String: Any] { [kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock] }
+    /// This device only: a Dropbox sign-in or Seerr key shouldn't follow a backup onto another device.
+    private static var accessibility: [String: Any] { [kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly] }
     #else
     private static var accessibility: [String: Any] { [:] }
     #endif
@@ -248,8 +249,8 @@ private enum Keychain {
         guard status == errSecSuccess, let item = result as? [String: Any],
               let data = item[kSecValueData as String] as? Data else { throw SecretStore.Unreadable() }
         #if os(iOS)
-        // Items saved before were readable only while unlocked.
-        if item[kSecAttrAccessible as String] as? String != kSecAttrAccessibleAfterFirstUnlock as String {
+        // Items saved before were readable only while unlocked, or not bound to this device.
+        if item[kSecAttrAccessible as String] as? String != kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String {
             SecItemUpdate(self.query(account) as CFDictionary, accessibility as CFDictionary)
         }
         #endif

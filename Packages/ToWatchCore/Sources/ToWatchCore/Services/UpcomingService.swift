@@ -65,10 +65,12 @@ public enum UpcomingService {
             predicate: #Predicate { $0.releaseDate != nil && $0.releaseDate! >= today },
             sortBy: [SortDescriptor(\.releaseDate)]
         )
-        let episodes = FetchDescriptor<Episode>(
+        var episodes = FetchDescriptor<Episode>(
             predicate: #Predicate { !$0.isWatched && $0.seasonNumber > 0 && $0.airDate != nil && $0.airDate! >= today },
             sortBy: [SortDescriptor(\.airDate), SortDescriptor(\.seasonNumber), SortDescriptor(\.episodeNumber)]
         )
+        // The abandoned check below reads each episode's show; without this it ran a query per episode.
+        episodes.relationshipKeyPathsForPrefetching = [\.season]
         let items = ((try? context.fetch(movies)) ?? []).map(UpcomingItem.movie)
             + ((try? context.fetch(episodes)) ?? []).filter { $0.show?.isAbandoned == false }.map(UpcomingItem.episode)
         return items.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }

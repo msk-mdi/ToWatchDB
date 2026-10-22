@@ -25,11 +25,19 @@ public struct TMDBClient: Sendable {
     public let language: String
     private let session: URLSession
 
-    public init(token: String, language: String = TMDBClient.language(for: .current), session: URLSession = .shared) {
+    public init(token: String, language: String = TMDBClient.language(for: .current), session: URLSession = TMDBClient.session) {
         self.token = token
         self.language = language
         self.session = session
     }
+
+    /// A stalled connection otherwise kept a refresh (four titles at a time) spinning for URLSession's default
+    /// minute per request. Images keep the shared session and its cache.
+    public static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 20
+        return URLSession(configuration: configuration)
+    }()
 
     /// TMDB's `language` for a locale: "fr-CA", or just "fr". A full BCP 47 tag can carry extensions
     /// ("en-US-u-ca-buddhist") or a numeric region ("es-419") that TMDB doesn't take.

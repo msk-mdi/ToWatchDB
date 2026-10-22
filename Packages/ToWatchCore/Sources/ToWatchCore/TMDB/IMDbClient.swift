@@ -29,9 +29,13 @@ public struct IMDbClient: Sendable {
     }
 
     /// Ratings are a nicety, so a request gives up after 10 seconds rather than URLSession's default minute.
+    /// No URL cache: the key goes in the query string, and the shared cache would write it to disk in plain
+    /// text. Ratings are kept on the titles themselves.
     public static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 10
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: configuration)
     }()
 

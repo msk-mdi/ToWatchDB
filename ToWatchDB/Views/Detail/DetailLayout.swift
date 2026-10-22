@@ -268,9 +268,18 @@ struct ExternalLinks: View {
             if let imdbID, let url = URL(string: "https://www.imdb.com/title/\(imdbID)") {
                 Link(destination: url) { Label("IMDb", systemImage: "link") }
             }
-            if let homepage, let url = URL(string: homepage) {
+            if let url = URL.web(homepage) {
                 Link(destination: url) { Label("Website", systemImage: "globe") }
             }
         }
+    }
+}
+
+extension URL {
+    /// An address from TMDB or Seerr, only if it's a web address: `Link` hands any other scheme to the system.
+    static func web(_ string: String?) -> URL? {
+        guard let string, let url = URL(string: string), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return nil }
+        return url
     }
 }

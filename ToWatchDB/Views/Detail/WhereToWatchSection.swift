@@ -30,7 +30,7 @@ struct WhereToWatchSection: View {
             if let providers {
                 if let offers = providers.results[appState.watchRegion], !offers.sections.isEmpty {
                     ForEach(offers.sections) { section in
-                        ProviderRow(section: section, link: offers.link.flatMap(URL.init(string:)))
+                        ProviderRow(section: section, link: URL.web(offers.link))
                     }
                 } else {
                     Text("Not available to stream, rent, or buy in \(countryName(appState.watchRegion)).")

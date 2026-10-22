@@ -372,6 +372,8 @@ extension SeerrTitle {
             SeerrRequest(id: $0.id, isApproved: $0.status == 2, seasons: ($0.seasons ?? []).map(\.seasonNumber).sorted(),
                          requestedBy: $0.requestedBy?.name)
         }
+        // Opened by the app as a link, so only a web address: any other scheme would be handed to the system.
         mediaURL = (info?.mediaUrl ?? info?.plexUrl).flatMap(URL.init(string:))
+            .flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
     }
 }

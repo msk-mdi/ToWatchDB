@@ -24,12 +24,14 @@ device=$(xcrun devicectl list devices 2>/dev/null | awk '/physical/ && /availabl
 [[ -n $device ]] || { echo "No connected iPhone or iPad found (xcrun devicectl list devices)."; exit 1; }
 
 xcodegen generate --quiet
+app=build/Release-ios/Build/Products/Release-iphoneos/ToWatchDB.app
+# Removed first: a failed build would otherwise leave the previous build's app, and it was installed as if new.
+rm -rf "$app"
 xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -configuration Release \
   -destination 'generic/platform=iOS' -derivedDataPath build/Release-ios \
   -allowProvisioningUpdates DEVELOPMENT_TEAM="$team" CODE_SIGN_IDENTITY="Apple Development" \
   build | grep -E 'error:|BUILD' || true
-
-app=build/Release-ios/Build/Products/Release-iphoneos/ToWatchDB.app
-[[ -d $app ]] || { echo "Build failed"; exit 1; }
+# The grep's status is the pipeline's; xcodebuild's is what matters.
+(( pipestatus[1] == 0 )) && [[ -d $app ]] || { echo "Build failed"; exit 1; }
 xcrun devicectl device install app --device "$device" "$app"
 echo "Installed on $device. First time: trust the developer in Settings ▸ General ▸ VPN & Device Management."

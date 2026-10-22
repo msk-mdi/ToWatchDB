@@ -8,13 +8,15 @@ set -euo pipefail
 cd "${0:A:h}/.."
 
 xcodegen generate --quiet
+app=build/Release-ipa/Build/Products/Release-iphoneos/ToWatchDB.app
+# Removed first: a failed build would otherwise leave the previous build's app, and it was packaged as if new.
+rm -rf "$app"
 xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -configuration Release \
   -destination 'generic/platform=iOS' -derivedDataPath build/Release-ipa \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
   build | grep -E 'error:|BUILD' || true
-
-app=build/Release-ipa/Build/Products/Release-iphoneos/ToWatchDB.app
-[[ -d $app ]] || { echo "Build failed"; exit 1; }
+# The grep's status is the pipeline's; xcodebuild's is what matters.
+(( pipestatus[1] == 0 )) && [[ -d $app ]] || { echo "Build failed"; exit 1; }
 staging=$(mktemp -d)
 mkdir "$staging/Payload"
 ditto "$app" "$staging/Payload/ToWatchDB.app"

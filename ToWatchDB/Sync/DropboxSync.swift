@@ -153,11 +153,36 @@ final class DropboxSync {
             return
         }
         isSyncing = true
-        defer { isSyncing = false }
+        defer { endSync() }
         repeat {
             needsAnotherPass = false
             await syncOnce(client: client, library: library, version: version)
         } while needsAnotherPass && isConnected && lastError == nil
+    }
+
+    /// Waits for the sync in progress, if any, without starting one. Returns at once if there is none, and as
+    /// soon as the waiting task is cancelled (quitting); the sync itself goes on.
+    func waitForSync() async {
+        guard isSyncing else { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                // Cancelled before the wait was registered: don't wait at all.
+                if isSyncing, !Task.isCancelled { syncWaiters[id] = continuation } else { continuation.resume() }
+            }
+        } onCancel: {
+            Task { @MainActor in self.syncWaiters.removeValue(forKey: id)?.resume() }
+        }
+    }
+
+    /// Tasks waiting in `waitForSync`, resumed when the sync ends.
+    @ObservationIgnored private var syncWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+
+    private func endSync() {
+        isSyncing = false
+        let waiters = syncWaiters
+        syncWaiters = [:]
+        for waiter in waiters.values { waiter.resume() }
     }
 
     private func syncOnce(client: DropboxClient, library: () -> LibraryService, version: () -> Int) async {

@@ -411,7 +411,7 @@ final class AppState {
         dropboxDelay?.cancel()
         let sync = Task {
             // A sync already running would only queue another pass and return at once.
-            while dropbox.isSyncing, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
+            await dropbox.waitForSync()
             if hasUnsyncedChanges, !Task.isCancelled {
                 await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
             }
@@ -445,7 +445,7 @@ final class AppState {
             Task {
                 // A sync already running would only queue another pass and return at once, ending the
                 // background task while that sync was still uploading.
-                while dropbox.isSyncing, backgroundSync != .invalid { try? await Task.sleep(for: .milliseconds(100)) }
+                await dropbox.waitForSync()
                 if hasUnsyncedChanges, backgroundSync != .invalid {
                     await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
                 }
@@ -488,7 +488,7 @@ final class AppState {
             }
         }
         // Same as a sync starting during a refresh, the other way around (both start at launch).
-        while dropbox.isSyncing { try? await Task.sleep(for: .milliseconds(100)) }
+        await dropbox.waitForSync()
         await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
         await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400, importedMaxAge: force ? 0 : 7 * 86400)
     }

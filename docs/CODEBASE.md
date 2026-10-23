@@ -348,7 +348,8 @@ parameters whenever it becomes active.
 | `token`, `client`, `library` | The TMDB token (saved override, else built-in), a client, and a `LibraryService` |
 | `perform(_:)` | Runs a throwing library operation and shows errors through `errorMessage` |
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
-| `cached(_:_:)` | Memoizes derived data (stats) until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
+| `cached(_:_:)` | Memoizes derived data until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
+| `computeOffMain(_:_:)`, `offMainValue(_:)` | Works a `Sendable` value out in a background context once per library version (stats); a page shows the last one until the new one lands (§7, item 4) |
 | `all(_:matching:)` | Fetches every model of a type (optionally filtered), for `cached` closures (§7, item 15) |
 | `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |
 | `shortcutsContent()` | Hash of the names and next episodes Siri is taught, worked out off the main thread once per library version and day (§5.11) |
@@ -618,8 +619,10 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
 3. **Walk a show's episodes once.** Use `progressSummary()` instead of separate `watchStatus()`,
    `progress()`, and `nextEpisodeToWatch()` calls. Sort by precomputed keys (`LibrarySort.sorted`) instead of
    recomputing inside comparators.
-4. **Cache derived data with `appState.cached(key) { … }`.** Stats are recomputed only after a save, and the
-   year comparison reuses the page's stats.
+4. **Cache derived data with `appState.cached(key) { … }`.** Values are recomputed only after a save. Stats
+   go further: `appState.computeOffMain` works them out in a background context (about 0.45 s for 300 shows,
+   which held the main thread after every save while Stats showed), the page keeps the last result up
+   meanwhile, and the year comparison reuses the page's stats.
 5. **Keep pages alive on macOS** (`PageHost`). What remains on a switch is mostly AppKit relaying out the
    toolbar.
 6. **Discover's trending lists** are cached in `AppState` for 30 minutes.

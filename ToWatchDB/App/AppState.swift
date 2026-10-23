@@ -209,6 +209,34 @@ final class AppState {
         return value
     }
 
+    /// Values worked out off the main thread by `computeOffMain`, with the library version they're from. They hold
+    /// no models, so one from an older version (or from before a deletion) is safe to show until it's replaced.
+    /// Observed: a page reading one redraws when its new value lands.
+    private var offMainCache: [String: (version: Int, value: any Sendable)] = [:]
+    @ObservationIgnored private var offMainCacheDay = Calendar.current.startOfDay(for: .now)
+
+    /// The value last worked out for `key`, from any library version, or nil if there's none yet.
+    func offMainValue<T: Sendable>(_ key: String, as type: T.Type = T.self) -> T? {
+        offMainCache[key]?.value as? T
+    }
+
+    /// Works `key` out again in a context of its own, from what's saved, unless it's already from the current
+    /// library version. Stats walk every watched title and episode: in a view's body they held the main thread
+    /// for about 0.45 s (300 shows) after every save while the page was showing.
+    func computeOffMain<T: Sendable>(_ key: String, _ work: @escaping @Sendable (ModelContext) -> T) async {
+        let version = libraryVersion, today = Calendar.current.startOfDay(for: .now)
+        if today != offMainCacheDay {
+            // Many keys include the day, so older entries are never read again.
+            offMainCache = offMainCache.filter { $0.key == key }
+            offMainCacheDay = today
+        }
+        if let entry = offMainCache[key], entry.version == version { return }
+        let container = container
+        let value = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
+        // Still kept if the page moved on: it's right for `version`. A newer one that landed first wins.
+        if offMainCache[key].map({ $0.version <= version }) ?? true { offMainCache[key] = (version, value) }
+    }
+
     /// Every model of a type, for `cached` closures. Pages used to `@Query` these, which refetched whole tables
     /// after every save even when the cached value was reused (and on hidden pages kept alive on Mac).
     func all<T: PersistentModel>(_ type: T.Type = T.self, matching predicate: Predicate<T>? = nil) -> [T] {

@@ -18,21 +18,22 @@ struct StatsView: View {
     }
 
     var body: some View {
-        // Cached until the library changes, so coming back to Stats doesn't recompute everything.
-        // A hidden page (kept alive on Mac) shows its last stats instead of recomputing after every save.
-        let stats = appState.cached(Self.cacheKey(period), allowStale: !isActive) {
-            StatsService.stats(in: appState.container.mainContext, period: period)
-        }
-        let years = appState.cached("watch-years", allowStale: !isActive) {
-            StatsService.watchYears(in: appState.container.mainContext)
-        }
+        // Worked out off the main thread once per library version; until a period's first result lands there's a
+        // spinner, and after a save the last result stays up. A hidden page (kept alive on Mac) doesn't work
+        // anything out until it's shown again.
+        let key = Self.cacheKey(period)
+        let loaded: WatchStats? = appState.offMainValue(key)
+        let stats = loaded ?? WatchStats()
+        let years = appState.offMainValue("watch-years", as: [Int].self) ?? []
         let showsCompare = if case let .year(year) = period { years.contains { $0 != year } } else { false }
         // With nothing else on the page, the empty state is centered like every other screen's.
-        let isBlank = stats.isEmpty && !showsCompare && stats.undatedWatches == 0
+        let isBlank = loaded != nil && stats.isEmpty && !showsCompare && stats.undatedWatches == 0
 
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                if stats.isEmpty {
+                if loaded == nil {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                } else if stats.isEmpty {
                     if !isBlank {
                         emptyMessage.frame(maxWidth: .infinity).padding(.top, 40)
                     }
@@ -70,6 +71,12 @@ struct StatsView: View {
             .frame(maxWidth: .infinity)
         }
         .centeredEmptyState(isBlank) { emptyMessage }
+        .task(id: isActive ? "\(key)-\(appState.libraryVersion)" : nil) {
+            guard isActive else { return }
+            let period = period
+            await appState.computeOffMain(key) { StatsService.stats(in: $0, period: period) }
+            await appState.computeOffMain("watch-years") { StatsService.watchYears(in: $0) }
+        }
         .pageTitle("Stats")
         .pageToolbar {
             ToolbarItem {
@@ -388,9 +395,8 @@ private struct CompareSection: View {
     var body: some View {
         let other = comparedYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first { $0 < year } ?? years[0]
         // The page's key: comparing against a year already shown (or showing the compared year) reuses its stats.
-        let previous = appState.cached(StatsView.cacheKey(.year(other)), allowStale: !isActive) {
-            StatsService.stats(in: appState.container.mainContext, period: .year(other))
-        }
+        let key = StatsView.cacheKey(.year(other))
+        let previous = appState.offMainValue(key, as: WatchStats.self)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -403,18 +409,24 @@ private struct CompareSection: View {
             }
             TileRow {
                 StatTile(title: "Watch Time", value: current.totalMinutes.watchTimeString, symbol: "clock",
-                         delta: delta(current.totalMinutes, previous.totalMinutes, other, format: \.watchTimeString))
+                         delta: delta(current.totalMinutes, previous?.totalMinutes, other, format: \.watchTimeString))
                 StatTile(title: "Movies", value: current.moviesWatched.formatted(), symbol: "film",
-                         delta: delta(current.moviesWatched, previous.moviesWatched, other))
+                         delta: delta(current.moviesWatched, previous?.moviesWatched, other))
                 StatTile(title: "Episodes", value: current.episodesWatched.formatted(), symbol: "tv",
-                         delta: delta(current.episodesWatched, previous.episodesWatched, other))
+                         delta: delta(current.episodesWatched, previous?.episodesWatched, other))
                 StatTile(title: "Shows", value: current.showsWatched.formatted(), symbol: "rectangle.stack",
-                         delta: delta(current.showsWatched, previous.showsWatched, other))
+                         delta: delta(current.showsWatched, previous?.showsWatched, other))
             }
+        }
+        .task(id: isActive ? "\(key)-\(appState.libraryVersion)" : nil) {
+            guard isActive else { return }
+            await appState.computeOffMain(key) { StatsService.stats(in: $0, period: .year(other)) }
         }
     }
 
-    private func delta(_ current: Int, _ previous: Int, _ year: Int, format: KeyPath<Int, String> = \.description) -> String {
+    /// Empty until the compared year's stats are worked out.
+    private func delta(_ current: Int, _ previous: Int?, _ year: Int, format: KeyPath<Int, String> = \.description) -> String {
+        guard let previous else { return " " }
         let difference = current - previous
         if difference == 0 { return "Same as \(year)" }
         let sign = difference > 0 ? "+" : "−"

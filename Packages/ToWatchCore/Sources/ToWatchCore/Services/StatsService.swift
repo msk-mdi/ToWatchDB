@@ -89,6 +89,9 @@ public struct WatchStats: Hashable, Sendable {
     /// Titles marked watched without a date. They count toward All Time only.
     public var undatedWatches = 0
 
+    /// Nothing watched, for a page waiting on its first result.
+    public init() {}
+
     public var totalMinutes: Int { movieMinutes + episodeMinutes }
     public var isEmpty: Bool { moviesWatched == 0 && episodesWatched == 0 }
 }
@@ -105,7 +108,7 @@ public enum StatsService {
 
     /// Stats from the library in `context`. Reads only watched titles and episodes, each in one fetch: walking
     /// every show's seasons and episodes ran a query per show and per season, and loaded every episode.
-    @MainActor
+    /// Not tied to the main actor: the app runs it in a context of its own off the main thread.
     public static func stats(in context: ModelContext, period: StatsPeriod,
                              now: Date = .now, calendar: Calendar = StatsPeriod.calendar, topCount: Int = 10) -> WatchStats {
         let movies = (try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate { $0.isWatched }))) ?? []
@@ -121,7 +124,6 @@ public enum StatsService {
     }
 
     /// `watchedEpisodes` gives a show's watched episodes, in any order.
-    @MainActor
     private static func stats(movies: [Movie], shows: [TVShow], watchedEpisodes: (TVShow) -> [Episode], period: StatsPeriod,
                               now: Date, calendar: Calendar, topCount: Int) -> WatchStats {
         let interval = period.interval(now: now, calendar: calendar)
@@ -192,7 +194,6 @@ public enum StatsService {
     }
 
     /// Years that have at least one dated watch, newest first. Reads only the watch dates.
-    @MainActor
     public static func watchYears(in context: ModelContext, calendar: Calendar = StatsPeriod.calendar) -> [Int] {
         var movies = FetchDescriptor<Movie>(predicate: #Predicate { $0.watchedDate != nil })
         movies.propertiesToFetch = [\.watchedDate]

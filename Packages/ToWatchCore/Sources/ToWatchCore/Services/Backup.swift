@@ -438,8 +438,9 @@ public extension LibraryService {
         var summary = ImportSummary()
         // One fetch each instead of one per record (which also had to search the growing unsaved inserts).
         // Before any insert, so a failed fetch leaves nothing pending.
-        var moviesByID = Dictionary(try context.fetch(FetchDescriptor<Movie>()).map { ($0.tmdbID, $0) }) { first, _ in first }
-        var showsByID = Dictionary(try context.fetch(FetchDescriptor<TVShow>()).map { ($0.tmdbID, $0) }) { first, _ in first }
+        // Titles deleted but not saved yet (`mergeDuplicateTitles`) aren't merged into.
+        var moviesByID = Dictionary(try context.fetch(FetchDescriptor<Movie>()).filter(\.isLive).map { ($0.tmdbID, $0) }) { first, _ in first }
+        var showsByID = Dictionary(try context.fetch(FetchDescriptor<TVShow>()).filter(\.isLive).map { ($0.tmdbID, $0) }) { first, _ in first }
         let stored = try Self.seasonsAndEpisodes(in: context)
 
         var spaces: [UUID: Space] = [:]
@@ -524,6 +525,34 @@ public extension LibraryService {
 
         try commit()
         return summary
+    }
+
+    /// Folds every title the library holds more than once into its earliest-added copy, the way a backup import
+    /// merges (watched if either is, notes and collections combined), and returns how many copies went. There
+    /// shouldn't be any, since adding checks again after the network, but sync used to keep one copy and delete
+    /// the others with their watch data. Runs at launch.
+    @discardableResult
+    func mergeDuplicateTitles() throws -> Int {
+        func extraCopies<M: PersistentModel>(_ models: [M], id: (M) -> Int) -> [M] {
+            var seen = Set<Int>()
+            return models.filter { !seen.insert(id($0)).inserted }
+        }
+        let movies = extraCopies(try context.fetch(FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate)])), id: \.tmdbID)
+        let shows = extraCopies(try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.addedDate)])), id: \.tmdbID)
+        guard !movies.isEmpty || !shows.isEmpty else { return 0 }
+        let notes = try notesByOwner()
+        let (seasons, episodes) = try Self.seasonsAndEpisodes(in: context)
+        var copies = LibraryBackup()
+        copies.movies = movies.map { Self.record($0, notes: notes) }
+        copies.shows = shows.map { Self.record($0, seasons: seasons[$0.persistentModelID] ?? [], episodes: episodes, notes: notes) }
+        for movie in movies { context.delete(movie) }
+        for show in shows { context.delete(show) }
+        do { try importBackup(copies) } catch {
+            context.rollback()
+            throw error
+        }
+        Log.library.error("Merged \(movies.count + shows.count, privacy: .public) duplicate titles")
+        return movies.count + shows.count
     }
 
     func importBackup(data: Data) throws -> ImportSummary {

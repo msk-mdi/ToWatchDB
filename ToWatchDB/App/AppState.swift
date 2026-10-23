@@ -168,6 +168,9 @@ final class AppState {
                 self?.errorMessage = "A change couldn't be saved, so it was undone. (\(error.localizedDescription))"
             }
             library.separateNotesSharingAnID()
+            do { try library.mergeDuplicateTitles() } catch {
+                Log.library.error("Couldn't merge duplicate titles: \(error.localizedDescription, privacy: .public)")
+            }
         }
         #if os(macOS)
         AppDelegate.appState = self

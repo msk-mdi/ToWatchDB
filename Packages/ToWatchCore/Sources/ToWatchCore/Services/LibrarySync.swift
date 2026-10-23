@@ -508,7 +508,11 @@ public extension LibraryService {
         var byKey: [K: M] = [:]
         for model in existing {
             let k = model[keyPath: modelKey]
-            if byKey[k] == nil { byKey[k] = model } else { context.delete(model) } // A duplicate.
+            // A duplicate. `mergeDuplicateTitles` folds title copies together at launch, so this is a last resort.
+            if byKey[k] == nil { byKey[k] = model } else {
+                Log.sync.error("Deleted a duplicate \(String(describing: M.self), privacy: .public) while applying a sync")
+                context.delete(model)
+            }
         }
         var kept: [K: M] = [:]
         for record in records {

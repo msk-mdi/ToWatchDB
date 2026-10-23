@@ -1386,3 +1386,43 @@ private final class CountingUnauthorizedProtocol: URLProtocol {
     #expect(entries.map(\.label) == ["Arrival (2016)", "Severance"])
     #expect(entries.map(\.line) == [1, 3])
 }
+
+@MainActor @Test func duplicateTitlesMergeIntoTheFirstAdded() throws {
+    let library = try makeLibrary()
+    let first = library.insertMovie(try fixture("movie_inception"))
+    first.addedDate = date("2024-01-01")
+    let copy = Movie(tmdbID: first.tmdbID, title: first.title)
+    copy.addedDate = date("2025-01-01")
+    library.context.insert(copy)
+    library.setWatched(copy, true, on: date("2025-02-01"))
+    library.addNote("Only on the copy", to: copy)
+
+    let show = try insertSeverance(into: library)
+    show.addedDate = date("2024-01-01")
+    let showCopy = TVShow(tmdbID: show.tmdbID, name: show.name)
+    showCopy.addedDate = date("2025-01-01")
+    library.context.insert(showCopy)
+    let season = Season(tmdbID: 1, seasonNumber: 1)
+    library.context.insert(season)
+    season.show = showCopy
+    let episode = Episode(tmdbID: 1, seasonNumber: 1, episodeNumber: 2)
+    library.context.insert(episode)
+    episode.season = season
+    library.setWatched(episode, true, on: date("2025-03-01"))
+    showCopy.userRating = 8
+    library.save()
+
+    #expect(try library.mergeDuplicateTitles() == 2)
+    let movies = try library.context.fetch(FetchDescriptor<Movie>())
+    let shows = try library.context.fetch(FetchDescriptor<TVShow>())
+    #expect(movies.count == 1 && shows.count == 1)
+    let movie = try #require(movies.first)
+    #expect(movie.addedDate == date("2024-01-01"))
+    #expect(movie.isWatched && movie.watchedDate == date("2025-02-01"))
+    #expect(movie.notes?.map(\.text) == ["Only on the copy"])
+    let kept = try #require(shows.first)
+    #expect(kept.userRating == 8)
+    #expect(kept.regularEpisodes.first { $0.code == "S01E02" }?.isWatched == true)
+    #expect(kept.regularEpisodes.count == show.regularEpisodes.count)
+    #expect(try library.mergeDuplicateTitles() == 0)
+}

@@ -3,11 +3,17 @@ import Foundation
 
 /// The few Dropbox HTTP endpoints sync needs: OAuth with PKCE (no client secret in the app), and downloading
 /// and uploading one file in the app's folder (Dropbox ▸ Apps ▸ ToWatchDB).
-struct DropboxClient: Sendable {
-    let appKey: String
+public struct DropboxClient: Sendable {
+    public let appKey: String
+    private let session: URLSession
+
+    public init(appKey: String, session: URLSession = DropboxClient.session) {
+        self.appKey = appKey
+        self.session = session
+    }
 
     /// From `DROPBOX_APP_KEY` in `Config/Secrets.xcconfig`. The key isn't secret: PKCE needs no client secret.
-    static var bundledAppKey: String? {
+    public static var bundledAppKey: String? {
         guard let key = Bundle.main.object(forInfoDictionaryKey: "DropboxAppKey") as? String,
               !key.isEmpty, !key.hasPrefix("$(") else { return nil }
         return key
@@ -17,7 +23,7 @@ struct DropboxClient: Sendable {
     /// row, and the launch refresh waits for a running sync. The timeout is for silence, not for the whole
     /// transfer, so a slow upload of a large library still finishes. No URL cache: the bodies are the library
     /// and the tokens.
-    static let session: URLSession = {
+    public static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.urlCache = nil
@@ -26,31 +32,36 @@ struct DropboxClient: Sendable {
     }()
 
     /// Dropbox treats `db-<app key>` as the app's own redirect scheme; the sign-in sheet catches it.
-    var callbackScheme: String { "db-\(appKey)" }
+    public var callbackScheme: String { "db-\(appKey)" }
     private var redirectURI: String { "\(callbackScheme)://2/token" }
 
-    struct Tokens: Decodable {
-        let accessToken: String
-        let expiresIn: Double
-        let refreshToken: String?
+    public struct Tokens: Decodable, Sendable {
+        public let accessToken: String
+        public let expiresIn: Double
+        public let refreshToken: String?
     }
 
     /// A file's contents and revision, which an upload passes back so it can't overwrite a newer file.
-    struct File {
-        let data: Data
-        let rev: String
+    public struct File: Sendable {
+        public let data: Data
+        public let rev: String
+
+        public init(data: Data, rev: String) {
+            self.data = data
+            self.rev = rev
+        }
     }
 
     // MARK: Sign-in
 
     /// A random PKCE verifier; the sign-in URL carries its hash.
-    static func makeVerifier() -> String {
+    public static func makeVerifier() -> String {
         let characters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         var generator = SystemRandomNumberGenerator()
         return String((0..<64).map { _ in characters.randomElement(using: &generator)! })
     }
 
-    func authorizeURL(verifier: String) -> URL {
+    public func authorizeURL(verifier: String) -> URL {
         let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
@@ -68,7 +79,7 @@ struct DropboxClient: Sendable {
     }
 
     /// The authorization code from the redirect, or the reason sign-in was refused.
-    func code(fromCallback url: URL) throws -> String {
+    public func code(fromCallback url: URL) throws -> String {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         if let code = items.first(where: { $0.name == "code" })?.value { return code }
         let reason = items.first(where: { $0.name == "error_description" })?.value
@@ -76,12 +87,12 @@ struct DropboxClient: Sendable {
         throw DropboxError.signInFailed(reason ?? "Dropbox didn't return an authorization code.")
     }
 
-    func exchange(code: String, verifier: String) async throws -> Tokens {
+    public func exchange(code: String, verifier: String) async throws -> Tokens {
         try await tokenRequest(["code": code, "grant_type": "authorization_code", "client_id": appKey,
                                 "code_verifier": verifier, "redirect_uri": redirectURI], invalidGrant: .signInFailed("The sign-in code expired. Try again."))
     }
 
-    func refresh(_ refreshToken: String) async throws -> Tokens {
+    public func refresh(_ refreshToken: String) async throws -> Tokens {
         try await tokenRequest(["grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": appKey],
                                invalidGrant: .signedOut)
     }
@@ -95,7 +106,7 @@ struct DropboxClient: Sendable {
         var body = URLComponents()
         body.queryItems = form.map { URLQueryItem(name: $0.key, value: $0.value) }
         request.httpBody = Data((body.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 400, String(decoding: data, as: UTF8.self).contains("invalid_grant") { throw invalidGrant }
         guard status == 200 else { throw DropboxError.http(status, Self.summary(data)) }
@@ -105,21 +116,21 @@ struct DropboxClient: Sendable {
     }
 
     /// Ends the session on Dropbox's side too. Best effort: disconnecting works offline.
-    func revoke(accessToken: String) async {
+    public func revoke(accessToken: String) async {
         var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/2/auth/token/revoke")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        _ = try? await Self.session.data(for: request)
+        _ = try? await session.data(for: request)
     }
 
     /// The signed-in account's email, shown in Settings.
-    func accountEmail(accessToken: String) async throws -> String? {
+    public func accountEmail(accessToken: String) async throws -> String? {
         var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/2/users/get_current_account")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data("null".utf8)
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         try Self.check(response, data)
         struct Account: Decodable {
             struct Name: Decodable { let display_name: String }
@@ -133,13 +144,13 @@ struct DropboxClient: Sendable {
     // MARK: Files
 
     /// The file, or nil if there isn't one yet.
-    func download(path: String, accessToken: String) async throws -> File? {
+    public func download(path: String, accessToken: String) async throws -> File? {
         var request = URLRequest(url: URL(string: "https://content.dropboxapi.com/2/files/download")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(try Self.argument(["path": path]), forHTTPHeaderField: "Dropbox-API-Arg")
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(data).hasPrefix("path/not_found") { return nil }
         try Self.check(response, data)
         struct Metadata: Decodable { let rev: String }
@@ -149,14 +160,14 @@ struct DropboxClient: Sendable {
     }
 
     /// The file's revision, or nil if there isn't one yet. Much cheaper than downloading it to see if it changed.
-    func revision(path: String, accessToken: String) async throws -> String? {
+    public func revision(path: String, accessToken: String) async throws -> String? {
         var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/2/files/get_metadata")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(try Self.argument(["path": path]).utf8)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(data).hasPrefix("path/not_found") { return nil }
         try Self.check(response, data)
         struct Metadata: Decodable { let rev: String? }
@@ -166,7 +177,7 @@ struct DropboxClient: Sendable {
     /// Writes the file. With `replacing`, only if it's still at that revision; otherwise only if there's none.
     /// Throws `DropboxError.conflict` if another device wrote it first.
     @discardableResult
-    func upload(_ data: Data, path: String, replacing rev: String?, accessToken: String) async throws -> String {
+    public func upload(_ data: Data, path: String, replacing rev: String?, accessToken: String) async throws -> String {
         var request = URLRequest(url: URL(string: "https://content.dropboxapi.com/2/files/upload")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -175,7 +186,7 @@ struct DropboxClient: Sendable {
         request.setValue(try Self.argument(["path": path, "mode": mode, "autorename": false, "mute": true]),
                          forHTTPHeaderField: "Dropbox-API-Arg")
         request.httpBody = data
-        let (body, response) = try await Self.session.data(for: request)
+        let (body, response) = try await session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(body).contains("conflict") {
             throw DropboxError.conflict
         }
@@ -212,7 +223,7 @@ struct DropboxClient: Sendable {
     }
 }
 
-enum DropboxError: LocalizedError {
+public enum DropboxError: LocalizedError, Sendable {
     case notConfigured
     case signInFailed(String)
     /// The sign-in was revoked, from Dropbox's website or another device.
@@ -224,7 +235,7 @@ enum DropboxError: LocalizedError {
     case rateLimited
     case http(Int, String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .notConfigured: "This build has no Dropbox app key. Set DROPBOX_APP_KEY in Config/Secrets.xcconfig."
         case let .signInFailed(reason): "Couldn't connect to Dropbox: \(reason)"

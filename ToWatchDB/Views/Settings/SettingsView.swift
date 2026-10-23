@@ -384,8 +384,12 @@ struct SettingsView: View {
     private func connectDropbox() {
         Task {
             await appState.dropbox.connect { url, scheme in
-                try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme),
-                                                                preferredBrowserSession: nil, additionalHeaderFields: [:])
+                do {
+                    return try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme),
+                                                                           preferredBrowserSession: nil, additionalHeaderFields: [:])
+                } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+                    throw CancellationError() // Closing the sheet isn't an error to show.
+                }
             }
             appState.syncWithDropbox()
         }

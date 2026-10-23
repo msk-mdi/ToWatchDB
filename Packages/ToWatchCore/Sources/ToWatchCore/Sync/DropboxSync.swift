@@ -1,67 +1,96 @@
-import AuthenticationServices
 import Foundation
 import Observation
 import SwiftData
-import ToWatchCore
 
 /// Keeps the library in sync with a file in the user's Dropbox, so every device signed in to the same
 /// Dropbox account sees the same library. See `LibrarySync` for how changes from both sides are merged.
 @Observable @MainActor
-final class DropboxSync {
+public final class DropboxSync {
     /// In the app's folder: Dropbox ▸ Apps ▸ ToWatchDB.
-    static let path = "/ToWatchDB Library.json"
-    private static let refreshTokenAccount = "dropbox-refresh-token"
+    public static let path = "/ToWatchDB Library.json"
 
-    let client: DropboxClient? = DropboxClient.bundledAppKey.map(DropboxClient.init)
+    /// Where the sign-in (Dropbox's refresh token) is kept: the app's secret store.
+    public struct Vault: Sendable {
+        /// The token, or nil if there's none. Throws when it couldn't be read (a locked iPhone), which isn't
+        /// the same as signed out.
+        public var read: @Sendable () throws -> String?
+        public var save: @Sendable (String) -> Bool
+        /// Whether the token is gone.
+        public var delete: @Sendable () -> Bool
 
-    private(set) var isConnected = false
-    private(set) var isSyncing = false
-    private(set) var lastError: String?
-
-    private(set) var accountEmail: String? = UserDefaults.standard.string(forKey: "dropboxAccount") {
-        didSet { UserDefaults.standard.set(accountEmail, forKey: "dropboxAccount") }
+        public init(read: @escaping @Sendable () throws -> String?, save: @escaping @Sendable (String) -> Bool,
+                    delete: @escaping @Sendable () -> Bool) {
+            self.read = read
+            self.save = save
+            self.delete = delete
+        }
     }
 
-    private(set) var lastSynced: Date? = UserDefaults.standard.object(forKey: "dropboxLastSynced") as? Date {
-        didSet { UserDefaults.standard.set(lastSynced, forKey: "dropboxLastSynced") }
+    public let client: DropboxClient?
+    private let vault: Vault
+    /// What a sync remembers between launches. Not observed: only the properties that write to it are.
+    @ObservationIgnored private let defaults: UserDefaults
+    /// The library as of the last sync, so the next one can tell what changed on each side.
+    private let baseURL: URL
+
+    public private(set) var isConnected = false
+    public private(set) var isSyncing = false
+    public private(set) var lastError: String?
+
+    public private(set) var accountEmail: String? {
+        didSet { defaults.set(accountEmail, forKey: "dropboxAccount") }
+    }
+
+    public private(set) var lastSynced: Date? {
+        didSet { defaults.set(lastSynced, forKey: "dropboxLastSynced") }
     }
 
     /// The library version the last sync uploaded or found already in Dropbox. A save after it needs a sync.
-    private(set) var syncedVersion: Int?
+    public private(set) var syncedVersion: Int?
 
     /// The Dropbox revision the base snapshot matches. While the file is still at it, a sync with no local
     /// changes has nothing to do, and one with changes can merge with the base instead of downloading.
-    @ObservationIgnored private var syncedRev: String? = UserDefaults.standard.string(forKey: "dropboxSyncedRev") {
-        didSet { UserDefaults.standard.set(syncedRev, forKey: "dropboxSyncedRev") }
+    @ObservationIgnored private var syncedRev: String? {
+        didSet { defaults.set(syncedRev, forKey: "dropboxSyncedRev") }
     }
     /// Whether a save since the last sync hasn't reached Dropbox, kept across launches. Without it every launch
     /// ran a full sync (snapshotting the whole library) even when nothing had changed. Unknown (an update from a
     /// version without it) counts as yes.
-    @ObservationIgnored private var hasUnsyncedEdits = UserDefaults.standard.object(forKey: "dropboxHasUnsyncedEdits") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(hasUnsyncedEdits, forKey: "dropboxHasUnsyncedEdits") }
+    @ObservationIgnored private var hasUnsyncedEdits: Bool {
+        didSet { defaults.set(hasUnsyncedEdits, forKey: "dropboxHasUnsyncedEdits") }
     }
     /// The sign-in couldn't be read when checked (a locked iPhone), so it's checked again before each sync.
     @ObservationIgnored private var isConnectionUnknown = false
 
-    init() {
+    /// `client` is nil when the build has no Dropbox app key. Tests pass their own defaults and base file.
+    public init(client: DropboxClient?, vault: Vault, defaults: UserDefaults = .standard,
+                baseURL: URL = DropboxSync.defaultBaseURL) {
+        self.client = client
+        self.vault = vault
+        self.defaults = defaults
+        self.baseURL = baseURL
+        accountEmail = defaults.string(forKey: "dropboxAccount")
+        lastSynced = defaults.object(forKey: "dropboxLastSynced") as? Date
+        syncedRev = defaults.string(forKey: "dropboxSyncedRev")
+        hasUnsyncedEdits = defaults.object(forKey: "dropboxHasUnsyncedEdits") as? Bool ?? true
         checkConnection()
         // Nothing saved since the last sync: the library as launched (version 0) is what Dropbox holds.
         if !hasUnsyncedEdits, syncedRev != nil { syncedVersion = 0 }
     }
 
     /// Called on every save of the library.
-    func noteSave() {
+    public func noteSave() {
         if !hasUnsyncedEdits { hasUnsyncedEdits = true }
     }
 
     /// Reads the sign-in again if it couldn't be read before. Called before syncing.
-    func checkConnectionIfNeeded() {
+    public func checkConnectionIfNeeded() {
         if isConnectionUnknown { checkConnection() }
     }
 
     private func checkConnection() {
         do {
-            isConnected = try SecretStore.read(Self.refreshTokenAccount) != nil
+            isConnected = try vault.read() != nil
             isConnectionUnknown = false
         } catch {
             isConnectionUnknown = true
@@ -78,8 +107,9 @@ final class DropboxSync {
 
     // MARK: Connecting
 
-    /// Signs in with Dropbox in a web sheet. `authenticate` presents it and returns the redirect URL.
-    func connect(authenticate: (URL, String) async throws -> URL) async {
+    /// Signs in with Dropbox in a web sheet. `authenticate` presents it and returns the redirect URL, or throws
+    /// `CancellationError` when the user closes it.
+    public func connect(authenticate: (URL, String) async throws -> URL) async {
         guard let client else {
             lastError = DropboxError.notConfigured.localizedDescription
             return
@@ -91,13 +121,13 @@ final class DropboxSync {
             guard let refreshToken = tokens.refreshToken else {
                 throw DropboxError.signInFailed("Dropbox didn't grant offline access.")
             }
-            guard SecretStore.save(refreshToken, account: Self.refreshTokenAccount) else {
+            guard vault.save(refreshToken) else {
                 throw DropboxError.signInFailed("The sign-in couldn't be saved on this device.")
             }
             session += 1
             accessToken = (tokens.accessToken, .now.addingTimeInterval(tokens.expiresIn - 60))
             // A different account's file has nothing to do with the last one's.
-            try? FileManager.default.removeItem(at: Self.baseURL)
+            try? FileManager.default.removeItem(at: baseURL)
             syncedRev = nil
             lastSynced = nil
             syncedVersion = nil
@@ -110,26 +140,26 @@ final class DropboxSync {
             if session == signIn { accountEmail = email }
         } catch {
             // Closing the sign-in sheet isn't an error worth showing.
-            if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin || error is CancellationError { return }
+            if error is CancellationError { return }
             lastError = error.localizedDescription
         }
     }
 
     /// Signs out and forgets the sync state. The library on this device and the file in Dropbox stay.
-    func disconnect() {
+    public func disconnect() {
         session += 1
         // Revoke even without a current access token (one is minted from the refresh token), or the device's
         // sign-in would stay valid on Dropbox's side.
         if let client {
-            let token = accessToken?.value, refreshToken = SecretStore.load(Self.refreshTokenAccount)
+            let token = accessToken?.value, refreshToken = (try? vault.read()) ?? nil
             Task {
                 var token = token
                 if token == nil, let refreshToken { token = try? await client.refresh(refreshToken).accessToken }
                 if let token { await client.revoke(accessToken: token) }
             }
         }
-        let isForgotten = SecretStore.delete(Self.refreshTokenAccount)
-        try? FileManager.default.removeItem(at: Self.baseURL)
+        let isForgotten = vault.delete()
+        try? FileManager.default.removeItem(at: baseURL)
         syncedRev = nil
         isConnectionUnknown = false
         accessToken = nil
@@ -145,7 +175,7 @@ final class DropboxSync {
 
     /// Downloads the file, merges it with the library, and uploads the result if it changed.
     /// `library` must be read fresh after each await; `version` is the library's current save count.
-    func sync(library: @escaping () -> LibraryService, version: @escaping () -> Int) async {
+    public func sync(library: @escaping () -> LibraryService, version: @escaping () -> Int) async {
         checkConnectionIfNeeded()
         guard isConnected, let client else { return }
         guard !isSyncing else {
@@ -162,7 +192,7 @@ final class DropboxSync {
 
     /// Waits for the sync in progress, if any, without starting one. Returns at once if there is none, and as
     /// soon as the waiting task is cancelled (quitting); the sync itself goes on.
-    func waitForSync() async {
+    public func waitForSync() async {
         guard isSyncing else { return }
         let id = UUID()
         await withTaskCancellationHandler {
@@ -197,7 +227,7 @@ final class DropboxSync {
                 let file: DropboxClient.File?
                 /// Whether `file` is the base: Dropbox still holds what the last sync uploaded or found.
                 var isBase = false
-                if attempt == 1, let syncedRev, let base = Self.loadBaseData(),
+                if attempt == 1, let syncedRev, let base = Self.loadBaseData(from: baseURL),
                    try await authorized(session, { try await client.revision(path: Self.path, accessToken: $0) }) == syncedRev {
                     try checkSession()
                     if syncedVersion == version() {
@@ -225,8 +255,9 @@ final class DropboxSync {
                         try Task.checkCancellation()
                         if pass > Self.maxPasses { throw LibraryKeptChanging() }
                         // Which titles the merge changes is worked out here too, so applying it writes only those.
-                        let (merged, changes) = try await Self.offMain { [local] in
-                            let merged = LibrarySync.merge(base: LibrarySync.usableBase(Self.loadBase(), local: local), local: local, remote: remote)
+                        let (merged, changes) = try await Self.offMain { [local, baseURL] in
+                            let base = LibrarySync.usableBase(Self.loadBase(from: baseURL), local: local)
+                            let merged = LibrarySync.merge(base: base, local: local, remote: remote)
                             return (merged, LibrarySync.changes(from: local, to: merged))
                         }
                         try checkSession()
@@ -353,7 +384,7 @@ final class DropboxSync {
         if let accessToken, accessToken.expires > .now { return accessToken.value }
         let session = session
         let refreshToken: String?
-        do { refreshToken = try SecretStore.read(Self.refreshTokenAccount) } catch { throw DropboxError.secretsUnavailable }
+        do { refreshToken = try vault.read() } catch { throw DropboxError.secretsUnavailable }
         guard let client, let refreshToken else { throw DropboxError.signedOut }
         let tokens = try await client.refresh(refreshToken)
         // Connecting or disconnecting meanwhile: this token is for the old sign-in, and caching it would let the
@@ -365,8 +396,8 @@ final class DropboxSync {
 
     // MARK: Base snapshot
 
-    /// The library as of the last sync, so the next one can tell what changed on each side.
-    private nonisolated static var baseURL: URL {
+    /// Where the app keeps the base.
+    public nonisolated static var defaultBaseURL: URL {
         URL.applicationSupportDirectory.appending(path: "Dropbox Sync Base.json")
     }
 
@@ -377,22 +408,22 @@ final class DropboxSync {
 
     /// Makes the next sync a first sync, which brings the file's library in rather than merging against the last
     /// sync: for a library that was lost, every title would look deleted here and be deleted on every device.
-    nonisolated static func forgetBase() {
-        try? FileManager.default.removeItem(at: Self.baseURL)
-        UserDefaults.standard.removeObject(forKey: "dropboxSyncedRev")
+    public nonisolated static func forgetBase(at baseURL: URL = defaultBaseURL, defaults: UserDefaults = .standard) {
+        try? FileManager.default.removeItem(at: baseURL)
+        defaults.removeObject(forKey: "dropboxSyncedRev")
     }
 
-    private nonisolated static func loadBaseData() -> Data? { try? Data(contentsOf: Self.baseURL) }
+    private nonisolated static func loadBaseData(from url: URL) -> Data? { try? Data(contentsOf: url) }
 
-    private nonisolated static func loadBase() -> LibraryBackup? {
-        loadBaseData().flatMap { try? BackupCoding.decode($0) }
+    private nonisolated static func loadBase(from url: URL) -> LibraryBackup? {
+        loadBaseData(from: url).flatMap { try? BackupCoding.decode($0) }
     }
 
     /// `rev` is the Dropbox revision whose content `data` matches, if known.
     private func saveBase(_ data: Data, rev: String?) {
-        try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: baseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         do {
-            try data.write(to: Self.baseURL, options: .atomic)
+            try data.write(to: baseURL, options: .atomic)
             syncedRev = rev
         } catch {
             syncedRev = nil

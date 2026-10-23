@@ -108,12 +108,15 @@ Packages/ToWatchCore/
     Services/LibrarySync.swift                 Three-way merge for Dropbox sync, applying a merged snapshot
     Services/ListImport.swift                  Importing a plain-text list of titles
     Services/SpokenSummaries.swift             Sentences for Siri results
-  Tests/ToWatchCoreTests/       Swift Testing suite + recorded TMDB JSON fixtures
+    Services/SealedSecretsFile.swift           macOS secrets file sealed with a Secure Enclave key
+    Services/Log.swift                         Loggers for Console.app
+    Sync/DropboxClient.swift    Dropbox HTTP: OAuth with PKCE, file revision, download, conditional upload
+    Sync/DropboxSync.swift      The sync driver: when to download, merge, apply, and upload
+  Tests/ToWatchCoreTests/       Swift Testing suite (with a fake Dropbox) + recorded TMDB JSON fixtures
 ToWatchDB/
   App/                          Entry point, AppState, appearance, debug tools, secret store (Keychain / Secure Enclave file)
   Views/                        All SwiftUI screens and components (see §5.5 and §5.6)
   Intents/                      App Intents: entities, queries, actions, App Shortcuts
-  Sync/                         Dropbox client (OAuth with PKCE, files) and the sync driver
   Resources/Assets.xcassets     AppIcon (coral), 9 alternate icons, 10 icon previews, AccentColor
   Info.plist, ToWatchDB.entitlements   Generated from project.yml
 Scripts/
@@ -135,7 +138,7 @@ About 14,750 lines of Swift in total (version 2.0.4).
 | Release builds | `Scripts/build-mac.sh`, `Scripts/install-ios.sh` | Mac: ad-hoc signed `dist/ToWatchDB.app`. iOS: free Apple ID team from Secrets, installed on a connected device. No `get-task-allow` in Release. |
 | Dropbox app key | `Config/Secrets.xcconfig` → `DROPBOX_APP_KEY` | Copied into Info.plist as `DropboxAppKey` in every configuration (it isn't a secret). Without it, Settings ▸ Dropbox Sync says sync is unavailable. |
 | Token override | Settings ▸ TMDB | Stored by `TokenStore` through `SecretStore`. It takes priority over the built-in token. |
-| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support, AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read (looked for once per launch). Macs without a Secure Enclave keep the Keychain. The decrypted file is kept in memory until the next save. iOS items are readable after the first unlock, so a sync or Siri action on a locked iPhone can use them. `SecretStore.read` throws `Unreadable` when reading failed and returns nil only when nothing is saved: callers must not treat a failed read as "signed out". `load` is the non-throwing form. |
+| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support (`SealedSecretsFile` in ToWatchCore), AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read (looked for once per launch). Macs without a Secure Enclave keep the Keychain. The decrypted file is kept in memory until the next save. iOS items are readable after the first unlock, so a sync or Siri action on a locked iPhone can use them. `SecretStore.read` throws `Unreadable` when reading failed and returns nil only when nothing is saved: callers must not treat a failed read as "signed out". `load` is the non-throwing form. |
 | Signing | `Config/App.xcconfig` | Ad-hoc by default (`CODE_SIGN_IDENTITY = -`). Set `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY = Apple Development` in Secrets so App Intents run. |
 | Entitlements | `project.yml` | macOS sandbox: network client and user-selected file read/write. Not used on iOS (`CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` is empty). |
 | Alternate icons | `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=iphone*]` | iOS only. macOS swaps the Dock icon at runtime instead. |
@@ -537,10 +540,10 @@ the local date.
   decides whether to upload by comparing only what the user owns (titles, watch data, ratings, notes,
   collections), not TMDB or IMDb details, which each device refreshes at its own times. An empty library whose
   base had 5 or more titles merges as a first sync (`usableBase`), so a lost store can't empty the file.
-- **App (`Sync/`):** `DropboxClient` does OAuth with PKCE (redirect `db-<app key>://2/token`, caught by
-  `WebAuthenticationSession`), download, and upload with the file's `rev`, so a concurrent write from another
+- **Driver (`ToWatchCore/Sync/`):** `DropboxClient` does OAuth with PKCE (redirect `db-<app key>://2/token`,
+  caught by the app's `WebAuthenticationSession`, which turns a closed sheet into `CancellationError`), download, and upload with the file's `rev`, so a concurrent write from another
   device comes back as a conflict and the sync re-merges. Its own `URLSession` gives up after 30 s of silence
-  and caches nothing. `DropboxSync` keeps the refresh token in `SecretStore`
+  and caches nothing. `DropboxSync` keeps the refresh token in the `Vault` it's given (the app's is `SecretStore`)
   and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`. After applying
   a downloaded file it saves that file as the base, so a retry after a conflict merges against it. Unsaved
   changes from a batch (list import, refresh) are saved before applying, so the merge can't drop them.
@@ -737,8 +740,7 @@ tokens, keys, or a URL error (it carries the URL, which holds the OMDb key).
 
 ### Unit tests
 
-There are 59 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/ToWatchCoreTests.swift`, written with
-Swift Testing. They cover:
+There are 75 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/`, written with Swift Testing. They cover:
 - decoding the recorded fixtures
 - date parsing
 - watch status and next-episode logic
@@ -750,6 +752,13 @@ Swift Testing. They cover:
 - spoken summaries
 - the trailer language fallback
 - cleaning up rules when a space or tag is deleted
+- sync applying only the titles a merge changed, merging duplicate titles, a refresh stopping on a rejected token,
+  opening a library saved before schema versioning, and every show's progress from one fetch
+- `DropboxSync` against a fake Dropbox (`DropboxSyncTests.swift`): an unchanged file costs one revision request,
+  edits reach the other device, a conflict merges again, a revoked sign-in signs out, disconnecting mid-sync uploads
+  nothing, and saves that keep landing end the sync quietly
+- `SealedSecretsFile` (`SealedSecretsFileTests.swift`, Macs with a Secure Enclave): secrets read back, saving one
+  keeps the others, a damaged file is replaced, and one that can't be read is neither empty nor overwritten
 
 ```bash
 cd Packages/ToWatchCore && swift test

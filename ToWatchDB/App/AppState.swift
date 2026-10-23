@@ -95,7 +95,7 @@ final class AppState {
         }
     }
 
-    let dropbox = DropboxSync()
+    let dropbox = DropboxSync(client: DropboxClient.bundledAppKey.map { DropboxClient(appKey: $0) }, vault: .secretStore)
     /// Sample-data and snapshot runs use a throwaway library, which must never reach Dropbox.
     private let isInMemory: Bool
     @ObservationIgnored private var dropboxDelay: Task<Void, Never>?

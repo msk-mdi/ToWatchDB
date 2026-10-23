@@ -31,6 +31,13 @@ final class ImageCache: @unchecked Sendable {
         cache.setObject(entry, forKey: url as NSURL, cost: entry.image.bytesPerRow * entry.image.height)
     }
 
+    /// An answer other than success, which isn't an image. `isFinal` when asking again won't change it: the image
+    /// is gone (TMDB answers 404 for a removed poster) rather than the server busy or rate limiting.
+    struct BadStatus: Error {
+        let code: Int
+        var isFinal: Bool { (400..<500).contains(code) && code != 408 && code != 429 }
+    }
+
     /// Downloads in progress, so views showing the same image (a title on two pages, an actor in two casts)
     /// share one download and one decode.
     private var inFlight: [URL: Task<Entry, Error>] = [:]
@@ -44,7 +51,10 @@ final class ImageCache: @unchecked Sendable {
             // Unstructured, so one view scrolling away (cancelling its wait) doesn't cancel the others'.
             let task = Task.detached(priority: .userInitiated) { [self] in
                 defer { lock.withLock { inFlight[url] = nil } }
-                let (data, _) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await URLSession.shared.data(from: url)
+                if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+                    throw BadStatus(code: status)
+                }
                 guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                       let image = CGImageSourceCreateImageAtIndex(
                           source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
@@ -112,6 +122,14 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
                 return
             } catch let error as URLError where error.code == .cancelled {
                 // Scrolled away or the page closed; not a failure.
+                return
+            } catch let error as ImageCache.BadStatus where error.isFinal {
+                // Retried over the next few minutes by every view showing it, it only got the same answer.
+                failed = true
+                return
+            } catch let error as URLError where error.code == .cannotDecodeContentData {
+                // The server sent something that isn't an image; sending it again won't help.
+                failed = true
                 return
             } catch {
                 failed = true

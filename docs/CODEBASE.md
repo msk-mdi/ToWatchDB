@@ -445,7 +445,7 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 
 | File | What |
 |---|---|
-| `Components/RemoteImage.swift` | `ImageCache`, an in-memory `NSCache` of decoded `CGImage`s (256 MB on Mac, 128 MB on iOS). Decoding happens off the main thread. `RemoteImage` draws cached images on the first frame and fades in only fresh downloads, and ignores a download that finishes after its URL changed. **Use it instead of `AsyncImage`.** |
+| `Components/RemoteImage.swift` | `ImageCache`, an in-memory `NSCache` of decoded `CGImage`s (256 MB on Mac, 128 MB on iOS). Decoding happens off the main thread. `RemoteImage` draws cached images on the first frame and fades in only fresh downloads, and ignores a download that finishes after its URL changed. A failed download is retried while it's on screen, except a 4xx answer (a removed poster is a 404) or a body that isn't an image. **Use it instead of `AsyncImage`.** |
 | `Components/PosterImage.swift` | `PosterImage`, a 2:3 poster with a placeholder, and `BackdropImage` |
 | `Components/EmptyState.swift` | `.centeredEmptyState(isShown) { … }`. Every empty message is centered on the page, even over a scroll view with a header. |
 | `Components/PageHost.swift` | See §5.4 |

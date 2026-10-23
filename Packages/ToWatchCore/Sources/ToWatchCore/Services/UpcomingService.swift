@@ -60,13 +60,14 @@ public enum UpcomingService {
     /// unwatched episodes are loaded, instead of every movie and every episode in the library.
     @MainActor
     public static func upcoming(in context: ModelContext, now: Date = .now) -> [UpcomingItem] {
-        let today = startOfToday(now)
+        // No force unwraps in the predicates: SwiftData can't translate them, and the fetches came back empty.
+        let today = startOfToday(now), past = Date.distantPast
         let movies = FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.releaseDate != nil && $0.releaseDate! >= today },
+            predicate: #Predicate { ($0.releaseDate ?? past) >= today },
             sortBy: [SortDescriptor(\.releaseDate)]
         )
         var episodes = FetchDescriptor<Episode>(
-            predicate: #Predicate { !$0.isWatched && $0.seasonNumber > 0 && $0.airDate != nil && $0.airDate! >= today },
+            predicate: #Predicate { !$0.isWatched && $0.seasonNumber > 0 && ($0.airDate ?? past) >= today },
             sortBy: [SortDescriptor(\.airDate), SortDescriptor(\.seasonNumber), SortDescriptor(\.episodeNumber)]
         )
         // The abandoned check below reads each episode's show; without this it ran a query per episode.

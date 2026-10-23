@@ -541,7 +541,8 @@ the local date.
   a downloaded file it saves that file as the base, so a retry after a conflict merges against it. Unsaved
   changes from a batch (list import, refresh) are saved before applying, so the merge can't drop them.
 - **Snapshots** are taken off the main thread (`DropboxSync.snapshot`), from what's saved, and taken again if a
-  save lands meanwhile. The upload is compressed (§4.6), so devices on 1.4.2 or older can't read the file.
+  save lands meanwhile (as is the merge), at most 5 times: past that the sync stops quietly and the next save,
+  activation, or quit syncs the edits. The upload is compressed (§4.6), so devices on 1.4.2 or older can't read the file.
 - **Skipping unchanged files:** the revision the base matches is kept (`syncedRev`, in `UserDefaults`). A sync
   first asks Dropbox for the file's revision (`files/get_metadata`). If it's unchanged and nothing was saved
   here, the sync stops. If only this device changed, merging against the base would give back this library, so

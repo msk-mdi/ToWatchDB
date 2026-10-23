@@ -220,8 +220,9 @@ final class DropboxSync {
                 // With the file still the base, merging gives back this device's library: skip merging and
                 // applying it. Unless the base isn't usable (a lost library), which merges as a first sync.
                 if let remote, !(isBase && LibrarySync.usableBase(remote, local: local) != nil) {
-                    while true {
+                    for pass in 1... {
                         try Task.checkCancellation()
+                        if pass > Self.maxPasses { throw LibraryKeptChanging() }
                         // Which titles the merge changes is worked out here too, so applying it writes only those.
                         let (merged, changes) = try await Self.offMain { [local] in
                             let merged = LibrarySync.merge(base: LibrarySync.usableBase(Self.loadBase(), local: local), local: local, remote: remote)
@@ -286,6 +287,11 @@ final class DropboxSync {
                 return
             } catch is CancellationError {
                 return
+            } catch is LibraryKeptChanging {
+                // Not again right away, which would be the same race: the edits stay unsynced (`syncedVersion`
+                // is behind), so the next save, activation, or quit syncs them.
+                needsAnotherPass = false
+                return
             } catch {
                 lastError = error.localizedDescription
                 return
@@ -297,7 +303,7 @@ final class DropboxSync {
     /// main thread with a context of its own. A save landing meanwhile could leave it half old, half new, so
     /// it's taken again then.
     private func snapshot(library: () -> LibraryService, version: () -> Int) async throws -> (LibraryBackup, Int) {
-        while true {
+        for _ in 1...Self.maxPasses {
             // Saves can keep landing (a list import), and quitting waits for the sync only so long.
             try Task.checkCancellation()
             let snapshotVersion = version()
@@ -305,7 +311,16 @@ final class DropboxSync {
             let backup = try await Self.offMain { try LibraryService.makeBackup(in: ModelContext(container)) }
             if version() == snapshotVersion { return (backup, snapshotVersion) }
         }
+        throw LibraryKeptChanging()
     }
+
+    /// How many times a snapshot or merge starts over because a save landed meanwhile. Each pass reads the whole
+    /// library (about 2 s for 300 shows), and nothing else cancels a sync: edits saved faster than that kept it
+    /// going, with the launch refresh waiting on it.
+    private static let maxPasses = 5
+
+    /// Saves kept landing during a sync. It stops without an error, leaving them for the next sync.
+    private struct LibraryKeptChanging: Error {}
 
     /// Runs a request with a valid access token, refreshing it first if it expired. The token is checked to
     /// belong to `session`, since getting one can wait on the network.

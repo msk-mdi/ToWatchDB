@@ -151,7 +151,7 @@ public struct LibraryService {
         var count = 0
         var rejection: (any Error)?
         await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) { id in
-            await Result { try await client.tvShowWithSeasons(id: id) }
+            await Self.result { try await client.tvShowWithSeasons(id: id) }
         } apply: { id, result in
             rejection = rejection ?? Self.tokenRejection(in: result)
             // A title deleted while downloading (by the user or a sync) is skipped: writing to it can trap.
@@ -162,7 +162,7 @@ public struct LibraryService {
         } until: { rejection != nil }
         if rejection == nil {
             await Self.forEachConcurrently(Array(moviesByID.keys), limit: 4) { id in
-                await Result { try await client.movie(id: id) }
+                await Self.result { try await client.movie(id: id) }
             } apply: { id, result in
                 rejection = rejection ?? Self.tokenRejection(in: result)
                 guard let detail = try? result.get(), let movie = moviesByID[id], movie.isLive else { return }
@@ -234,7 +234,7 @@ public struct LibraryService {
         var changed = false
         var isRejected = false
         await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) { id in
-            await Result { try await client.tvExternalIDs(id: id) }
+            await Self.result { try await client.tvExternalIDs(id: id) }
         } apply: { id, result in
             if Self.tokenRejection(in: result) != nil { isRejected = true }
             guard let ids = try? result.get(), let show = showsByID[id], show.isLive else { return }
@@ -246,6 +246,11 @@ public struct LibraryService {
             changed = true
         } until: { isRejected }
         if changed { save() }
+    }
+
+    /// The outcome of `body`, for batches that look at each failure.
+    nonisolated static func result<T: Sendable>(_ body: @Sendable () async throws -> T) async -> Result<T, any Error> {
+        do { return .success(try await body()) } catch { return .failure(error) }
     }
 
     /// The error, if TMDB turned the token down (a wrong or revoked one): every other request would fail too.

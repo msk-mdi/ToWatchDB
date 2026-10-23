@@ -1,0 +1,37 @@
+# Runs the core tests and builds the app for macOS and the iOS Simulator on every push to main and every pull
+# request. Warnings fail the build: the project builds without any, and this keeps it that way.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the Xcode in use
+        run: xcodebuild -version
+
+      - name: Core tests
+        working-directory: Packages/ToWatchCore
+        run: swift test
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build for macOS
+        run: >
+          xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'generic/platform=macOS'
+          CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build
+
+      - name: Build for the iOS Simulator
+        run: >
+          xcodebuild -project ToWatchDB.xcodeproj -scheme ToWatchDB -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build

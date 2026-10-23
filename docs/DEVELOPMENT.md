@@ -81,7 +81,7 @@ for Mac and `ToWatchDB.ipa` for iPhone and iPad.
 ## Layout
 
 - `Packages/ToWatchCore` — TMDB, IMDb and Seerr clients, SwiftData models, library/watch-state/upcoming logic,
-  backup and sync merging. Tested with `swift test`.
+  backup, sync merging and the Dropbox sync driver, the macOS secrets file. Tested with `swift test`.
 - `ToWatchDB/` — SwiftUI app (sidebar or tab bar layouts, detail views, settings, Dropbox sync, Siri actions).
 - `Scripts/generate-icons.swift` — redraws the themed app icons and their Settings previews.
 - `Scripts/snapshot-mac.sh` — debug visual pass: captures each screen's window on macOS.
@@ -90,6 +90,9 @@ for Mac and `ToWatchDB.ipa` for iPhone and iPad.
 navigation and layouts, performance choices, rules to follow, debugging tools, and how-tos.
 
 ## Checks
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the core tests and builds both platforms, with warnings as
+errors, on every push to `main` and every pull request. The same, locally:
 
 ```bash
 cd Packages/ToWatchCore && swift test

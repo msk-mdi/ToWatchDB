@@ -730,8 +730,10 @@ private final class SyncDevice {
     func sync(_ file: inout LibraryBackup?) throws -> Bool {
         var changed = false
         if let remote = file {
-            let merged = LibrarySync.merge(base: base, local: try library.makeBackup(), remote: remote)
-            changed = try library.applySyncedBackup(merged)
+            // Applied the way the app does: writing only the titles the merge changed.
+            let local = try library.makeBackup()
+            let merged = LibrarySync.merge(base: base, local: local, remote: remote)
+            changed = try library.applySyncedBackup(merged, changes: LibrarySync.changes(from: local, to: merged))
         }
         let snapshot = LibrarySync.normalized(try library.makeBackup())
         file = snapshot
@@ -1265,4 +1267,56 @@ private final class SeerrSignInProtocol: URLProtocol {
         #expect(message?.contains("permission") == true)
     }
     do { try await expired.deleteRequest(id: 7) } catch SeerrError.unauthorized {} catch { Issue.record("\(error)") }
+}
+
+@MainActor @Test func syncChangesListOnlyTitlesTheMergeChanges() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+    let local = try library.makeBackup()
+    #expect(LibrarySync.changes(from: local, to: LibrarySync.merge(base: local, local: local, remote: local)) == .init())
+
+    // Another device watched an episode and added a movie this one doesn't have.
+    var remote = LibrarySync.normalized(local)
+    let showIndex = try #require(remote.shows.firstIndex { $0.tmdbID == show.tmdbID })
+    remote.shows[showIndex].seasons[1].episodes[0].isWatched = true
+    remote.shows[showIndex].seasons[1].episodes[0].watchedDate = date("2026-01-05")
+    var newMovie = remote.movies[0]
+    newMovie.tmdbID = 999
+    remote.movies.append(newMovie)
+    let merged = LibrarySync.merge(base: local, local: local, remote: remote)
+    let changes = LibrarySync.changes(from: local, to: merged)
+    #expect(changes.shows == [show.tmdbID])
+    #expect(changes.movies == [999])
+    #expect(!changes.movies.contains(movie.tmdbID))
+}
+
+@MainActor @Test func applyingOnlyChangedTitlesMatchesApplyingAll() throws {
+    func device() throws -> LibraryService {
+        let library = try makeLibrary()
+        let movie = library.insertMovie(try fixture("movie_inception"))
+        library.addNote("Seen twice", to: movie)
+        _ = try insertSeverance(into: library)
+        return library
+    }
+    let full = try device(), partial = try device()
+    let local = try full.makeBackup()
+    var remote = LibrarySync.normalized(local)
+    remote.shows[0].seasons[1].episodes[2].isWatched = true
+    remote.shows[0].seasons[1].episodes[2].watchedDate = date("2026-02-01")
+    remote.shows[0].userRating = 9
+    remote.movies[0].notes.append(.init(text: "From the phone", createdAt: date("2026-02-02"), updatedAt: date("2026-02-02"), id: UUID()))
+    let merged = LibrarySync.merge(base: local, local: local, remote: remote)
+
+    #expect(try full.applySyncedBackup(merged))
+    let partialLocal = try partial.makeBackup()
+    #expect(try partial.applySyncedBackup(merged, changes: LibrarySync.changes(from: partialLocal, to: merged)))
+    let encoder = BackupCoding.compactEncoder
+    #expect(try encoder.encode(LibrarySync.normalized(full.makeBackup())) == encoder.encode(LibrarySync.normalized(partial.makeBackup())))
+    // A title gone from the merge is still deleted, though nothing else about the library changed.
+    var withoutMovie = merged
+    withoutMovie.movies = []
+    let before = try partial.makeBackup()
+    #expect(try partial.applySyncedBackup(withoutMovie, changes: LibrarySync.changes(from: before, to: withoutMovie)))
+    #expect(try partial.context.fetch(FetchDescriptor<Movie>()).isEmpty)
 }

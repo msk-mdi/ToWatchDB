@@ -523,7 +523,10 @@ the local date.
   data (watched, rated, notes): otherwise a refresh here removed it because TMDB dropped it, and taking it back
   restored phantom episodes. Each device's own refresh adds real new episodes. Same-name tags settle on the
   smaller UUID.
-  `applySyncedBackup` then makes the store match the merge exactly, writing only real changes. `sameContent`
+  `applySyncedBackup` then makes the store match the merge exactly, writing only real changes. Given
+  `LibrarySync.changes(from:to:)` (worked out off the main thread with the merge), it writes only the titles the
+  merge changed and only checks the rest are still there: applying all of them walked every episode on the main
+  thread (about 0.75 s for 300 shows) even for one edit. `sameContent`
   decides whether to upload by comparing only what the user owns (titles, watch data, ratings, notes,
   collections), not TMDB or IMDb details, which each device refreshes at its own times. An empty library whose
   base had 5 or more titles merges as a first sync (`usableBase`), so a lost store can't empty the file.

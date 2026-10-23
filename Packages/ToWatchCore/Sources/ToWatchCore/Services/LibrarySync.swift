@@ -168,6 +168,61 @@ public enum LibrarySync {
         }
     }
 
+    /// The titles `applySyncedBackup` has to write so the library matches a merge, by TMDB ID.
+    public struct TitleChanges: Sendable, Equatable {
+        public var movies: Set<Int> = []
+        public var shows: Set<Int> = []
+    }
+
+    /// The titles new in `merged`, or whose record differs from `local`'s: what applying it to a library that
+    /// holds `local` changes. Applying every title walked every episode in the library on the main thread, about
+    /// 0.8 s for 300 shows, for an edit to one. Records are compared as a file writes them (dates to the whole
+    /// second, lists in a stable order), so a difference the file can't show doesn't count; any other does.
+    public static func changes(from local: LibraryBackup, to merged: LibraryBackup) -> TitleChanges {
+        func stableNotes(_ notes: [LibraryBackup.NoteRecord]) -> [LibraryBackup.NoteRecord] {
+            notes.sorted { ($0.createdAt, $0.text, $0.id?.uuidString ?? "") < ($1.createdAt, $1.text, $1.id?.uuidString ?? "") }
+        }
+        func sortedIDs(_ ids: [UUID]) -> [UUID] { ids.sorted { $0.uuidString < $1.uuidString } }
+        func stable(_ movie: LibraryBackup.MovieRecord) -> LibraryBackup.MovieRecord {
+            var movie = movie
+            movie.notes = stableNotes(movie.notes)
+            movie.spaceIDs = sortedIDs(movie.spaceIDs)
+            movie.tagIDs = sortedIDs(movie.tagIDs)
+            return movie
+        }
+        func stable(_ show: LibraryBackup.ShowRecord) -> LibraryBackup.ShowRecord {
+            var show = show
+            show.notes = stableNotes(show.notes)
+            show.spaceIDs = sortedIDs(show.spaceIDs)
+            show.tagIDs = sortedIDs(show.tagIDs)
+            show.seasons = show.seasons.sorted { $0.seasonNumber < $1.seasonNumber }.map { season in
+                var season = season
+                season.episodes = season.episodes.sorted { $0.episodeNumber < $1.episodeNumber }.map { episode in
+                    var episode = episode
+                    episode.notes = stableNotes(episode.notes)
+                    return episode
+                }
+                return season
+            }
+            return show
+        }
+        /// Titles `merged` lists that need writing. A title `local` lists twice is always written: which of its
+        /// models the apply keeps isn't known here.
+        func changed<R: Encodable>(_ local: [R], _ merged: [R], id: (R) -> Int, stable: (R) -> R) -> Set<Int> {
+            var byID: [Int: R] = [:], listedTwice = Set<Int>()
+            for record in local where byID.updateValue(record, forKey: id(record)) != nil { listedTwice.insert(id(record)) }
+            let encoder = BackupCoding.compactEncoder
+            return Set(merged.compactMap { record in
+                let key = id(record)
+                guard !listedTwice.contains(key), let old = byID[key],
+                      let before = try? encoder.encode(stable(old)), before == (try? encoder.encode(stable(record))) else { return key }
+                return nil
+            })
+        }
+        return TitleChanges(movies: changed(local.movies, merged.movies, id: \.tmdbID, stable: stable),
+                            shows: changed(local.shows, merged.shows, id: \.tmdbID, stable: stable))
+    }
+
     // MARK: Merging
 
     /// One record as it was at the last sync (nil if it's new or this is the first sync), here, and in the file.
@@ -342,18 +397,22 @@ public extension LibraryService {
     /// Makes the library match a merged snapshot: user state is set exactly, titles and collections missing
     /// from it are deleted, and titles new to this device are created from its metadata. Existing metadata is
     /// left alone, except for IMDb ratings newer than this device's. Returns whether anything changed.
+    ///
+    /// `changes`, from `LibrarySync.changes(from:to:)` against a snapshot of what's saved, limits the writing to the
+    /// titles it lists; every other title is only checked to still be there. Without it, every title is written.
     @discardableResult
-    func applySyncedBackup(_ backup: LibraryBackup) throws -> Bool {
+    func applySyncedBackup(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges? = nil) throws -> Bool {
         // Half applied, the changes stayed pending and were saved with the next unrelated edit.
-        do { return try applyUnsaved(backup) } catch {
+        do { return try applyUnsaved(backup, changes: changes) } catch {
             context.rollback()
             throw error
         }
     }
 
-    private func applyUnsaved(_ backup: LibraryBackup) throws -> Bool {
+    private func applyUnsaved(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges?) throws -> Bool {
         let notes = try notesByOwner()
-        let stored = try Self.seasonsAndEpisodes(in: context)
+        // A few shows read their own seasons and episodes; many (a first sync) read them all in one fetch each.
+        let stored = changes.map { $0.shows.count > 50 } ?? true ? try Self.seasonsAndEpisodes(in: context) : nil
         let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
                                 modelKey: \.uuid) { record in
             let space = Space(name: record.name, symbolName: record.symbolName, colorName: record.colorName)
@@ -394,9 +453,10 @@ public extension LibraryService {
         }
 
         var movies = FetchDescriptor<Movie>()
-        movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
+        if changes == nil { movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags] }
         try upsert(backup.movies, existing: context.fetch(movies), key: \.tmdbID,
                    modelKey: \.tmdbID, make: makeMovie) { movie, record in
+            guard changes?.movies.contains(record.tmdbID) ?? true else { return }
             assign(movie, \.isWatched, record.isWatched)
             assign(movie, \.watchedDate, record.watchedDate)
             assign(movie, \.userRating, record.userRating)
@@ -410,9 +470,10 @@ public extension LibraryService {
         }
 
         var shows = FetchDescriptor<TVShow>()
-        shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags]
+        if changes == nil { shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags] }
         try upsert(backup.shows, existing: context.fetch(shows), key: \.tmdbID,
                    modelKey: \.tmdbID, make: makeShow) { show, record in
+            guard changes?.shows.contains(record.tmdbID) ?? true else { return }
             assign(show, \.userRating, record.userRating)
             assign(show, \.isInBacklog, record.isInBacklog)
             assign(show, \.isFavorite, record.isFavorite)
@@ -422,12 +483,20 @@ public extension LibraryService {
             setNotes(record.notes, on: notes.shows[show.persistentModelID]) { $0.show = show }
             if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
             if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }
-            setEpisodes(record.seasons, on: show, existing: stored, notes: notes.episodes)
+            setEpisodes(record.seasons, on: show, existing: stored ?? Self.seasonsAndEpisodes(of: show), notes: notes.episodes)
         }
 
         guard context.hasChanges else { return false }
         try commit()
         return true
+    }
+
+    /// One show's seasons and episodes, shaped like `seasonsAndEpisodes(in:)`.
+    private static func seasonsAndEpisodes(of show: TVShow)
+        -> (seasons: [PersistentIdentifier: [Season]], episodes: [PersistentIdentifier: [Episode]]) {
+        let seasons = show.seasons ?? []
+        return ([show.persistentModelID: seasons],
+                Dictionary(seasons.map { ($0.persistentModelID, $0.episodes ?? []) }) { first, _ in first })
     }
 
     /// Creates, updates, and deletes models so they match the records one-to-one by key.

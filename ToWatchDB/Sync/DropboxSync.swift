@@ -222,7 +222,11 @@ final class DropboxSync {
                 if let remote, !(isBase && LibrarySync.usableBase(remote, local: local) != nil) {
                     while true {
                         try Task.checkCancellation()
-                        let merged = try await Self.offMain { [local] in LibrarySync.merge(base: LibrarySync.usableBase(Self.loadBase(), local: local), local: local, remote: remote) }
+                        // Which titles the merge changes is worked out here too, so applying it writes only those.
+                        let (merged, changes) = try await Self.offMain { [local] in
+                            let merged = LibrarySync.merge(base: LibrarySync.usableBase(Self.loadBase(), local: local), local: local, remote: remote)
+                            return (merged, LibrarySync.changes(from: local, to: merged))
+                        }
                         try checkSession()
                         let service = library()
                         // A batch (a list import, a refresh) changes models and saves only when it's done, so its
@@ -234,7 +238,7 @@ final class DropboxSync {
                             (local, localVersion) = try await snapshot(library: library, version: version)
                             continue
                         }
-                        if try service.applySyncedBackup(merged) {
+                        if try service.applySyncedBackup(merged, changes: changes) {
                             (local, localVersion) = try await snapshot(library: library, version: version)
                         }
                         break

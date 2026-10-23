@@ -113,7 +113,14 @@ enum AppKitAccent {
 
     private static let installed: Void = {
         let selector = #selector(getter: NSColor.controlAccentColor)
-        guard let method = class_getClassMethod(NSColor.self, selector) else { return }
+        // Only while it's still the plain getter this replaces (returns an object, takes no arguments): if AppKit
+        // changes it, calling through the wrong signature would crash, so AppKit keeps its own accent instead.
+        guard let method = class_getClassMethod(NSColor.self, selector),
+              let encoding = method_getTypeEncoding(method), String(cString: encoding) == "@16@0:8" else {
+            Logger(subsystem: "com.mehdi.towatchdb", category: "appearance")
+                .error("NSColor.controlAccentColor changed shape; menus keep AppKit's accent color")
+            return
+        }
         typealias Getter = @convention(c) (AnyClass, Selector) -> NSColor
         let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
         let replacement: @convention(block) (AnyClass) -> NSColor = { type in override.withLockUnchecked { $0 } ?? original(type, selector) }

@@ -681,6 +681,9 @@ To measure page switches, see §9.
 
 ## 8. Rules and gotchas
 
+- **The Mac accent color replaces an AppKit getter.** `AppKitAccent` (`App/Appearance.swift`) swaps the
+  implementation of `NSColor.controlAccentColor` so menus and pop-up buttons use the theme color. It only does so
+  while the getter's type encoding is still `@16@0:8`; otherwise it logs and leaves AppKit's color alone.
 - **Changing a model needs a schema version.** The library opens through `ToWatchMigrationPlan` with
   `ToWatchSchema.current` (`Models.swift`). Version 1 is every release through 2.0, and its `models` are the
   classes in use today. Before editing any `@Model` class, copy each class as it is into `ToWatchSchemaV1` (as

@@ -33,6 +33,8 @@ public struct ListEntry: Hashable, Sendable, Identifiable {
 }
 
 public enum ListImport {
+    static let maxLineLength = 500
+
     /// Reads one title per line. "MOVIES" / "TV SHOWS" headings switch the kind (movies until one appears);
     /// underlines, blank lines, bullets, and numbering are skipped. Anything after the year is ignored.
     public static func parse(_ text: String) -> [ListEntry] {
@@ -42,7 +44,8 @@ public enum ListImport {
         // at the start would otherwise stick to the first line and hide a heading there.
         for (index, rawLine) in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated() {
             var line = rawLine.trimmingCharacters(in: .whitespaces.union(["\u{FEFF}"]))
-            guard !line.isEmpty, !line.allSatisfy({ "=-_#*~".contains($0) }) else { continue }
+            // No title is this long, and the year's pattern backtracks: a long line with many "(" took quadratic time.
+            guard !line.isEmpty, line.count <= Self.maxLineLength, !line.allSatisfy({ "=-_#*~".contains($0) }) else { continue }
             if let heading = heading(line) {
                 kind = heading
                 continue

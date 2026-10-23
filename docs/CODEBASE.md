@@ -309,7 +309,8 @@ one from `SharedLibrary.service`. A save that fails is rolled back, logged, and 
   - Spaces match by UUID. Tags match by UUID or name. Smart-list rules are remapped to the tags and spaces
     that were kept.
 - **Lists of titles (`ListImport.swift`):** `ListImport.parse` reads plain text, one title per line
-  ("Arrival (2016) - drama"), with optional MOVIES / TV SHOWS headings. `LibraryService.importList` searches
+  ("Arrival (2016) - drama"), with optional MOVIES / TV SHOWS headings, skipping lines over 500 characters. The
+  file is read and parsed off the main thread. `LibraryService.importList` searches
   TMDB for each (with the year, which matches any release date, then without), picks a result with
   `ListImport.bestMatch` (exact title first, then year; listed years are often regional), downloads 4 at a time,
   and saves once. It can mark titles watched (no date) or backlog, never un-marking. File ▸ Import List of Titles….

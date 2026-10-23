@@ -1379,3 +1379,10 @@ private final class CountingUnauthorizedProtocol: URLProtocol {
     #expect(movie.isWatched && movie.notes?.map(\.text) == ["Kept"])
     #expect(try context.fetchCount(FetchDescriptor<Episode>()) > 0)
 }
+
+@Test func listImportSkipsLinesTooLongToBeTitles() {
+    let long = String(repeating: "(x ", count: 2000) + "(2016)"
+    let entries = ListImport.parse("Arrival (2016)\n\(long)\nSeverance")
+    #expect(entries.map(\.label) == ["Arrival (2016)", "Severance"])
+    #expect(entries.map(\.line) == [1, 3])
+}

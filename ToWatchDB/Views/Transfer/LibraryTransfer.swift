@@ -144,19 +144,22 @@ private struct LibraryFileTransfers: ViewModifier {
     }
 
     private func readList(from url: URL) {
-        let isScoped = url.startAccessingSecurityScopedResource()
-        defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let data = try Data(contentsOf: url)
-            let text = ListImport.decodeText(data)
-            let entries = ListImport.parse(text)
-            guard !entries.isEmpty else {
-                showError("No titles found in “\(url.lastPathComponent)”. Put one title per line, like “Arrival (2016)”.")
-                return
+        Task {
+            let isScoped = url.startAccessingSecurityScopedResource()
+            defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                // Off the main thread like a backup: a large file froze the window while it was read and parsed.
+                let entries = try await Task.detached(priority: .userInitiated) {
+                    ListImport.parse(ListImport.decodeText(try Data(contentsOf: url)))
+                }.value
+                guard !entries.isEmpty else {
+                    showError("No titles found in “\(url.lastPathComponent)”. Put one title per line, like “Arrival (2016)”.")
+                    return
+                }
+                listDraft = ListImportDraft(fileName: url.lastPathComponent, entries: entries)
+            } catch {
+                showError(error.localizedDescription)
             }
-            listDraft = ListImportDraft(fileName: url.lastPathComponent, entries: entries)
-        } catch {
-            showError(error.localizedDescription)
         }
     }
 

@@ -249,6 +249,13 @@ private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
         #expect(grouped.lastWatched == single.lastWatched)
     }
     #expect(all[show.persistentModelID]?.lastWatched == date("2026-04-01")) // Specials don't count.
+
+    // Every season and episode, specials too, traces back to its show: a deleted one can't be read.
+    let index = try TVShow.progressIndex(in: library.context, asOf: now)
+    let seasons = show.seasons ?? []
+    #expect(seasons.allSatisfy { index.showOf[$0.persistentModelID] == show.persistentModelID })
+    #expect(seasons.flatMap { $0.episodes ?? [] }.allSatisfy { index.showOf[$0.persistentModelID] == show.persistentModelID })
+    #expect(index.showOf.count == seasons.count + seasons.flatMap { $0.episodes ?? [] }.count)
 }
 
 @MainActor @Test func refreshMergeKeepsWatchData() throws {

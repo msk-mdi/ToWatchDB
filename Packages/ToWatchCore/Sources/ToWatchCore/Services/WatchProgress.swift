@@ -36,21 +36,32 @@ public extension TVShow {
     /// season: the first read of each `show.seasons` and `season.episodes` materializes the relationship,
     /// which took about 3 s for 300 shows of 72 episodes (prefetching didn't help), against about 0.6 s here.
     static func progressSummaries(in context: ModelContext, asOf now: Date = .now) throws -> [PersistentIdentifier: ShowProgress] {
-        var showBySeason: [PersistentIdentifier: PersistentIdentifier] = [:]
-        for season in try context.fetch(FetchDescriptor<Season>(predicate: #Predicate { $0.seasonNumber > 0 })) {
-            if let show = season.show { showBySeason[season.persistentModelID] = show.persistentModelID }
+        try progressIndex(in: context, asOf: now).progress
+    }
+
+    /// `progressSummaries`, with the show every season and episode belongs to: a deleted one can't be read, so
+    /// this is how a cache of the progress finds the show to work out again.
+    static func progressIndex(in context: ModelContext, asOf now: Date = .now) throws
+        -> (progress: [PersistentIdentifier: ShowProgress], showOf: [PersistentIdentifier: PersistentIdentifier]) {
+        var showOf: [PersistentIdentifier: PersistentIdentifier] = [:]
+        var regularSeasons = Set<PersistentIdentifier>()
+        for season in try context.fetch(FetchDescriptor<Season>()) {
+            guard let show = season.show else { continue }
+            showOf[season.persistentModelID] = show.persistentModelID
+            if season.seasonNumber > 0 { regularSeasons.insert(season.persistentModelID) }
         }
         var episodesByShow: [PersistentIdentifier: [Episode]] = [:]
         for episode in try context.fetch(FetchDescriptor<Episode>()) {
-            guard let season = episode.season, let show = showBySeason[season.persistentModelID] else { continue }
-            episodesByShow[show, default: []].append(episode)
+            guard let season = episode.season?.persistentModelID, let show = showOf[season] else { continue }
+            showOf[episode.persistentModelID] = show
+            if regularSeasons.contains(season) { episodesByShow[show, default: []].append(episode) }
         }
         var progress: [PersistentIdentifier: ShowProgress] = [:]
         for show in try context.fetch(FetchDescriptor<TVShow>()) {
             let episodes = episodesByShow[show.persistentModelID] ?? []
             progress[show.persistentModelID] = show.progressSummary(asOf: now, forEachEpisode: { episodes.forEach($0) })
         }
-        return progress
+        return (progress, showOf)
     }
 
     /// `progressSummary` over the episodes `forEachEpisode` visits: the show's regular episodes, in any order.

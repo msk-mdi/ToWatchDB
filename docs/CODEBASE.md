@@ -637,8 +637,9 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
    `forEachRegularEpisode` (unsorted) or `progressSummary()`, which also returns `lastWatched`.
 8. **Share per-show progress.** `appState.showProgress()` keeps every show's `ShowProgress`; the library grids
    and Next to Watch read it instead of walking episodes themselves. A save recomputes only the shows whose
-   show, season, or episode it inserted or updated. Deleting a show, season, or episode, a new day, or more
-   than 2,000 changes rebuild it all (§7, item 18); deleting anything else keeps it.
+   show, season, or episode it inserted or updated. A deleted show is dropped, and a show that lost a season or
+   episode is recomputed (the map records each one's show, since a deleted model can't be read). A new day, more
+   than 2,000 changes, or a deleted season or episode it never read rebuild it all (§7, item 18).
 9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
    save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.

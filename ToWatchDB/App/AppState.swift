@@ -152,13 +152,8 @@ final class AppState {
                     // Nothing cached before a deletion is served again, and it may hold the deleted models.
                     self.derivedCache.removeAll()
                 }
-                // Progress holds only shows' episodes, so deleting a movie, a note, or a collection keeps it: a
-                // rebuild reads every episode again (about 0.7 s for 300 shows).
-                if deleted.contains(where: { Self.progressEntities.contains($0.entityName) }) {
-                    self.progressCache = nil
-                } else {
-                    self.noteProgressChanges(changed)
-                }
+                self.noteProgressDeletions(deleted)
+                self.noteProgressChanges(changed)
                 if !self.isInMemory { self.dropbox.noteSave() }
                 // Here rather than in a view: on Mac, edits from a title window, Settings, or Siri with the main
                 // window closed weren't synced until it reopened.
@@ -295,10 +290,10 @@ final class AppState {
         let day = Calendar.current.startOfDay(for: .now)
         let context = container.mainContext
         guard var cache = progressCache, cache.day == day else {
-            let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
-            progressCache = (day, progress)
+            let index = (try? TVShow.progressIndex(in: context)) ?? (progress: [:], showOf: [:])
+            progressCache = (day, index.progress, index.showOf)
             progressChanges = []
-            return progress
+            return index.progress
         }
         guard !progressChanges.isEmpty else { return cache.progress }
         var shows: [PersistentIdentifier: TVShow] = [:]
@@ -309,7 +304,9 @@ final class AppState {
             case let episode as Episode: episode.season?.show
             default: nil
             }
-            if let show, show.isLive { shows[show.persistentModelID] = show }
+            guard let show, show.isLive else { continue }
+            shows[show.persistentModelID] = show
+            if id.entityName != "TVShow" { cache.showOf[id] = show.persistentModelID }
         }
         for (id, show) in shows { cache.progress[id] = show.progressSummary() }
         progressCache = cache
@@ -317,11 +314,37 @@ final class AppState {
         return cache.progress
     }
 
-    /// `showProgress` as of `day`, and the shows, seasons, and episodes saved since, which it recomputes.
-    @ObservationIgnored private var progressCache: (day: Date, progress: [PersistentIdentifier: ShowProgress])?
+    /// `showProgress` as of `day`, with the show each season and episode it read belongs to; and the shows,
+    /// seasons, and episodes saved since, which it recomputes.
+    @ObservationIgnored private var progressCache: (day: Date, progress: [PersistentIdentifier: ShowProgress],
+                                                    showOf: [PersistentIdentifier: PersistentIdentifier])?
     @ObservationIgnored private var progressChanges: [PersistentIdentifier] = []
     /// The models a show's progress is worked out from.
     private static let progressEntities: Set<String> = ["TVShow", "Season", "Episode"]
+
+    /// Drops deleted shows and queues the shows that lost a season or episode. A deletion used to rebuild every
+    /// show's progress, reading every episode again (about 0.7 s for 300 shows), when a refresh dropped one episode.
+    /// A season or episode saved since the progress was last read can't be traced to its show (deleted, it can't be
+    /// read), so then everything is worked out again.
+    private func noteProgressDeletions(_ deleted: [PersistentIdentifier]) {
+        let deleted = deleted.filter { Self.progressEntities.contains($0.entityName) }
+        guard !deleted.isEmpty, var cache = progressCache else { return }
+        let deletedIDs = Set(deleted)
+        var shows: [PersistentIdentifier] = []
+        for id in deleted where id.entityName != "TVShow" {
+            guard let show = cache.showOf.removeValue(forKey: id) else {
+                progressCache = nil
+                progressChanges = []
+                return
+            }
+            if !deletedIDs.contains(show) { shows.append(show) }
+        }
+        for id in deleted where id.entityName == "TVShow" { cache.progress[id] = nil }
+        progressCache = cache
+        // A deleted model can't be read to find its show.
+        progressChanges.removeAll { deletedIDs.contains($0) }
+        progressChanges += shows
+    }
 
     private func noteProgressChanges(_ changed: [PersistentIdentifier]) {
         guard progressCache != nil else { return }

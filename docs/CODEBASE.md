@@ -677,6 +677,14 @@ To measure page switches, see §9.
 
 ## 8. Rules and gotchas
 
+- **Changing a model needs a schema version.** The library opens through `ToWatchMigrationPlan` with
+  `ToWatchSchema.current` (`Models.swift`). Version 1 is every release through 2.0, and its `models` are the
+  classes in use today. Before editing any `@Model` class, copy each class as it is into `ToWatchSchemaV1` (as
+  nested types), point V1's `models` at the copies, add `ToWatchSchemaV2` with the edited classes, and add a
+  stage to the plan (`.lightweight` when SwiftData can infer it). Test it on a copy of a real store, never the
+  original. A change made without this fails to open existing libraries, which are then moved aside. An index
+  added on its own isn't treated as a change at all: existing stores never get it.
+
 - **Every macOS page must have at least one toolbar item.** With an empty toolbar, macOS collapses it and the
   whole window (traffic lights, sidebar, title) jumps when you switch to that page. The window's Refresh button
   covers every page but Search, which has its search field.

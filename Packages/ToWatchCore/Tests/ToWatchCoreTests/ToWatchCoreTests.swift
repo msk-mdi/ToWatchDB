@@ -23,7 +23,7 @@ private func episode(_ season: Int, _ number: Int, airs: String?) -> TMDBEpisode
 @MainActor
 private func makeLibrary() throws -> LibraryService {
     let container = try ModelContainer(
-        for: Schema(ToWatchSchema.models),
+        for: ToWatchSchema.current, migrationPlan: ToWatchMigrationPlan.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     liveContainers.append(container)
@@ -1356,4 +1356,26 @@ private final class CountingUnauthorizedProtocol: URLProtocol {
     await #expect(throws: TMDBError.self) { try await library.refreshStale(maxAge: 0) }
     // The four started together answer; nothing after them is asked, movies included.
     #expect(CountingUnauthorizedProtocol.lock.withLock { CountingUnauthorizedProtocol.count } <= 4)
+}
+
+@MainActor @Test func storeFromBeforeVersioningOpensWithTheMigrationPlan() throws {
+    let url = URL.temporaryDirectory.appending(path: "unversioned-\(UUID().uuidString).store")
+    defer {
+        for suffix in ["", "-shm", "-wal"] { try? FileManager.default.removeItem(at: URL(filePath: url.path() + suffix)) }
+    }
+    // Saved as every release through 2.0.4 opened the library: a bare schema, no versions.
+    do {
+        let container = try ModelContainer(for: Schema(ToWatchSchema.models), configurations: ModelConfiguration(url: url))
+        let library = LibraryService(context: container.mainContext, client: nil)
+        let movie = library.insertMovie(try fixture("movie_inception"))
+        library.setWatched(movie, true, on: date("2025-05-01"))
+        library.addNote("Kept", to: movie)
+        _ = try insertSeverance(into: library)
+    }
+    let container = try ModelContainer(for: ToWatchSchema.current, migrationPlan: ToWatchMigrationPlan.self,
+                                       configurations: ModelConfiguration(url: url))
+    let context = container.mainContext
+    let movie = try #require(try context.fetch(FetchDescriptor<Movie>()).first)
+    #expect(movie.isWatched && movie.notes?.map(\.text) == ["Kept"])
+    #expect(try context.fetchCount(FetchDescriptor<Episode>()) > 0)
 }

@@ -598,10 +598,10 @@ enum SharedLibrary {
     }
 
     private static func openContainer(inMemory: Bool) -> ModelContainer {
-        let schema = Schema(ToWatchSchema.models)
+        let schema = ToWatchSchema.current
         let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
         do {
-            return try ModelContainer(for: schema, configurations: configuration)
+            return try ModelContainer(for: schema, migrationPlan: ToWatchMigrationPlan.self, configurations: configuration)
         } catch {
             // A store that exists but can't be read yet (an iPhone launched in the background before its first
             // unlock) is fine on the next launch: moving it aside would lose it.
@@ -618,7 +618,8 @@ enum SharedLibrary {
             openFailure = "The library couldn't be opened (\(error.localizedDescription)), so an empty one was started."
                 + (folder.map { " The old one was moved to “\($0.path())”." } ?? "")
                 + " With Dropbox sync on, the library comes back with the next sync."
-            if let container = try? ModelContainer(for: schema, configurations: configuration) { return container }
+            if let container = try? ModelContainer(for: schema, migrationPlan: ToWatchMigrationPlan.self,
+                                                   configurations: configuration) { return container }
             do {
                 return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
             } catch {

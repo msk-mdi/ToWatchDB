@@ -256,6 +256,24 @@ public enum ToWatchSchema {
         Movie.self, TVShow.self, Season.self, Episode.self, Note.self,
         Space.self, MediaTag.self, SmartList.self,
     ]
+
+    /// The current version, which the library opens with through `ToWatchMigrationPlan`.
+    public static var current: Schema { Schema(versionedSchema: ToWatchSchemaV1.self) }
+}
+
+/// The models of every release through 2.0. Until there's a version 2 these are the model classes above; to change
+/// a model, first copy each class as it is now into this enum (as `ToWatchSchemaV1.Movie` and so on, and point
+/// `models` at the copies), then add `ToWatchSchemaV2` with the new classes and a stage in the plan. Without a
+/// plan, a change SwiftData couldn't migrate on its own made the library fail to open, and it was moved aside.
+public enum ToWatchSchemaV1: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
+    public static var models: [any PersistentModel.Type] { ToWatchSchema.models }
+}
+
+/// How a library saved by an older version is brought up to the current schema, one stage per version.
+public enum ToWatchMigrationPlan: SchemaMigrationPlan {
+    public static var schemas: [any VersionedSchema.Type] { [ToWatchSchemaV1.self] }
+    public static var stages: [MigrationStage] { [] }
 }
 
 extension PersonCredit {

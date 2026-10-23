@@ -13,6 +13,18 @@ struct DropboxClient: Sendable {
         return key
     }
 
+    /// A stalled connection otherwise held a sync for URLSession's default minute per request, up to four in a
+    /// row, and the launch refresh waits for a running sync. The timeout is for silence, not for the whole
+    /// transfer, so a slow upload of a large library still finishes. No URL cache: the bodies are the library
+    /// and the tokens.
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        return URLSession(configuration: configuration)
+    }()
+
     /// Dropbox treats `db-<app key>` as the app's own redirect scheme; the sign-in sheet catches it.
     var callbackScheme: String { "db-\(appKey)" }
     private var redirectURI: String { "\(callbackScheme)://2/token" }
@@ -83,7 +95,7 @@ struct DropboxClient: Sendable {
         var body = URLComponents()
         body.queryItems = form.map { URLQueryItem(name: $0.key, value: $0.value) }
         request.httpBody = Data((body.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 400, String(decoding: data, as: UTF8.self).contains("invalid_grant") { throw invalidGrant }
         guard status == 200 else { throw DropboxError.http(status, Self.summary(data)) }
@@ -97,7 +109,7 @@ struct DropboxClient: Sendable {
         var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/2/auth/token/revoke")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        _ = try? await URLSession.shared.data(for: request)
+        _ = try? await Self.session.data(for: request)
     }
 
     /// The signed-in account's email, shown in Settings.
@@ -107,7 +119,7 @@ struct DropboxClient: Sendable {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data("null".utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         try Self.check(response, data)
         struct Account: Decodable {
             struct Name: Decodable { let display_name: String }
@@ -127,7 +139,7 @@ struct DropboxClient: Sendable {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(try Self.argument(["path": path]), forHTTPHeaderField: "Dropbox-API-Arg")
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(data).hasPrefix("path/not_found") { return nil }
         try Self.check(response, data)
         struct Metadata: Decodable { let rev: String }
@@ -144,7 +156,7 @@ struct DropboxClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(try Self.argument(["path": path]).utf8)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(data).hasPrefix("path/not_found") { return nil }
         try Self.check(response, data)
         struct Metadata: Decodable { let rev: String? }
@@ -163,7 +175,7 @@ struct DropboxClient: Sendable {
         request.setValue(try Self.argument(["path": path, "mode": mode, "autorename": false, "mute": true]),
                          forHTTPHeaderField: "Dropbox-API-Arg")
         request.httpBody = data
-        let (body, response) = try await URLSession.shared.data(for: request)
+        let (body, response) = try await Self.session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409, Self.summary(body).contains("conflict") {
             throw DropboxError.conflict
         }

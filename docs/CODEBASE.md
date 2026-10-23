@@ -528,7 +528,8 @@ the local date.
   base had 5 or more titles merges as a first sync (`usableBase`), so a lost store can't empty the file.
 - **App (`Sync/`):** `DropboxClient` does OAuth with PKCE (redirect `db-<app key>://2/token`, caught by
   `WebAuthenticationSession`), download, and upload with the file's `rev`, so a concurrent write from another
-  device comes back as a conflict and the sync re-merges. `DropboxSync` keeps the refresh token in `SecretStore`
+  device comes back as a conflict and the sync re-merges. Its own `URLSession` gives up after 30 s of silence
+  and caches nothing. `DropboxSync` keeps the refresh token in `SecretStore`
   and the base in Application Support (`Dropbox Sync Base.json`), and remembers `syncedVersion`. After applying
   a downloaded file it saves that file as the base, so a retry after a conflict merges against it. Unsaved
   changes from a batch (list import, refresh) are saved before applying, so the merge can't drop them.

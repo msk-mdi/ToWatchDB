@@ -200,7 +200,9 @@ erDiagram
 ### 4.2 TMDB client
 
 `TMDBClient` is a `Sendable` struct around `URLSession`, authenticated with a **v4 read token** as a Bearer
-header on the **v3 API**. The `language` parameter is sent with every request.
+header on the **v3 API**. The `language` parameter is sent with every request. Its session gives up after 20 s
+of silence and keeps responses in a cache of its own (128 MB in Caches ▸ TMDB Responses), apart from the
+posters in the shared one.
 
 | Method | Endpoint |
 |---|---|

@@ -33,9 +33,15 @@ public struct TMDBClient: Sendable {
 
     /// A stalled connection otherwise kept a refresh (four titles at a time) spinning for URLSession's default
     /// minute per request. Images keep the shared session and its cache.
+    ///
+    /// Responses get a cache of their own. TMDB answers `max-age=0` with an ETag, so a cached one is only ever
+    /// checked again (an unchanged show comes back as a short 304); in the shared cache, sized for posters, a show
+    /// with its seasons appended (hundreds of KB, a few MB for a long-running one) pushed posters out.
     public static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 20
+        configuration.urlCache = URLCache(memoryCapacity: 4 << 20, diskCapacity: 128 << 20,
+                                          directory: URL.cachesDirectory.appending(path: "TMDB Responses"))
         return URLSession(configuration: configuration)
     }()
 

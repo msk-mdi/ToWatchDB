@@ -11,7 +11,7 @@ struct NextToWatchView: View {
         // Hidden (kept alive on Mac): show the last queue instead of recomputing after every save.
         // Keyed by day: an episode airing today joins the queue after midnight, not at the next save.
         let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: !isActive) {
-            Self.queue(appState.all(matching: #Predicate<TVShow> { !$0.isAbandoned }), progress: appState.showProgress())
+            Self.queue(appState.all(TVShow.self).filter { !$0.isAbandoned }, progress: appState.showProgress())
         }
 
         Group {

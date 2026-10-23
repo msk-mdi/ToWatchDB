@@ -380,8 +380,8 @@ struct LibraryView: View {
         var items: [LibraryItem] = switch scope {
         case .movies: items(appState.all(), [])
         case .shows: items([], appState.all())
-        case .backlog: items(appState.all(matching: #Predicate { $0.isInBacklog }), appState.all(matching: #Predicate { $0.isInBacklog }))
-        case .watched: items(appState.all(matching: #Predicate { $0.isWatched }), appState.all())
+        case .backlog: items(appState.all(Movie.self).filter(\.isInBacklog), appState.all(TVShow.self).filter(\.isInBacklog))
+        case .watched: items(appState.all(Movie.self).filter(\.isWatched), appState.all())
         case let .space(id):
             spaces.first { $0.uuid == id }.map { items($0.movies ?? [], $0.shows ?? []) } ?? []
         case let .tag(id):

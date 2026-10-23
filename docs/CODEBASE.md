@@ -355,7 +355,7 @@ parameters whenever it becomes active.
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
 | `cached(_:_:)` | Memoizes derived data until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
 | `computeOffMain(_:_:)`, `offMainValue(_:)` | Works a `Sendable` value out in a background context once per library version (stats); a page shows the last one until the new one lands (§7, item 4) |
-| `all(_:matching:)` | Fetches every model of a type (optionally filtered), for `cached` closures (§7, item 15) |
+| `all(_:)` | Every model of a type, for `cached` closures; movies and shows are kept until a save inserts or deletes one, so filter them in memory (§7, item 15) |
 | `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |
 | `shortcutsContent()` | Hash of the names and next episodes Siri is taught, worked out off the main thread once per library version and day (§5.11) |
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
@@ -662,7 +662,9 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     macOS and keeps `List` (and swipe actions) on iOS.
 15. **No whole-table `@Query` feeding a cache.** A `@Query` refetches after every save, hidden pages included,
     even when `appState.cached` reuses its value. Pages fetch titles inside the `cached` closure instead
-    (`appState.all(_:matching:)`, `appState.libraryIDs()`); `@Query` stays for small tables and filtered lookups.
+    (`appState.all(_:)`, `appState.libraryIDs()`); `@Query` stays for small tables and filtered lookups. `all` keeps
+    movies and shows until one is added or deleted: fetching 1,300 titles took about 60 ms after every save, while
+    sorting them takes under 10 ms.
 16. **Sync skips unchanged files.** `DropboxSync` keeps the revision its base matches: when the file is still
     at it, a sync with no local changes stops after one metadata request, and one with changes merges against
     the base without downloading. The sync file is compact JSON (`BackupCoding.compactEncoder`).

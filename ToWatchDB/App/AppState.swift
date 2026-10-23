@@ -143,7 +143,8 @@ final class AppState {
                 notification.userInfo?[key.rawValue] as? [PersistentIdentifier] ?? []
             }
             let deleted = identifiers(.deletedIdentifiers)
-            let changed = identifiers(.insertedIdentifiers) + identifiers(.updatedIdentifiers)
+            let inserted = identifiers(.insertedIdentifiers)
+            let changed = inserted + identifiers(.updatedIdentifiers)
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.libraryVersion += 1
@@ -152,6 +153,7 @@ final class AppState {
                     // Nothing cached before a deletion is served again, and it may hold the deleted models.
                     self.derivedCache.removeAll()
                 }
+                if (inserted + deleted).contains(where: { Self.titleEntities.contains($0.entityName) }) { self.titleCache.removeAll() }
                 self.noteProgressDeletions(deleted)
                 self.noteProgressChanges(changed)
                 if !self.isInMemory { self.dropbox.noteSave() }
@@ -243,9 +245,21 @@ final class AppState {
 
     /// Every model of a type, for `cached` closures. Pages used to `@Query` these, which refetched whole tables
     /// after every save even when the cached value was reused (and on hidden pages kept alive on Mac).
-    func all<T: PersistentModel>(_ type: T.Type = T.self, matching predicate: Predicate<T>? = nil) -> [T] {
-        (try? container.mainContext.fetch(FetchDescriptor<T>(predicate: predicate))) ?? []
+    ///
+    /// Movies and shows are kept until a save inserts or deletes one: a grid fetched them again after every save
+    /// (about 60 ms for 1,300 titles), though an edit changes a title's sort keys and filters, not which titles there
+    /// are. Filter the result in memory rather than fetching with a predicate.
+    func all<T: PersistentModel>(_ type: T.Type = T.self) -> [T] {
+        let key = ObjectIdentifier(T.self)
+        // A title rolled back after a failed save is gone from the context; one deleted since isn't live either.
+        if let cached = titleCache[key] as? [T] { return cached.filter(\.isLive) }
+        let models = (try? container.mainContext.fetch(FetchDescriptor<T>())) ?? []
+        if Self.titleEntities.contains(String(describing: T.self)) { titleCache[key] = models }
+        return models
     }
+
+    @ObservationIgnored private var titleCache: [ObjectIdentifier: [any PersistentModel]] = [:]
+    private static let titleEntities: Set<String> = ["Movie", "TVShow"]
 
     /// A hash of what Siri is taught: title names and each show's next episode. Worked out off the main thread
     /// from what's saved, once per library version and day: it walks every episode, which froze the app about

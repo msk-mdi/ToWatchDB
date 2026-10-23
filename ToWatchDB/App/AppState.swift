@@ -103,6 +103,8 @@ final class AppState {
     @ObservationIgnored private var syncsAfterRefresh = false
     /// When `refreshLibrary` last started.
     @ObservationIgnored private var lastRefresh: Date?
+    /// Whether a refresh already said TMDB turned the token down.
+    @ObservationIgnored private var hasReportedRejectedToken = false
     #if os(iOS)
     @ObservationIgnored private var backgroundSync: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -366,6 +368,7 @@ final class AppState {
 
     func setTokenOverride(_ token: String?) {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        hasReportedRejectedToken = false
         if trimmed.isEmpty {
             noteSecretFailure(TokenStore.delete())
             tokenOverride = nil
@@ -534,7 +537,16 @@ final class AppState {
         }
         // Same as a sync starting during a refresh, the other way around (both start at launch).
         await dropbox.waitForSync()
-        await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
+        do {
+            try await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
+        } catch {
+            // Said once per launch: the refresh runs again at every activation, and the token stays wrong until
+            // it's changed in Settings.
+            if !hasReportedRejectedToken {
+                hasReportedRejectedToken = true
+                errorMessage = "TMDB turned down the access token, so the library couldn't be refreshed. Check the token in Settings. (\(error.localizedDescription))"
+            }
+        }
         await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400, importedMaxAge: force ? 0 : 7 * 86400)
     }
 }

@@ -1320,3 +1320,33 @@ private final class SeerrSignInProtocol: URLProtocol {
     #expect(try partial.applySyncedBackup(withoutMovie, changes: LibrarySync.changes(from: before, to: withoutMovie)))
     #expect(try partial.context.fetch(FetchDescriptor<Movie>()).isEmpty)
 }
+
+/// `UnauthorizedProtocol`, counting the requests it answers.
+private final class CountingUnauthorizedProtocol: URLProtocol {
+    nonisolated(unsafe) static var count = 0
+    static let lock = NSLock()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lock.withLock { Self.count += 1 }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status_message":"Invalid API key"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor @Test func refreshStopsWhenTMDBTurnsDownTheToken() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [CountingUnauthorizedProtocol.self]
+    let client = TMDBClient(token: "revoked", language: "en-US", session: URLSession(configuration: configuration))
+    let library = LibraryService(context: try makeLibrary().context, client: client)
+    for id in 1...12 { library.context.insert(TVShow(tmdbID: id, name: "Show \(id)")) } // No status: ongoing.
+    for id in 1...3 { library.context.insert(Movie(tmdbID: id, title: "Movie \(id)")) } // No date: unreleased.
+    library.save()
+
+    await #expect(throws: TMDBError.self) { try await library.refreshStale(maxAge: 0) }
+    // The four started together answer; nothing after them is asked, movies included.
+    #expect(CountingUnauthorizedProtocol.lock.withLock { CountingUnauthorizedProtocol.count } <= 4)
+}

@@ -126,9 +126,11 @@ public struct LibraryService {
     }
 
     /// Refreshes ongoing shows and unreleased movies that haven't been refreshed within `maxAge`.
-    /// Failures are skipped so one bad item doesn't block the rest; returns how many were refreshed.
+    /// Failures are skipped so one bad item doesn't block the rest; returns how many were refreshed. Throws when
+    /// TMDB turns the token down, after saving what was refreshed: every other title would fail the same way,
+    /// and a revoked token otherwise failed one request per title at every launch without a word.
     @discardableResult
-    public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async -> Int {
+    public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async throws -> Int {
         let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
         // The store narrows it down (this runs at every launch and activation); the checks after are exact.
         let cutoff = now.addingTimeInterval(-maxAge), today = TMDBDate.today(now)
@@ -147,23 +149,29 @@ public struct LibraryService {
         let showsByID = Dictionary(shows.map { ($0.tmdbID, $0) }) { first, _ in first }
         let moviesByID = Dictionary(movies.map { ($0.tmdbID, $0) }) { first, _ in first }
         var count = 0
-        await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) {
-            try? await client.tvShowWithSeasons(id: $0)
-        } apply: { id, payload in
+        var rejection: (any Error)?
+        await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) { id in
+            await Result { try await client.tvShowWithSeasons(id: id) }
+        } apply: { id, result in
+            rejection = rejection ?? Self.tokenRejection(in: result)
             // A title deleted while downloading (by the user or a sync) is skipped: writing to it can trap.
-            guard let (detail, seasons) = payload, let show = showsByID[id], show.isLive else { return }
+            guard let (detail, seasons) = try? result.get(), let show = showsByID[id], show.isLive else { return }
             show.apply(detail)
             merge(seasons, into: show)
             count += 1
-        }
-        await Self.forEachConcurrently(Array(moviesByID.keys), limit: 4) {
-            try? await client.movie(id: $0)
-        } apply: { id, detail in
-            guard let detail, let movie = moviesByID[id], movie.isLive else { return }
-            movie.apply(detail)
-            count += 1
+        } until: { rejection != nil }
+        if rejection == nil {
+            await Self.forEachConcurrently(Array(moviesByID.keys), limit: 4) { id in
+                await Result { try await client.movie(id: id) }
+            } apply: { id, result in
+                rejection = rejection ?? Self.tokenRejection(in: result)
+                guard let detail = try? result.get(), let movie = moviesByID[id], movie.isLive else { return }
+                movie.apply(detail)
+                count += 1
+            } until: { rejection != nil }
         }
         if count > 0 { save() }
+        if let rejection { throw rejection }
         return count
     }
 
@@ -218,18 +226,32 @@ public struct LibraryService {
         guard let client, !shows.isEmpty else { return }
         let showsByID = Dictionary(shows.map { ($0.tmdbID, $0) }) { first, _ in first }
         var changed = false
-        await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) {
-            try? await client.tvExternalIDs(id: $0)
-        } apply: { id, ids in
-            guard let ids, let show = showsByID[id], show.isLive else { return }
+        var isRejected = false
+        await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) { id in
+            await Result { try await client.tvExternalIDs(id: id) }
+        } apply: { id, result in
+            if Self.tokenRejection(in: result) != nil { isRejected = true }
+            guard let ids = try? result.get(), let show = showsByID[id], show.isLive else { return }
             if let imdbID = ids.imdbId, !imdbID.isEmpty {
                 show.imdbID = imdbID
             } else {
                 show.imdbRatingDate = now // TMDB has none: don't ask again until the ratings are due.
             }
             changed = true
-        }
+        } until: { isRejected }
         if changed { save() }
+    }
+
+    /// The error, if TMDB turned the token down (a wrong or revoked one): every other request would fail too.
+    static func tokenRejection<T>(in result: Result<T, any Error>) -> (any Error)? {
+        switch result {
+        case let .failure(error as TMDBError):
+            switch error {
+            case .http(status: 401, _), .missingToken: error
+            default: nil
+            }
+        default: nil
+        }
     }
 
     /// Fetches the IMDb ratings of these titles and saves once. A failed request leaves
@@ -264,11 +286,12 @@ public struct LibraryService {
     }
 
     /// Runs `fetch` for each ID with at most `limit` running at once, and hands each result to `apply` on the
-    /// main actor as it arrives.
+    /// main actor as it arrives. Once `stop` returns true, no more are started and the ones running are cancelled.
     static func forEachConcurrently<Value: Sendable>(
         _ ids: [Int], limit: Int,
         fetch: @escaping @Sendable (Int) async -> Value,
-        apply: (Int, Value) -> Void
+        apply: (Int, Value) -> Void,
+        until stop: () -> Bool = { false }
     ) async {
         await withTaskGroup(of: (Int, Value).self) { group in
             // Children are added inline rather than from a local function capturing `group`: the launch refresh
@@ -280,6 +303,10 @@ public struct LibraryService {
             }
             while let (id, value) = await group.next() {
                 apply(id, value)
+                if stop() {
+                    group.cancelAll()
+                    continue
+                }
                 if let next = pending.next() {
                     group.addTask { (next, await fetch(next)) }
                 }

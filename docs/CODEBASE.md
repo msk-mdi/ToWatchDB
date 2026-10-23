@@ -235,7 +235,8 @@ one from `SharedLibrary.service`.
   - `refresh(_:)` re-fetches a title. `merge(_:into:)` upserts seasons and episodes by number and never
     touches watch data.
   - `refreshStale(maxAge:)` refreshes ongoing shows and unreleased movies older than 12 hours. It runs at
-    launch and from Refresh buttons.
+    launch and from Refresh buttons. A title that fails is skipped, but a 401 from TMDB (a wrong or revoked
+    token) stops the batch and throws after saving what came in; `AppState` says so once per launch.
 - **Watch state:**
   - `setWatched(movie/episode/season/show, _:on:)` and `markWatchedUpTo(_:)` change watch state.
   - Marking something watched clears the backlog flag. Marking an episode watched also un-abandons its show.

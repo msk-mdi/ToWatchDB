@@ -125,7 +125,7 @@ Scripts/
 docs/CODEBASE.md                This file
 ```
 
-About 14,750 lines of Swift in total (version 2.0.4).
+About 15,900 lines of Swift in total (version 2.0.4).
 
 ---
 

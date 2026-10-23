@@ -266,6 +266,8 @@ one from `SharedLibrary.service`.
 - `progressSummary(asOf:)` returns a `ShowProgress` (status, fraction, next episode, counts) from **one pass**
   over the episodes. Building `regularEpisodes` touches every season and episode, so screens that need
   several of these values should call it once (the library poster card does).
+- `TVShow.progressSummaries(in:)` gives every show's progress at once, from one fetch of the episodes grouped
+  through their season. It's much faster than calling `progressSummary()` on each show of a fresh context (§7, item 18).
 - `nextEpisodeToWatch` is the first aired, unwatched regular episode. `nextEpisodeToAir` is the first episode
   dated in the future.
 
@@ -349,7 +351,7 @@ parameters whenever it becomes active.
 | `cached(_:_:)` | Memoizes derived data (stats) until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
 | `all(_:matching:)` | Fetches every model of a type (optionally filtered), for `cached` closures (§7, item 15) |
 | `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |
-| `shortcutsContent` | Cached hash of the names and next episodes Siri is taught (§5.11) |
+| `shortcutsContent()` | Hash of the names and next episodes Siri is taught, worked out off the main thread once per library version and day (§5.11) |
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 
 `SharedLibrary` holds the on-disk container and a client factory. App Intents use the same container, so their
@@ -580,7 +582,7 @@ the local date.
 
 - **Siri phrases:** `ToWatchShortcuts` has 9 App Shortcuts, for example "What's next in ToWatchDB" and "Mark
   ⟨show⟩ watched in ToWatchDB". `updateAppShortcutParameters()` runs when the app becomes active and
-  `appState.shortcutsContent` (the title names and each show's next episode) changed, so Siri learns your
+  `appState.shortcutsContent()` (the title names and each show's next episode) changed, so Siri learns your
   current show and movie names without walking every episode on each activation.
 - **Opening actions** set `IntentRouter.shared`, and `RootView` navigates.
 - **Signing:** the system only runs intents from apps signed with a team (§3).
@@ -624,8 +626,8 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
    `forEachRegularEpisode` (unsorted) or `progressSummary()`, which also returns `lastWatched`.
 8. **Share per-show progress.** `appState.showProgress()` keeps every show's `ShowProgress`; the library grids
    and Next to Watch read it instead of walking episodes themselves. A save recomputes only the shows whose
-   show, season, or episode it inserted or updated. A deletion, a new day, or more than 2,000 changes rebuild
-   it all.
+   show, season, or episode it inserted or updated. Deleting a show, season, or episode, a new day, or more
+   than 2,000 changes rebuild it all (§7, item 18); deleting anything else keeps it.
 9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
    save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.
@@ -650,6 +652,12 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     the base without downloading. The sync file is compact JSON (`BackupCoding.compactEncoder`).
 17. **Group notes in one fetch.** `notesByOwner()` reads every note once for backups and syncs; reading
     `movie.notes` or `episode.notes` runs a query per model.
+18. **Group episodes in one fetch for every show's progress.** The first read of each `show.seasons` and
+    `season.episodes` in a context materializes the relationship: `progressSummary()` on every show of a fresh
+    context took about 3.4 s for 300 shows of 72 episodes (1 s for 80), and prefetching didn't help.
+    `TVShow.progressSummaries(in:)` fetches the episodes once and groups them through their season, which
+    takes about 0.6 s. `showProgress()` uses it for a full rebuild, and `shortcutsContent()` uses it in a
+    background context.
 
 To measure page switches, see §9.
 

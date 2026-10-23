@@ -226,6 +226,31 @@ private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
     #expect(show.nextEpisodeToWatch(asOf: now)?.code == "S01E02")
 }
 
+@MainActor @Test func groupedProgressMatchesEachShow() throws {
+    let library = try makeLibrary()
+    let show = try insertSeverance(into: library)
+    let episodes = show.regularEpisodes
+    library.setWatched(episodes[0], true, on: date("2026-03-01"))
+    library.setWatched(episodes[9], true, on: date("2026-04-01"))
+    library.setWatched(try #require(show.sortedSeasons.first?.sortedEpisodes.first), true, on: date("2026-06-01")) // A special.
+    let empty = TVShow(tmdbID: 1, name: "No Episodes")
+    library.context.insert(empty)
+    library.save()
+
+    let all = try TVShow.progressSummaries(in: library.context, asOf: now)
+    #expect(all.count == 2)
+    for show in [show, empty] {
+        let grouped = try #require(all[show.persistentModelID]), single = show.progressSummary(asOf: now)
+        #expect(grouped.status == single.status)
+        #expect(grouped.fraction == single.fraction)
+        #expect(grouped.nextEpisode?.code == single.nextEpisode?.code)
+        #expect(grouped.nextEpisodeToAir?.code == single.nextEpisodeToAir?.code)
+        #expect(grouped.airedCount == single.airedCount)
+        #expect(grouped.lastWatched == single.lastWatched)
+    }
+    #expect(all[show.persistentModelID]?.lastWatched == date("2026-04-01")) // Specials don't count.
+}
+
 @MainActor @Test func refreshMergeKeepsWatchData() throws {
     let library = try makeLibrary()
     let show = try insertSeverance(into: library)

@@ -149,6 +149,10 @@ final class AppState {
                     self.lastDeletionVersion = self.libraryVersion
                     // Nothing cached before a deletion is served again, and it may hold the deleted models.
                     self.derivedCache.removeAll()
+                }
+                // Progress holds only shows' episodes, so deleting a movie, a note, or a collection keeps it: a
+                // rebuild reads every episode again (about 0.7 s for 300 shows).
+                if deleted.contains(where: { Self.progressEntities.contains($0.entityName) }) {
                     self.progressCache = nil
                 } else {
                     self.noteProgressChanges(changed)
@@ -211,20 +215,32 @@ final class AppState {
         (try? container.mainContext.fetch(FetchDescriptor<T>(predicate: predicate))) ?? []
     }
 
-    /// A hash of what Siri is taught: title names and each show's next episode.
-    var shortcutsContent: Int {
-        cached("shortcuts-content") {
-            var hasher = Hasher()
-            var movies = FetchDescriptor<Movie>()
-            movies.propertiesToFetch = [\.title]
-            for movie in (try? container.mainContext.fetch(movies)) ?? [] { hasher.combine(movie.title) }
-            let progress = showProgress()
-            for show in all(TVShow.self) {
-                hasher.combine(show.name)
-                hasher.combine(progress[show.persistentModelID]?.nextEpisode?.code)
-            }
-            return hasher.finalize()
+    /// A hash of what Siri is taught: title names and each show's next episode. Worked out off the main thread
+    /// from what's saved, once per library version and day: it walks every episode, which froze the app about
+    /// a second after each launch (3 s with a large library) when it ran on the main context.
+    func shortcutsContent() async -> Int {
+        let version = libraryVersion, day = Calendar.current.startOfDay(for: .now)
+        if let shortcutsHash, shortcutsHash.version == version, shortcutsHash.day == day { return shortcutsHash.value }
+        let container = container
+        let value = await Task.detached(priority: .utility) { Self.shortcutsContent(in: ModelContext(container)) }.value
+        // Under the version it started from: a save meanwhile makes the next call work it out again.
+        shortcutsHash = (version, day, value)
+        return value
+    }
+
+    @ObservationIgnored private var shortcutsHash: (version: Int, day: Date, value: Int)?
+
+    private nonisolated static func shortcutsContent(in context: ModelContext) -> Int {
+        var hasher = Hasher()
+        var movies = FetchDescriptor<Movie>()
+        movies.propertiesToFetch = [\.title]
+        for movie in (try? context.fetch(movies)) ?? [] { hasher.combine(movie.title) }
+        let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
+        for show in (try? context.fetch(FetchDescriptor<TVShow>())) ?? [] {
+            hasher.combine(show.name)
+            hasher.combine(progress[show.persistentModelID]?.nextEpisode?.code)
         }
+        return hasher.finalize()
     }
 
     /// The TMDB IDs in the library, for Discover and Search badges. Reads only the IDs. Hidden pages (kept alive
@@ -249,8 +265,7 @@ final class AppState {
         let day = Calendar.current.startOfDay(for: .now)
         let context = container.mainContext
         guard var cache = progressCache, cache.day == day else {
-            let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
-            let progress = Dictionary(shows.map { ($0.persistentModelID, $0.progressSummary()) }) { first, _ in first }
+            let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
             progressCache = (day, progress)
             progressChanges = []
             return progress
@@ -275,10 +290,12 @@ final class AppState {
     /// `showProgress` as of `day`, and the shows, seasons, and episodes saved since, which it recomputes.
     @ObservationIgnored private var progressCache: (day: Date, progress: [PersistentIdentifier: ShowProgress])?
     @ObservationIgnored private var progressChanges: [PersistentIdentifier] = []
+    /// The models a show's progress is worked out from.
+    private static let progressEntities: Set<String> = ["TVShow", "Season", "Episode"]
 
     private func noteProgressChanges(_ changed: [PersistentIdentifier]) {
         guard progressCache != nil else { return }
-        progressChanges += changed.filter { ["TVShow", "Season", "Episode"].contains($0.entityName) }
+        progressChanges += changed.filter { Self.progressEntities.contains($0.entityName) }
         // A refresh of the whole library: computing everything again is cheaper than finding each show.
         if progressChanges.count > 2000 {
             progressCache = nil

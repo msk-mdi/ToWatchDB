@@ -164,6 +164,9 @@ final class AppState {
         if container === SharedLibrary.container {
             Self.shared = self
             errorMessage = SharedLibrary.openFailure
+            LibraryService.saveFailed = { [weak self] error in
+                self?.errorMessage = "A change couldn't be saved, so it was undone. (\(error.localizedDescription))"
+            }
             library.separateNotesSharingAnID()
         }
         #if os(macOS)
@@ -178,6 +181,7 @@ final class AppState {
             seerrAuth = try SeerrAuthStore.read()
             secretsUnread = false
         } catch {
+            Log.secrets.error("The secrets couldn't be read at launch; trying again when the app comes to the front")
             secretsUnread = true
         }
     }
@@ -614,6 +618,7 @@ enum SharedLibrary {
             // downgrade, a damaged file). The store is kept aside and the app starts with an empty library, which
             // a Dropbox sync or a backup fills again.
             let folder = moveAside(url)
+            Log.library.fault("The library couldn't be opened and was moved aside: \(error.localizedDescription, privacy: .public)")
             DropboxSync.forgetBase()
             openFailure = "The library couldn't be opened (\(error.localizedDescription)), so an empty one was started."
                 + (folder.map { " The old one was moved to “\($0.path())”." } ?? "")

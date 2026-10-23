@@ -171,7 +171,13 @@ public struct LibraryService {
             } until: { rejection != nil }
         }
         if count > 0 { save() }
-        if let rejection { throw rejection }
+        let failed = shows.count + movies.count - count
+        Log.refresh.info("Refreshed \(count, privacy: .public) of \(shows.count, privacy: .public) shows and \(movies.count, privacy: .public) movies")
+        if let rejection {
+            Log.refresh.error("TMDB turned down the token: \(rejection.localizedDescription, privacy: .public)")
+            throw rejection
+        }
+        if failed > 0 { Log.refresh.error("\(failed, privacy: .public) titles weren't refreshed (failed, or deleted meanwhile)") }
         return count
     }
 
@@ -260,7 +266,13 @@ public struct LibraryService {
     public func refreshIMDbRatings(movies: [Movie] = [], shows: [TVShow] = [], now: Date = .now) async -> Int {
         // Deleted before this ran (it can be started without waiting, see `refreshIMDbRatingsLater`): can't be read.
         let ids = movies.filter(\.isLive).compactMap(\.imdbID) + shows.filter(\.isLive).compactMap(\.imdbID)
-        guard let imdb, !ids.isEmpty, let ratings = try? await imdb.ratings(for: ids) else { return 0 }
+        guard let imdb, !ids.isEmpty else { return 0 }
+        let ratings: [String: IMDbRating?]
+        do { ratings = try await imdb.ratings(for: ids) } catch {
+            // Not the error itself: a URL error carries the request's URL, which holds the OMDb key.
+            Log.refresh.error("No IMDb ratings came back for \(ids.count, privacy: .public) titles (\(String(describing: type(of: error)), privacy: .public))")
+            return 0
+        }
         var count = 0
         // Titles deleted while the request ran (by the user or a sync) are skipped: writing to them can trap.
         // Titles IMDb didn't answer for keep their rating and date, so they're asked for again next time.
@@ -495,17 +507,22 @@ public struct LibraryService {
     }
 
     /// Saves for an edit the UI can't report. A failed save is rolled back: left pending, its changes were saved
-    /// later with an unrelated edit, or made every later save fail too.
+    /// later with an unrelated edit, or made every later save fail too. It's logged and handed to
+    /// `saveFailed`: in Release, a tap that was undone used to look like it had worked.
     @discardableResult
     public func save() -> Bool {
         do {
             try commit()
             return true
         } catch {
-            assertionFailure("SwiftData save failed: \(error)")
+            Log.library.error("Save failed and was rolled back: \(error.localizedDescription, privacy: .public)")
+            Self.saveFailed?(error)
             return false
         }
     }
+
+    /// Told about every save that failed and was rolled back. The app shows it.
+    public static var saveFailed: ((any Error) -> Void)?
 
     /// Saves, rolling back the unsaved changes if that fails, for callers that must not go on as if it worked.
     public func commit() throws {

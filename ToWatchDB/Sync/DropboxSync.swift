@@ -201,6 +201,7 @@ final class DropboxSync {
                    try await authorized(session, { try await client.revision(path: Self.path, accessToken: $0) }) == syncedRev {
                     try checkSession()
                     if syncedVersion == version() {
+                        Log.sync.info("Nothing to sync: the file and the library are as last synced")
                         hasUnsyncedEdits = false
                         lastSynced = .now
                         lastError = nil
@@ -239,6 +240,7 @@ final class DropboxSync {
                             (local, localVersion) = try await snapshot(library: library, version: version)
                             continue
                         }
+                        Log.sync.info("Merged the file: \(changes.movies.count, privacy: .public) movies and \(changes.shows.count, privacy: .public) shows changed here")
                         if try service.applySyncedBackup(merged, changes: changes) {
                             (local, localVersion) = try await snapshot(library: library, version: version)
                         }
@@ -258,6 +260,7 @@ final class DropboxSync {
 
                 var rev = file?.rev
                 if changed {
+                    Log.sync.info("Uploading the library (\(data.count / 1024, privacy: .public) KB)")
                     try checkSession()
                     rev = try await authorized(session) {
                         try await client.upload(data, path: Self.path, replacing: file?.rev, accessToken: $0)
@@ -267,32 +270,39 @@ final class DropboxSync {
                 saveBase(data, rev: rev)
                 syncedVersion = snapshotVersion
                 if snapshotVersion == version() { hasUnsyncedEdits = false }
+                Log.sync.info("Synced\(changed ? "" : " (the file already matched)", privacy: .public)")
                 lastSynced = .now
                 lastError = nil
                 return
             } catch where session != self.session {
                 return // Connected or disconnected meanwhile: this sync's results belong to the old session.
             } catch DropboxError.conflict where attempt < 3 {
+                Log.sync.info("Another device uploaded first; merging with its file (attempt \(attempt, privacy: .public))")
                 continue
             } catch DropboxError.rateLimited where attempt < 3 {
+                Log.sync.info("Dropbox is rate limiting; trying again (attempt \(attempt, privacy: .public))")
                 // "Sync will try again later": wait a little and try again before saying so.
                 do { try await Task.sleep(for: .seconds(5 * attempt)) } catch { return }
                 continue
             } catch DropboxError.secretsUnavailable {
+                Log.sync.error("The Dropbox sign-in couldn't be read")
                 lastError = DropboxError.secretsUnavailable.localizedDescription
                 return
             } catch DropboxError.signedOut {
+                Log.sync.error("Dropbox signed this device out")
                 disconnect()
                 lastError = DropboxError.signedOut.localizedDescription
                 return
             } catch is CancellationError {
                 return
             } catch is LibraryKeptChanging {
+                Log.sync.info("Saves kept landing during the sync; leaving them for the next one")
                 // Not again right away, which would be the same race: the edits stay unsynced (`syncedVersion`
                 // is behind), so the next save, activation, or quit syncs them.
                 needsAnotherPass = false
                 return
             } catch {
+                Log.sync.error("Sync failed: \(error.localizedDescription, privacy: .public)")
                 lastError = error.localizedDescription
                 return
             }

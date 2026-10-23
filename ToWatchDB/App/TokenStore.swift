@@ -1,6 +1,6 @@
 import Foundation
-import ToWatchCore
 import Security
+import ToWatchCore
 #if os(macOS)
 import CryptoKit
 import Synchronization
@@ -144,8 +144,12 @@ enum EnclaveSecrets {
         case let .secrets(secrets):
             cache.withLock { $0 = secrets }
             return secrets
-        case .unavailable: throw SecretStore.Unreadable()
-        case .unusable: return [:] // Made on another Mac or damaged: the secrets have to be entered again.
+        case .unavailable:
+            Log.secrets.error("The sealed secrets file couldn't be read")
+            throw SecretStore.Unreadable()
+        case .unusable:
+            Log.secrets.error("The sealed secrets file can't be opened on this Mac; the secrets have to be entered again")
+            return [:] // Made on another Mac or damaged: the secrets have to be entered again.
         }
     }
 
@@ -199,6 +203,7 @@ enum EnclaveSecrets {
             cache.withLock { $0 = secrets }
             return true
         } catch {
+            Log.secrets.error("Couldn't seal the secrets file: \(error.localizedDescription, privacy: .public)")
             cache.withLock { $0 = nil }
             return false
         }
@@ -247,7 +252,10 @@ private enum Keychain {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let item = result as? [String: Any],
-              let data = item[kSecValueData as String] as? Data else { throw SecretStore.Unreadable() }
+              let data = item[kSecValueData as String] as? Data else {
+            Log.secrets.error("Keychain read failed (status \(status, privacy: .public))")
+            throw SecretStore.Unreadable()
+        }
         #if os(iOS)
         // Items saved before were readable only while unlocked, or not bound to this device.
         if item[kSecAttrAccessible as String] as? String != kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String {

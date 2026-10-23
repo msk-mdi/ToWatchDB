@@ -228,7 +228,8 @@ posters in the shared one.
 
 `LibraryService` is a `@MainActor struct` holding a `ModelContext` and an optional `TMDBClient`. **Every
 mutation goes through it** and ends with `save()`. The app gets one from `appState.library`, and intents get
-one from `SharedLibrary.service`.
+one from `SharedLibrary.service`. A save that fails is rolled back, logged, and handed to
+`LibraryService.saveFailed`, which `AppState` turns into an alert.
 
 - **Adding:** `addMovie(tmdbID:)` and `addShow(tmdbID:)` return the existing title if it's already there.
   Otherwise they fetch it and call `insertMovie` / `insertShow`, which re-check for a duplicate after the
@@ -718,6 +719,13 @@ To measure page switches, see §9.
 ---
 
 ## 9. Testing and debugging
+
+### Logs
+
+`Log` (`ToWatchCore/Services/Log.swift`) has a `Logger` per area: `library` (saves, the store), `refresh` (TMDB,
+IMDb ratings), `sync` (each Dropbox sync's outcome), and `secrets`. In Console.app, filter by subsystem
+`com.mehdi.towatchdb`, or run `log stream --predicate 'subsystem == "com.mehdi.towatchdb"' --info`. Never log
+tokens, keys, or a URL error (it carries the URL, which holds the OMDb key).
 
 ### Unit tests
 

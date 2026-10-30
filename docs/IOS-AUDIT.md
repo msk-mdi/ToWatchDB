@@ -31,7 +31,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 9 | Low, fixed | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
 | 10 | Low | No `#Index` on the columns every predicate filters by | Store |
 | 11 | Low, fixed, unchecked on a device | iPad rebuilds the page on every sidebar switch | iPad |
-| 12 | Low | The decoded image cache is a 128 MB ceiling, with no reaction to memory warnings beyond NSCache's own | Memory |
+| 12 | Low, fixed | The decoded image cache is a 128 MB ceiling, with no reaction to memory warnings beyond NSCache's own | Memory |
 
 ## Findings
 
@@ -314,6 +314,11 @@ either misbehaves, putting the `.id(selectedTab)` stack back for iOS in `RootVie
 `AppState` caches are small (arrays of model references and an hour of TMDB detail payloads) and are the
 right trade. This is Low: worth a `UIApplication.didReceiveMemoryWarningNotification` observer that clears
 `responseCache` and the stale `derivedCache` entries, mostly so that a jetsam report never names the app.
+
+**Fixed (same day).** On iOS, `AppState` observes the memory warning and empties `responseCache`,
+`derivedCache` (all of it: the visible page recomputes its value when it next draws) and `titleCache`. It leaves
+`offMainCache`, which pages show while a new value is worked out, the progress map, and `ImageCache`, which evicts
+on its own.
 
 ## What is already right for iOS
 

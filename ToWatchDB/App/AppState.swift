@@ -148,8 +148,27 @@ final class AppState {
         attachLibrary()
         #if os(macOS)
         AppDelegate.appState = self
+        #else
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.releaseCaches() }
+        }
         #endif
     }
+
+    #if os(iOS)
+    @ObservationIgnored private var memoryWarningObserver: (any NSObjectProtocol)?
+
+    /// Under memory pressure, drops what's cheap to work out again: TMDB detail responses, derived values (pages
+    /// recompute theirs when they next draw), and the kept title lists. Not the off-main values pages show
+    /// while a new one is worked out, nor the progress map; posters are in an `NSCache`, which evicts on its own.
+    private func releaseCaches() {
+        responseCache.removeAll()
+        derivedCache.removeAll()
+        titleCache.removeAll()
+    }
+    #endif
 
     /// Whether the library is the empty stand-in for one that can't be read yet. Nothing syncs or refreshes into it.
     private var isPlaceholder: Bool { container === SharedLibrary.container && SharedLibrary.isPlaceholder }

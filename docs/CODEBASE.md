@@ -472,8 +472,8 @@ iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
 
 | File | What |
 |---|---|
-| `Components/RemoteImage.swift` | `ImageCache`, an in-memory `NSCache` of decoded `CGImage`s (256 MB on Mac, 128 MB on iOS). Decoding happens off the main thread. `RemoteImage` draws cached images on the first frame and fades in only fresh downloads, and ignores a download that finishes after its URL changed. A failed download is retried while it's on screen, except a 4xx answer (a removed poster is a 404) or a body that isn't an image. **Use it instead of `AsyncImage`.** |
-| `Components/PosterImage.swift` | `PosterImage`, a 2:3 poster with a placeholder, and `BackdropImage` |
+| `Components/RemoteImage.swift` | `ImageCache`, an in-memory `NSCache` of decoded `CGImage`s (256 MB on Mac, 128 MB on iOS). Decoding happens off the main thread. `RemoteImage` draws cached images on the first frame and fades in only fresh downloads, and ignores a download that finishes after its URL changed. A failed download is retried while it's on screen, except a 4xx answer (a removed poster is a 404) or a body that isn't an image. A download is cancelled when the last view waiting for it goes away. Also `NetworkConditions`, which tells views when the network is in Low Data Mode (`NWPathMonitor`). **Use it instead of `AsyncImage`.** |
+| `Components/PosterImage.swift` | `PosterImage`, a 2:3 poster with a placeholder, and `BackdropImage`. In Low Data Mode, posters are w185 instead of w342 and backdrops show their gradient only |
 | `Components/EmptyState.swift` | `.centeredEmptyState(isShown) { … }`. Every empty message is centered on the page, even over a scroll view with a header. |
 | `Components/PageHost.swift` | See §5.4 |
 | `Components/RowList.swift` | `RowList`, `.rowListRow()`, `RowListHeader`: rows in a `List` on iOS, a lazy stack on macOS (§7, item 14) |
@@ -681,7 +681,9 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.
 10. **Refresh in parallel, save once.** `refreshStale` fetches 4 titles at a time and saves at the end; every
     save redraws each open page. `apply` only writes episode and season fields that changed.
-11. **One download per image.** `ImageCache` shares in-flight downloads between views showing the same URL.
+11. **One download per image.** `ImageCache` shares in-flight downloads between views showing the same URL, counts
+    the views waiting for each, and cancels it when the last one is cancelled: flicking through a grid on cellular
+    fetched every poster it passed.
 12. **Detail responses are cached for an hour** (`appState.cachedResponse`): Where to Watch and TMDB previews.
 13. **Keep the Mac toolbar still across page switches.** When a switch adds or removes a toolbar item, AppKit
     re-lays out the toolbar and recalculates the key view loop of the whole window, hidden `PageHost` pages

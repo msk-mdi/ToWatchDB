@@ -26,7 +26,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 4 | Medium, fixed | Every launch fetches every movie and show in full to look for duplicates | Launch |
 | 5 | Medium, fixed | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
 | 6 | Medium, fixed | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
-| 7 | Low | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
+| 7 | Low, fixed | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
 | 8 | Low | Each visible episode row runs a query for its notes | Detail page |
 | 9 | Low | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
 | 10 | Low | No `#Index` on the columns every predicate filters by | Store |
@@ -232,6 +232,13 @@ it is a one-time cost per poster, but `URLSession` does not reduce usage in Low 
   backdrops, or set `allowsConstrainedNetworkAccess = false` on the image requests and show placeholders.
 - The retry loop is fine, but the 10 s first retry means an offline grid keeps 20 to 30 timers alive; a single
   shared "network came back" trigger would be cheaper.
+
+**Fixed (same day), the first two.** `ImageCache.load` counts the views waiting for each download and cancels it
+(`withTaskCancellationHandler`; `URLSession` stops the request) when the last one is cancelled; a view that stops
+waiting while others still wait leaves it going. A new `NetworkConditions` (`NWPathMonitor`) reports Low Data
+Mode: `PosterImage` asks for w185 instead of w342, and `BackdropImage` shows its gradient only. Only Low Data
+Mode, not every expensive (cellular) path: that's the user's own setting for using less. The retry loop is left
+as it is. Not measured on a device; Settings, Cellular after scrolling the grid is the check.
 
 ### 8. Low: each visible episode row runs a query for its notes
 

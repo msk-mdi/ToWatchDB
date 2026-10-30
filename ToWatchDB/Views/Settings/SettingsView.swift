@@ -63,27 +63,24 @@ struct SettingsView: View {
                     Text(tokenStatus).foregroundStyle(appState.token == nil ? .red : .secondary)
                 }
                 SecureField("Read access token", text: $tokenDraft, prompt: Text("Paste your API Read Access Token"))
-                HStack {
-                    Button("Save Token") {
-                        appState.setTokenOverride(tokenDraft)
-                        tokenDraft = ""
-                    }
-                    .disabled(tokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                    if appState.tokenOverride != nil {
-                        Button("Remove Token", role: .destructive) { appState.setTokenOverride(nil) }
-                    }
-                    Spacer()
-                    if isTesting { ProgressView().controlSize(.small) }
-                    Button("Test Connection") { test() }
-                        .disabled(appState.client == nil || isTesting)
+                KeyActions(save: "Save Token", remove: "Remove Token", test: "Test Connection",
+                           canSave: !tokenDraft.trimmingCharacters(in: .whitespaces).isEmpty,
+                           canRemove: appState.tokenOverride != nil,
+                           canTest: appState.client != nil, isTesting: isTesting) {
+                    appState.setTokenOverride(tokenDraft)
+                    tokenDraft = ""
+                } onRemove: {
+                    appState.setTokenOverride(nil)
+                } onTest: {
+                    test()
                 }
-                .rowButtonStyle()
                 if let testResult {
                     Text(testResult).font(.callout).foregroundStyle(.secondary)
                 }
                 Picker("Language", selection: $appState.language) {
                     ForEach(Self.languages, id: \.code) { Text($0.name).tag($0.code) }
                 }
+                .listPickerStyle()
                 Text("Titles, overviews, and episode names are fetched in this language when TMDB has a translation. Refresh the library to update existing titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -92,6 +89,7 @@ struct SettingsView: View {
                         Text(Locale.current.localizedString(forRegionCode: code) ?? code).tag(code)
                     }
                 }
+                .listPickerStyle()
             } header: {
                 Text("TMDB")
             } footer: {
@@ -200,26 +198,20 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             SecureField("OMDb API key", text: $omdbKeyDraft, prompt: Text("Paste your OMDb API key"))
-            HStack {
-                Button("Save Key") {
-                    appState.setOMDbKey(omdbKeyDraft)
-                    omdbKeyDraft = ""
-                    omdbTestResult = nil
-                    Task { await appState.library.refreshStaleIMDbRatings() }
-                }
-                .disabled(omdbKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                if appState.omdbKey != nil {
-                    Button("Remove Key", role: .destructive) {
-                        appState.setOMDbKey(nil)
-                        omdbTestResult = nil
-                    }
-                }
-                Spacer()
-                if isTestingOMDb { ProgressView().controlSize(.small) }
-                Button("Test Key") { testOMDb() }
-                    .disabled(appState.imdb == nil || isTestingOMDb)
+            KeyActions(save: "Save Key", remove: "Remove Key", test: "Test Key",
+                       canSave: !omdbKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty,
+                       canRemove: appState.omdbKey != nil,
+                       canTest: appState.imdb != nil, isTesting: isTestingOMDb) {
+                appState.setOMDbKey(omdbKeyDraft)
+                omdbKeyDraft = ""
+                omdbTestResult = nil
+                Task { await appState.library.refreshStaleIMDbRatings() }
+            } onRemove: {
+                appState.setOMDbKey(nil)
+                omdbTestResult = nil
+            } onTest: {
+                testOMDb()
             }
-            .rowButtonStyle()
             if let omdbTestResult {
                 Text(omdbTestResult).font(.callout).foregroundStyle(.secondary)
             }
@@ -490,6 +482,54 @@ private extension View {
         buttonStyle(.borderless)
         #else
         self
+        #endif
+    }
+
+    /// Long lists open on their own screen on iOS, where a menu would run off the screen and the value
+    /// would wrap under the label.
+    func listPickerStyle() -> some View {
+        #if os(iOS)
+        pickerStyle(.navigationLink)
+        #else
+        self
+        #endif
+    }
+}
+
+/// Save, Remove, and Test buttons for a key or token. They share a row on macOS; on iOS they don't fit
+/// one, so each gets its own row, with the destructive one last.
+private struct KeyActions: View {
+    let save: String
+    let remove: String
+    let test: String
+    let canSave: Bool
+    let canRemove: Bool
+    let canTest: Bool
+    let isTesting: Bool
+    let onSave: () -> Void
+    let onRemove: () -> Void
+    let onTest: () -> Void
+
+    var body: some View {
+        #if os(iOS)
+        Button(save, action: onSave).disabled(!canSave)
+        Button(action: onTest) {
+            HStack {
+                Text(test)
+                Spacer()
+                if isTesting { ProgressView() }
+            }
+        }
+        .disabled(!canTest || isTesting)
+        if canRemove { Button(remove, role: .destructive, action: onRemove) }
+        #else
+        HStack {
+            Button(save, action: onSave).disabled(!canSave)
+            if canRemove { Button(remove, role: .destructive, action: onRemove) }
+            Spacer()
+            if isTesting { ProgressView().controlSize(.small) }
+            Button(test, action: onTest).disabled(!canTest || isTesting)
+        }
         #endif
     }
 }

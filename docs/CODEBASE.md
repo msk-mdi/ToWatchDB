@@ -125,7 +125,7 @@ Scripts/
 docs/CODEBASE.md                This file
 ```
 
-About 16,100 lines of Swift in total (version 2.1.0).
+About 16,800 lines of Swift in total.
 
 ---
 
@@ -789,7 +789,7 @@ tokens, keys, or a URL error (it carries the URL, which holds the OMDb key).
 
 ### Unit tests
 
-There are 75 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/`, written with Swift Testing. They cover:
+There are 84 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/`, written with Swift Testing. They cover:
 - decoding the recorded fixtures
 - date parsing
 - watch status and next-episode logic
@@ -803,9 +803,12 @@ There are 75 tests in `Packages/ToWatchCore/Tests/ToWatchCoreTests/`, written wi
 - cleaning up rules when a space or tag is deleted
 - sync applying only the titles a merge changed, merging duplicate titles, a refresh stopping on a rejected token,
   opening a library saved before schema versioning, and every show's progress from one fetch
+- applying a sync and importing a backup in slices (the same library as in one go, a show never split, an apply
+  stopping when an edit lands between slices), the launch's duplicate check, a refresh telling unreachable titles
+  from failed ones, and which episodes have notes
 - `DropboxSync` against a fake Dropbox (`DropboxSyncTests.swift`): an unchanged file costs one revision request,
   edits reach the other device, a conflict merges again, a revoked sign-in signs out, disconnecting mid-sync uploads
-  nothing, and saves that keep landing end the sync quietly
+  nothing, saves that keep landing end the sync quietly, and a first sync of several slices applies whole
 - `SealedSecretsFile` (`SealedSecretsFileTests.swift`, Macs with a Secure Enclave): secrets read back, saving one
   keeps the others, a damaged file is replaced, and one that can't be read is neither empty nor overwritten
 

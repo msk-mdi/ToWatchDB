@@ -305,6 +305,9 @@ one from `SharedLibrary.service`. A save that fails is rolled back, logged, and 
 - **CSV:** fields that start like a formula (`=`, `+`, `-`, `@`) get a leading apostrophe. The app writes the
   file with a UTF-8 byte-order mark so Excel reads accented titles correctly.
 - **Import is a merge (`importBackup`):**
+  - The app imports a picked file with `importBackupInSlices`: about 500 titles and episodes at a time, each slice
+    saved before the main thread is given back (§7, item 19). Each slice reads only its own titles, seasons, and
+    episodes. A slice saved before a failure is harmless: importing again merges the rest without duplicating.
   - Titles match by TMDB ID.
   - Flags (watched, backlog, favorite, abandoned) are kept if set on either side.
   - Local dates and ratings win; the backup fills in gaps.
@@ -537,7 +540,11 @@ the local date.
   apply never meets one; it would keep one copy and delete the other with its watch data. Given
   `LibrarySync.changes(from:to:)` (worked out off the main thread with the merge), it writes only the titles the
   merge changed and only checks the rest are still there: applying all of them walked every episode on the main
-  thread (about 0.75 s for 300 shows) even for one edit. `sameContent`
+  thread (about 0.75 s for 300 shows) even for one edit. The driver applies with `applySyncedBackupInSlices`: a large apply
+  (a first sync) writes its titles a slice at a time, saving each, and deletes what the merge doesn't hold with the last
+  one. An edit saved between slices (each slice's own save counts as one version) stops it, and the driver merges again:
+  the slices already saved hold the merge's values, the base is only saved after a whole apply, and merging is
+  idempotent, so a partly applied sync is harmless. `sameContent`
   decides whether to upload by comparing only what the user owns (titles, watch data, ratings, notes,
   collections), not TMDB or IMDb details, which each device refreshes at its own times. An empty library whose
   base had 5 or more titles merges as a first sync (`usableBase`), so a lost store can't empty the file.
@@ -688,6 +695,12 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     it can be helped: `showProgress()` rebuilds through `TVShow.progressSnapshotIndex(in:)` in a context of its
     own and `ShowProgress.resolve` fetches the next episodes back into the main context in one go (6 ms for 300);
     `shortcutsContent()` and the Siri entity query (`ShowQuery.suggestedEntities`) use a background context too.
+19. **Write a whole library in slices.** A first Dropbox sync or a backup import of 300 shows of 72 episodes held the
+    main thread for about 3.3 s in one transaction. `applySyncedBackupInSlices` and `importBackupInSlices` save every
+    500 titles and episodes (`LibraryService.sliceSize`; a show is never split) and yield: at most 0.09 s per slice
+    (0.2 s with 1,000), and the same total. Each save redraws open pages and restarts the 5 s sync wait, which is
+    fine for a one-off. Splitting an import into sub-backups that each read the whole library cost more than the
+    slice itself (0.5 s per read of every episode), so each slice reads only its own titles.
 
 To measure page switches, see §9.
 

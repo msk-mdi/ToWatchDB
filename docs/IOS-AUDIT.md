@@ -24,7 +24,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 2 | High, fixed | First visit to Up Next or Library, a new day, or a large refresh rebuilds the progress index on the main thread | Main thread |
 | 3 | Medium | A launch before first unlock crashes on purpose (`fatalError`), including iOS prewarming and background Siri launches | Stability |
 | 4 | Medium | Every launch fetches every movie and show in full to look for duplicates | Launch |
-| 5 | Medium | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
+| 5 | Medium, fixed | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
 | 6 | Medium | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
 | 7 | Low | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
 | 8 | Low | Each visible episode row runs a query for its notes | Detail page |
@@ -149,6 +149,19 @@ so it is Medium rather than High, but it is also the user's first impression of 
   guide's reason for saving once (each save redraws every page) matters less during a one-off import behind
   a progress sheet.
 - Show progress for the first sync; today the Settings row only shows a spinner.
+
+**Fixed (same day).** Both now write in slices of about 500 titles and episodes, saving each and yielding the
+main thread between them (`applySyncedBackupInSlices`, `importBackupInSlices`). Measured on a Mac with 300 shows of
+72 episodes: the longest main-thread hold went from 3.3 s to 0.09 s, for the same total time. The sync apply keeps
+its deletions for the last slice and stops when an edit lands between slices, so the sync merges again rather than
+undo it; a partly applied sync is harmless because the base is only saved after a whole apply. The progress
+display for the first sync is not done.
+
+Measured while fixing: splitting the import into sub-backups that each go through `importBackup` was slower than
+one go (4.2 s against 3.1 s), with each chunk holding the main thread 0.5 to 0.9 s, because every chunk read every
+season and episode again. Each slice now reads only its own titles. The first recommendation, a background context, was not
+tried: slicing keeps the apply on the main context, whose saves are what the app watches to bump the library
+version, clear its caches, and schedule the next sync.
 
 ### 6. Medium: a launch refresh interrupted by backgrounding has no background task and leaves titles stale for an hour
 

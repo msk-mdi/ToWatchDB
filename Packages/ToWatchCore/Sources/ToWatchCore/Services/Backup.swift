@@ -271,14 +271,25 @@ public extension LibraryService {
 
     /// Every season grouped by show and every episode grouped by season, in one fetch each.
     /// Reading `show.seasons` and `season.episodes` ran a query per show and per season.
-    internal nonisolated static func seasonsAndEpisodes(in context: ModelContext) throws
+    /// `shows` narrows it to the shows with those TMDB IDs.
+    internal nonisolated static func seasonsAndEpisodes(in context: ModelContext, shows ids: [Int]? = nil) throws
         -> (seasons: [PersistentIdentifier: [Season]], episodes: [PersistentIdentifier: [Episode]]) {
+        var seasons = FetchDescriptor<Season>(), episodes = FetchDescriptor<Episode>()
+        if let ids {
+            // `flatMap`, never a force unwrap, which can't be translated (see `refreshStale`).
+            seasons.predicate = #Predicate { season in
+                season.show.flatMap { show in ids.contains(show.tmdbID) } ?? false
+            }
+            episodes.predicate = #Predicate { episode in
+                episode.season.flatMap { season in season.show.flatMap { show in ids.contains(show.tmdbID) } } ?? false
+            }
+        }
         var seasonsByShow: [PersistentIdentifier: [Season]] = [:]
-        for season in try context.fetch(FetchDescriptor<Season>()) {
+        for season in try context.fetch(seasons) {
             if let show = season.show { seasonsByShow[show.persistentModelID, default: []].append(season) }
         }
         var episodesBySeason: [PersistentIdentifier: [Episode]] = [:]
-        for episode in try context.fetch(FetchDescriptor<Episode>()) {
+        for episode in try context.fetch(episodes) {
             if let season = episode.season { episodesBySeason[season.persistentModelID, default: []].append(episode) }
         }
         return (seasonsByShow, episodesBySeason)
@@ -435,13 +446,55 @@ public extension LibraryService {
     /// - Spaces, tags, and smart lists match by ID (tags also by name); memberships are unioned.
     @discardableResult
     func importBackup(_ backup: LibraryBackup) throws -> ImportSummary {
+        let summary = try importUnsaved(backup, readsOnlyItsTitles: false)
+        try commit()
+        return summary
+    }
+
+    /// `importBackup` for a file picked by the user, which can hold a whole library: its titles are merged a slice at
+    /// a time, each saved before the main thread is given back, so the app keeps drawing. Done in one go, 300 shows
+    /// held the main thread for about 3 s on a Mac. Each slice reads only its own titles, seasons, and episodes:
+    /// reading the whole library again for each one cost more than the slice itself. An import merges, so a slice
+    /// saved before a failure is kept, and importing the file again finishes it without duplicating anything.
+    @discardableResult
+    func importBackupInSlices(_ backup: LibraryBackup, sliceSize: Int = LibraryService.sliceSize) async throws -> ImportSummary {
+        var summary = ImportSummary()
+        for (index, slice) in Self.slices(backup, size: sliceSize).enumerated() {
+            if index > 0 { await Task.yield() }
+            // Every slice carries the spaces and tags, which memberships point at by the file's IDs (a tag found here
+            // by name has another); after the first they're found already here.
+            var part = LibraryBackup()
+            part.spaces = backup.spaces
+            part.tags = backup.tags
+            if index == 0 { part.smartLists = backup.smartLists }
+            part.movies = Array(backup.movies[slice.movies])
+            part.shows = Array(backup.shows[slice.shows])
+            let added = try importUnsaved(part, readsOnlyItsTitles: true)
+            try commit()
+            summary.moviesAdded += added.moviesAdded
+            summary.moviesMerged += added.moviesMerged
+            summary.showsAdded += added.showsAdded
+            summary.showsMerged += added.showsMerged
+            summary.collectionsAdded += added.collectionsAdded
+        }
+        return summary
+    }
+
+    /// `readsOnlyItsTitles` fetches only the backup's titles and their seasons and episodes, for a slice of a larger one.
+    private func importUnsaved(_ backup: LibraryBackup, readsOnlyItsTitles: Bool) throws -> ImportSummary {
         var summary = ImportSummary()
         // One fetch each instead of one per record (which also had to search the growing unsaved inserts).
         // Before any insert, so a failed fetch leaves nothing pending.
         // Titles deleted but not saved yet (`mergeDuplicateTitles`) aren't merged into.
-        var moviesByID = Dictionary(try context.fetch(FetchDescriptor<Movie>()).filter(\.isLive).map { ($0.tmdbID, $0) }) { first, _ in first }
-        var showsByID = Dictionary(try context.fetch(FetchDescriptor<TVShow>()).filter(\.isLive).map { ($0.tmdbID, $0) }) { first, _ in first }
-        let stored = try Self.seasonsAndEpisodes(in: context)
+        var movies = FetchDescriptor<Movie>(), shows = FetchDescriptor<TVShow>()
+        let movieIDs = backup.movies.map(\.tmdbID), showIDs = backup.shows.map(\.tmdbID)
+        if readsOnlyItsTitles {
+            movies.predicate = #Predicate { movieIDs.contains($0.tmdbID) }
+            shows.predicate = #Predicate { showIDs.contains($0.tmdbID) }
+        }
+        var moviesByID = Dictionary(try context.fetch(movies).filter(\.isLive).map { ($0.tmdbID, $0) }) { first, _ in first }
+        var showsByID = Dictionary(try context.fetch(shows).filter(\.isLive).map { ($0.tmdbID, $0) }) { first, _ in first }
+        let stored = try Self.seasonsAndEpisodes(in: context, shows: readsOnlyItsTitles ? showIDs : nil)
 
         var spaces: [UUID: Space] = [:]
         for record in backup.spaces {
@@ -522,8 +575,6 @@ public extension LibraryService {
             if let merged = union(show.tags, record.tagIDs.compactMap { tags[$0] }) { show.tags = merged }
             mergeSeasons(record.seasons, into: show, existing: stored)
         }
-
-        try commit()
         return summary
     }
 

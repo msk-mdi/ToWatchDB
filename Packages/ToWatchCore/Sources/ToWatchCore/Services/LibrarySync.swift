@@ -409,86 +409,188 @@ public extension LibraryService {
         }
     }
 
+    /// `applySyncedBackup` for a large apply (a first sync brings in the whole library): titles are written a slice
+    /// at a time, each saved before the main thread is given back, so the app keeps drawing. Done in one go, a first
+    /// sync of 300 shows held the main thread for about 3.3 s (Mac) and kept every model of the library pending.
+    /// Titles and collections missing from the merge are deleted with the last slice.
+    ///
+    /// Stops and returns nil when the library changed between slices other than by this apply: `isUndisturbed` is
+    /// asked with the number of slices saved so far, and a change waiting to be saved counts too. Applying on would
+    /// undo that edit for titles not reached yet. The slices already saved are harmless: they hold the merge's
+    /// values, and merging again with them gives the same result.
+    func applySyncedBackupInSlices(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges? = nil,
+                                   sliceSize: Int = LibraryService.sliceSize,
+                                   isUndisturbed: (_ savedSlices: Int) -> Bool) async throws -> Bool? {
+        var saves = 0, changed = false
+        do {
+            var apply = try SyncApply(backup, changes: changes, in: self)
+            let slices = Self.slices(backup, changes: changes, size: sliceSize)
+            for (index, slice) in slices.enumerated() {
+                apply.apply(movies: backup.movies[slice.movies], shows: backup.shows[slice.shows])
+                guard index < slices.count - 1 else { break }
+                if context.hasChanges {
+                    try commit()
+                    saves += 1
+                    changed = true
+                }
+                await Task.yield()
+                try Task.checkCancellation()
+                guard isUndisturbed(saves), !context.hasChanges else { return nil }
+            }
+            apply.deleteTitlesNotKept()
+            guard context.hasChanges else { return changed }
+            try commit()
+            return true
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
     private func applyUnsaved(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges?) throws -> Bool {
-        let notes = try notesByOwner()
-        // A few shows read their own seasons and episodes; many (a first sync) read them all in one fetch each.
-        let stored = changes.map { $0.shows.count > 50 } ?? true ? try Self.seasonsAndEpisodes(in: context) : nil
-        let spaces = try upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
-                                modelKey: \.uuid) { record in
-            let space = Space(name: record.name, symbolName: record.symbolName, colorName: record.colorName)
-            space.uuid = record.uuid
-            space.createdAt = record.createdAt
-            context.insert(space)
-            return space
-        } update: { space, record in
-            assign(space, \.name, record.name)
-            assign(space, \.symbolName, record.symbolName)
-            assign(space, \.colorName, record.colorName)
-        }
-        let tags = try upsert(backup.tags, existing: context.fetch(FetchDescriptor<MediaTag>()), key: \.uuid,
-                              modelKey: \.uuid) { record in
-            let tag = MediaTag(name: record.name, colorName: record.colorName)
-            tag.uuid = record.uuid
-            tag.createdAt = record.createdAt
-            context.insert(tag)
-            return tag
-        } update: { tag, record in
-            assign(tag, \.name, record.name)
-            assign(tag, \.colorName, record.colorName)
-        }
-        try upsert(backup.smartLists, existing: context.fetch(FetchDescriptor<SmartList>()), key: \.uuid,
-                   modelKey: \.uuid) { record in
-            let list = SmartList(name: record.name, rules: record.rules)
-            list.uuid = record.uuid
-            list.createdAt = record.createdAt
-            list.symbolName = record.symbolName
-            list.colorName = record.colorName
-            context.insert(list)
-            return list
-        } update: { list, record in
-            assign(list, \.name, record.name)
-            assign(list, \.symbolName, record.symbolName)
-            assign(list, \.colorName, record.colorName)
-            if list.rules != record.rules { list.rules = record.rules }
-        }
-
-        var movies = FetchDescriptor<Movie>()
-        if changes == nil { movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags] }
-        try upsert(backup.movies, existing: context.fetch(movies), key: \.tmdbID,
-                   modelKey: \.tmdbID, make: makeMovie) { movie, record in
-            guard changes?.movies.contains(record.tmdbID) ?? true else { return }
-            assign(movie, \.isWatched, record.isWatched)
-            assign(movie, \.watchedDate, record.watchedDate)
-            assign(movie, \.userRating, record.userRating)
-            assign(movie, \.isInBacklog, record.isInBacklog)
-            assign(movie, \.isFavorite, record.isFavorite)
-            assign(movie, \.addedDate, record.addedDate)
-            movie.adoptIMDbRating(from: record)
-            setNotes(record.notes, on: notes.movies[movie.persistentModelID]) { $0.movie = movie }
-            if Set((movie.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { movie.spaces = record.spaceIDs.compactMap { spaces[$0] } }
-            if Set((movie.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { movie.tags = record.tagIDs.compactMap { tags[$0] } }
-        }
-
-        var shows = FetchDescriptor<TVShow>()
-        if changes == nil { shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags] }
-        try upsert(backup.shows, existing: context.fetch(shows), key: \.tmdbID,
-                   modelKey: \.tmdbID, make: makeShow) { show, record in
-            guard changes?.shows.contains(record.tmdbID) ?? true else { return }
-            assign(show, \.userRating, record.userRating)
-            assign(show, \.isInBacklog, record.isInBacklog)
-            assign(show, \.isFavorite, record.isFavorite)
-            assign(show, \.isAbandoned, record.isAbandoned)
-            assign(show, \.addedDate, record.addedDate)
-            show.adoptIMDbRating(from: record)
-            setNotes(record.notes, on: notes.shows[show.persistentModelID]) { $0.show = show }
-            if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
-            if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }
-            setEpisodes(record.seasons, on: show, existing: stored ?? Self.seasonsAndEpisodes(of: show), notes: notes.episodes)
-        }
-
+        var apply = try SyncApply(backup, changes: changes, in: self)
+        apply.apply(movies: backup.movies[...], shows: backup.shows[...])
+        apply.deleteTitlesNotKept()
         guard context.hasChanges else { return false }
         try commit()
         return true
+    }
+
+    /// How much a slice of a large apply or import writes: a title counts 1 and each of a show's episodes 1 more.
+    /// Measured on a Mac with 300 shows of 72 episodes: at most 0.09 s of main-thread time per slice (0.2 s with
+    /// 1,000), and the same total as one go. A title the apply only checks is still there costs nothing.
+    static let sliceSize = 500
+
+    /// Consecutive ranges of movies, then of shows, each writing about `size`. A show is never split.
+    internal static func slices(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges? = nil, size: Int)
+        -> [(movies: Range<Int>, shows: Range<Int>)] {
+        var slices: [(movies: Range<Int>, shows: Range<Int>)] = []
+        var movieStart = 0, showStart = 0, weight = 0
+        func cut(movies: Int, shows: Int) {
+            slices.append((movieStart..<movies, showStart..<shows))
+            (movieStart, showStart, weight) = (movies, shows, 0)
+        }
+        for (index, movie) in backup.movies.enumerated() where changes?.movies.contains(movie.tmdbID) ?? true {
+            weight += 1
+            if weight >= size { cut(movies: index + 1, shows: 0) }
+        }
+        let movieEnd = backup.movies.count
+        for (index, show) in backup.shows.enumerated() where changes?.shows.contains(show.tmdbID) ?? true {
+            weight += 1 + show.seasons.reduce(0) { $0 + $1.episodes.count }
+            if weight >= size { cut(movies: movieEnd, shows: index + 1) }
+        }
+        if slices.isEmpty || movieStart < movieEnd || showStart < backup.shows.count {
+            // Titles after the last cut that write nothing join the slice before them.
+            if weight == 0, let last = slices.popLast() { (movieStart, showStart) = (last.movies.lowerBound, last.shows.lowerBound) }
+            cut(movies: movieEnd, shows: backup.shows.count)
+        }
+        return slices
+    }
+
+    /// One apply of a merged snapshot, in steps: the collections when it starts, then titles in any number of
+    /// slices, then the deletion of titles the snapshot doesn't hold, which has to wait until every slice is in.
+    @MainActor
+    private struct SyncApply {
+        let library: LibraryService
+        let changes: LibrarySync.TitleChanges?
+        let notes: NotesByOwner
+        /// Every season and episode, read in one fetch when many shows change; otherwise each show reads its own.
+        let stored: (seasons: [PersistentIdentifier: [Season]], episodes: [PersistentIdentifier: [Episode]])?
+        let spaces: [UUID: Space]
+        let tags: [UUID: MediaTag]
+        var movies: Upsert<Movie, Int>
+        var shows: Upsert<TVShow, Int>
+
+        init(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges?, in library: LibraryService) throws {
+            self.library = library
+            self.changes = changes
+            let context = library.context
+            notes = try library.notesByOwner()
+            // A few shows read their own seasons and episodes; many (a first sync) read them all in one fetch each.
+            stored = changes.map { $0.shows.count > 50 } ?? true ? try LibraryService.seasonsAndEpisodes(in: context) : nil
+            spaces = try library.upsert(backup.spaces, existing: context.fetch(FetchDescriptor<Space>()), key: \.uuid,
+                                        modelKey: \.uuid) { record in
+                let space = Space(name: record.name, symbolName: record.symbolName, colorName: record.colorName)
+                space.uuid = record.uuid
+                space.createdAt = record.createdAt
+                context.insert(space)
+                return space
+            } update: { space, record in
+                library.assign(space, \.name, record.name)
+                library.assign(space, \.symbolName, record.symbolName)
+                library.assign(space, \.colorName, record.colorName)
+            }
+            tags = try library.upsert(backup.tags, existing: context.fetch(FetchDescriptor<MediaTag>()), key: \.uuid,
+                                      modelKey: \.uuid) { record in
+                let tag = MediaTag(name: record.name, colorName: record.colorName)
+                tag.uuid = record.uuid
+                tag.createdAt = record.createdAt
+                context.insert(tag)
+                return tag
+            } update: { tag, record in
+                library.assign(tag, \.name, record.name)
+                library.assign(tag, \.colorName, record.colorName)
+            }
+            try library.upsert(backup.smartLists, existing: context.fetch(FetchDescriptor<SmartList>()), key: \.uuid,
+                               modelKey: \.uuid) { record in
+                let list = SmartList(name: record.name, rules: record.rules)
+                list.uuid = record.uuid
+                list.createdAt = record.createdAt
+                list.symbolName = record.symbolName
+                list.colorName = record.colorName
+                context.insert(list)
+                return list
+            } update: { list, record in
+                library.assign(list, \.name, record.name)
+                library.assign(list, \.symbolName, record.symbolName)
+                library.assign(list, \.colorName, record.colorName)
+                if list.rules != record.rules { list.rules = record.rules }
+            }
+
+            var movies = FetchDescriptor<Movie>()
+            if changes == nil { movies.relationshipKeyPathsForPrefetching = [\.spaces, \.tags] }
+            self.movies = Upsert(try context.fetch(movies), key: \.tmdbID, in: context)
+            var shows = FetchDescriptor<TVShow>()
+            if changes == nil { shows.relationshipKeyPathsForPrefetching = [\.spaces, \.tags] }
+            self.shows = Upsert(try context.fetch(shows), key: \.tmdbID, in: context)
+        }
+
+        mutating func apply(movies movieRecords: ArraySlice<LibraryBackup.MovieRecord>,
+                            shows showRecords: ArraySlice<LibraryBackup.ShowRecord>) {
+            let (library, changes, notes, stored, spaces, tags) = (library, changes, notes, stored, spaces, tags)
+            movies.apply(movieRecords, key: \.tmdbID, make: library.makeMovie) { movie, record in
+                guard changes?.movies.contains(record.tmdbID) ?? true else { return }
+                library.assign(movie, \.isWatched, record.isWatched)
+                library.assign(movie, \.watchedDate, record.watchedDate)
+                library.assign(movie, \.userRating, record.userRating)
+                library.assign(movie, \.isInBacklog, record.isInBacklog)
+                library.assign(movie, \.isFavorite, record.isFavorite)
+                library.assign(movie, \.addedDate, record.addedDate)
+                movie.adoptIMDbRating(from: record)
+                library.setNotes(record.notes, on: notes.movies[movie.persistentModelID]) { $0.movie = movie }
+                if Set((movie.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { movie.spaces = record.spaceIDs.compactMap { spaces[$0] } }
+                if Set((movie.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { movie.tags = record.tagIDs.compactMap { tags[$0] } }
+            }
+            shows.apply(showRecords, key: \.tmdbID, make: library.makeShow) { show, record in
+                guard changes?.shows.contains(record.tmdbID) ?? true else { return }
+                library.assign(show, \.userRating, record.userRating)
+                library.assign(show, \.isInBacklog, record.isInBacklog)
+                library.assign(show, \.isFavorite, record.isFavorite)
+                library.assign(show, \.isAbandoned, record.isAbandoned)
+                library.assign(show, \.addedDate, record.addedDate)
+                show.adoptIMDbRating(from: record)
+                library.setNotes(record.notes, on: notes.shows[show.persistentModelID]) { $0.show = show }
+                if Set((show.spaces ?? []).map(\.uuid)) != Set(record.spaceIDs) { show.spaces = record.spaceIDs.compactMap { spaces[$0] } }
+                if Set((show.tags ?? []).map(\.uuid)) != Set(record.tagIDs) { show.tags = record.tagIDs.compactMap { tags[$0] } }
+                library.setEpisodes(record.seasons, on: show, existing: stored ?? LibraryService.seasonsAndEpisodes(of: show),
+                                    notes: notes.episodes)
+            }
+        }
+
+        func deleteTitlesNotKept() {
+            movies.deleteUnkept(in: library.context)
+            shows.deleteUnkept(in: library.context)
+        }
     }
 
     /// One show's seasons and episodes, shaped like `seasonsAndEpisodes(in:)`.
@@ -505,24 +607,42 @@ public extension LibraryService {
     private func upsert<M: PersistentModel, R, K: Hashable>(_ records: [R], existing: [M], key: KeyPath<R, K>,
                                                              modelKey: KeyPath<M, K>, make: (R) -> M,
                                                              update: (M, R) -> Void) -> [K: M] {
-        var byKey: [K: M] = [:]
-        for model in existing {
-            let k = model[keyPath: modelKey]
-            // A duplicate. `mergeDuplicateTitles` folds title copies together at launch, so this is a last resort.
-            if byKey[k] == nil { byKey[k] = model } else {
-                Log.sync.error("Deleted a duplicate \(String(describing: M.self), privacy: .public) while applying a sync")
-                context.delete(model)
+        var upsert = Upsert(existing, key: modelKey, in: context)
+        upsert.apply(records[...], key: key, make: make, update: update)
+        upsert.deleteUnkept(in: context)
+        return upsert.kept
+    }
+
+    /// `upsert` in steps, so the records can be applied in slices: models no record kept are deleted only after
+    /// the last one.
+    @MainActor
+    private struct Upsert<M: PersistentModel, K: Hashable> {
+        private var existing: [K: M] = [:]
+        private(set) var kept: [K: M] = [:]
+
+        init(_ models: [M], key: KeyPath<M, K>, in context: ModelContext) {
+            for model in models {
+                let k = model[keyPath: key]
+                // A duplicate. `mergeDuplicateTitles` folds title copies together at launch, so this is a last resort.
+                if existing[k] == nil { existing[k] = model } else {
+                    Log.sync.error("Deleted a duplicate \(String(describing: M.self), privacy: .public) while applying a sync")
+                    context.delete(model)
+                }
             }
         }
-        var kept: [K: M] = [:]
-        for record in records {
-            let k = record[keyPath: key]
-            let model = byKey[k] ?? make(record)
-            update(model, record)
-            kept[k] = model
+
+        mutating func apply<R>(_ records: ArraySlice<R>, key: KeyPath<R, K>, make: (R) -> M, update: (M, R) -> Void) {
+            for record in records {
+                let k = record[keyPath: key]
+                let model = existing[k] ?? make(record)
+                update(model, record)
+                kept[k] = model
+            }
         }
-        for (k, model) in byKey where kept[k] == nil { context.delete(model) }
-        return kept
+
+        func deleteUnkept(in context: ModelContext) {
+            for (k, model) in existing where kept[k] == nil { context.delete(model) }
+        }
     }
 
     private func setNotes(_ records: [LibraryBackup.NoteRecord], on existing: @autoclosure () -> [Note]?,

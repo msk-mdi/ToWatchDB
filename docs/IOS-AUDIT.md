@@ -30,7 +30,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 8 | Low, fixed | Each visible episode row runs a query for its notes | Detail page |
 | 9 | Low, fixed | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
 | 10 | Low | No `#Index` on the columns every predicate filters by | Store |
-| 11 | Low | iPad rebuilds the page on every sidebar switch | iPad |
+| 11 | Low, fixed, unchecked on a device | iPad rebuilds the page on every sidebar switch | iPad |
 | 12 | Low | The decoded image cache is a 128 MB ceiling, with no reaction to memory warnings beyond NSCache's own | Memory |
 
 ## Findings
@@ -295,6 +295,14 @@ get it.
 Library to Up Next and back rebuilds both. The cached lists keep it short, but the poster grid still
 re-measures and refills. `PageHost` was written to be platform-neutral; enabling it for the iPad regular
 width would make sidebar switches instant there too.
+
+**Fixed (same day), not checked on an iPad.** The sidebar layout's detail is now `PageHost` on iPad as on Mac.
+The iOS-only toolbar items pages added with a raw `.toolbar` (Discover's, Next to Watch's and Upcoming's Refresh,
+and the Settings button) now use `.pageToolbar`, which changes nothing on iPhone. Two things can only be checked
+on a device: whether SwiftUI gives each kept page's `NavigationStack` its own navigation bar inside the split view's
+detail column (rather than one bar for the column, which would show hidden pages' items), and `LibraryView`'s
+`.searchable`, left as it is because switching it off on hidden pages would rebuild the grid on every switch. If
+either misbehaves, putting the `.id(selectedTab)` stack back for iOS in `RootView.sidebar` undoes this.
 
 ### 12. Low: the decoded image cache is a 128 MB ceiling with no app-level reaction to memory warnings
 

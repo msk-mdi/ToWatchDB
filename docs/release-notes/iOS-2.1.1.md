@@ -1,0 +1,13 @@
+## What's new
+- Top Genres in Stats now shows each genre's name next to its bar instead of on top of it.
+- Up Next and Upcoming stay fresh: the app refreshes your titles in the background every few hours.
+- Leaving the app right after opening it no longer stops the launch refresh, and titles it couldn't reach are refreshed again the next time you open the app.
+- No more crash when Siri or a Shortcuts automation runs before your iPhone has been unlocked after a restart. They now ask you to unlock first.
+- Opening a list no longer pauses the app while it works out every show's progress, which also removes a pause about a second after launch.
+- A new device's first Dropbox sync, or importing a backup, no longer freezes the app.
+- Launching no longer looks for duplicate titles before the first screen appears.
+- Show pages load faster: the app checks which episodes have notes once per page instead of once per row.
+- When your Seerr server can't be reached, for example on cellular away from home, title pages stop waiting up to 15 seconds for it. They try again after 5 minutes, or right away after Test Connection.
+- Posters you scroll past are no longer downloaded. In Low Data Mode, posters are smaller and backdrops aren't downloaded.
+- On iPad, switching pages in the sidebar keeps them as you left them instead of rebuilding them.
+- The app frees its caches when iOS runs low on memory.

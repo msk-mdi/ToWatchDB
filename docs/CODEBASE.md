@@ -123,6 +123,8 @@ Scripts/
   generate-icons.swift          Draws the themed app icons and Settings previews
   snapshot-mac.sh               Debug visual pass: captures each screen's real window on macOS
 docs/CODEBASE.md                This file
+docs/release-notes/             Each release's notes, named after its tag (MacOS-x.y.z.md, iOS-x.y.z.md)
+.github/workflows/              ci.yml tests and builds every push; release.yml publishes a release per tag
 ```
 
 About 16,800 lines of Swift in total.

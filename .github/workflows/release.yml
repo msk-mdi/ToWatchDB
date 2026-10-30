@@ -1,0 +1,79 @@
+# Publishes a GitHub release when a version tag is pushed: `MacOS-<version>` builds ToWatchDB.app.zip, and
+# `iOS-<version>` builds the unsigned ToWatchDB.ipa. The notes are docs/release-notes/<tag>.md, followed by
+# GitHub's changelog link from the previous tag of the same platform. The tag's version must match
+# MARKETING_VERSION in project.yml. To publish an existing tag again, run it by hand with that tag.
+name: Release
+
+on:
+  push:
+    tags: ['MacOS-*', 'iOS-*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (MacOS-x.y.z or iOS-x.y.z)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag, version and notes
+        run: |
+          platform=${TAG%%-*}
+          version=${TAG#*-}
+          [[ $platform == MacOS || $platform == iOS ]] || { echo "::error::$TAG isn't a MacOS- or iOS- tag"; exit 1; }
+          project_version=$(sed -nE 's/^ *MARKETING_VERSION: "(.*)"/\1/p' project.yml)
+          [[ $version == "$project_version" ]] || { echo "::error::$TAG doesn't match MARKETING_VERSION $project_version"; exit 1; }
+          notes=docs/release-notes/$TAG.md
+          [[ -f $notes ]] || { echo "::error::$notes is missing"; exit 1; }
+          previous=$(git tag --list "$platform-*" --sort=-v:refname | grep -A1 -x "$TAG" | sed -n 2p)
+          {
+            echo "PLATFORM=$platform"
+            echo "VERSION=$version"
+            echo "NOTES=$notes"
+            echo "PREVIOUS=$previous"
+          } >> "$GITHUB_ENV"
+
+      # Release builds carry no TMDB token. The Dropbox app key isn't secret (sign-in uses PKCE), so it's a
+      # repository variable; without one, Settings explains how to turn sync on.
+      - name: Configure the build
+        env:
+          DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY }}
+        run: |
+          brew install xcodegen
+          if [[ -n $DROPBOX_APP_KEY ]]; then
+            echo "DROPBOX_APP_KEY = $DROPBOX_APP_KEY" > Config/Secrets.xcconfig
+          else
+            echo "::warning::No DROPBOX_APP_KEY repository variable: this build has no Dropbox sync"
+          fi
+
+      - name: Build for Mac
+        if: env.PLATFORM == 'MacOS'
+        run: |
+          Scripts/build-mac.sh
+          cp dist/ToWatchDB-mac.zip dist/ToWatchDB.app.zip
+          echo "ASSET=dist/ToWatchDB.app.zip" >> "$GITHUB_ENV"
+
+      - name: Build for iPhone and iPad
+        if: env.PLATFORM == 'iOS'
+        run: |
+          Scripts/build-ipa.sh
+          echo "ASSET=dist/ToWatchDB.ipa" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        run: |
+          args=(--title "$PLATFORM $VERSION" --notes-file "$NOTES" --generate-notes --verify-tag)
+          [[ -n $PREVIOUS ]] && args+=(--notes-start-tag "$PREVIOUS")
+          gh release create "$TAG" "$ASSET" "${args[@]}"

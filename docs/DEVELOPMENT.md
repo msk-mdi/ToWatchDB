@@ -78,6 +78,17 @@ The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml` 
 Releases are on the [GitHub releases page](https://github.com/msk-mdi/ToWatchDB/releases): `ToWatchDB.app.zip`
 for Mac and `ToWatchDB.ipa` for iPhone and iPad.
 
+To release: bump the version in `project.yml`, write `docs/release-notes/MacOS-<version>.md` and
+`docs/release-notes/iOS-<version>.md`, commit, then tag and push both:
+
+```bash
+git tag MacOS-2.1.1 && git tag iOS-2.1.1 && git push origin main MacOS-2.1.1 iOS-2.1.1
+```
+
+`.github/workflows/release.yml` builds each tag and publishes its release, with the notes and a changelog link.
+The Dropbox app key comes from the `DROPBOX_APP_KEY` repository variable (Settings ▸ Secrets and variables ▸
+Actions ▸ Variables); without it the release has no Dropbox sync. Builds are signed ad hoc, as the scripts do.
+
 ## Layout
 
 - `Packages/ToWatchCore` — TMDB, IMDb and Seerr clients, SwiftData models, library/watch-state/upcoming logic,

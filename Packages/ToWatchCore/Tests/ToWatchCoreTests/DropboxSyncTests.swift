@@ -230,6 +230,25 @@ struct DropboxSyncTests {
         #expect(!mac.sync.isConnected && mac.sync.lastError == nil)
     }
 
+    @Test func aFirstSyncLargerThanASliceAppliesWhole() async throws {
+        reset()
+        let mac = try Device(), phone = try Device()
+        // Six slices of an apply: one save each must not read as an edit landing, or the sync starts over after
+        // each slice and gives up after five passes.
+        let count = LibraryService.sliceSize * 5 + 200
+        for id in 1...count { phone.container.mainContext.insert(Movie(tmdbID: id, title: "Movie \(id)")) }
+        phone.library.save()
+        await phone.runSync()
+        mac.addMovie(5000, "Only on the Mac")
+        let before = mac.version
+        await mac.runSync()
+        #expect(mac.sync.lastError == nil)
+        #expect(mac.version - before == 6, "applied in six saves")
+        #expect(try mac.container.mainContext.fetchCount(FetchDescriptor<Movie>()) == count + 1)
+        #expect(try fileContents().movies.count == count + 1)
+        #expect(mac.sync.syncedVersion == mac.version)
+    }
+
     @Test func savesThatKeepLandingEndTheSyncQuietly() async throws {
         reset()
         let mac = try Device()

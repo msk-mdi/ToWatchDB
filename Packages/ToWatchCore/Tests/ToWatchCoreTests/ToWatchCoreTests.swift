@@ -1456,3 +1456,136 @@ private final class CountingUnauthorizedProtocol: URLProtocol {
     #expect(kept.regularEpisodes.count == show.regularEpisodes.count)
     #expect(try library.mergeDuplicateTitles() == 0)
 }
+
+// MARK: - Applying and importing in slices
+
+/// A library of Inception, Severance (watched, with notes on the show and an episode), and three small shows, as a backup.
+@MainActor
+private func slicedLibraryBackup() throws -> LibraryBackup {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    library.setWatched(movie, true, on: date("2024-12-31"))
+    let show = try insertSeverance(into: library)
+    let episodes = show.regularEpisodes
+    for episode in episodes.prefix(5) { library.setWatched(episode, true, on: date("2025-01-02")) }
+    library.addNote("Great pilot", to: episodes[0])
+    library.addNote("Watch with Sam", to: show)
+    let tag = try #require(library.createTag(name: "Rewatch", colorName: "red"))
+    library.toggle(tag, on: .show(show))
+    for id in 1...3 {
+        let small = TVShow(tmdbID: id, name: "Show \(id)")
+        library.context.insert(small)
+        let season = Season(tmdbID: id * 10, seasonNumber: 1)
+        library.context.insert(season)
+        season.show = small
+        for number in 1...2 {
+            let episode = Episode(tmdbID: id * 100 + number, seasonNumber: 1, episodeNumber: number)
+            library.context.insert(episode)
+            episode.season = season
+        }
+    }
+    library.save()
+    return LibrarySync.normalized(try library.makeBackup())
+}
+
+/// The library as a file holds it, titles in ID order (titles added in the same second have no other).
+@MainActor private func normalizedData(_ library: LibraryService) throws -> Data {
+    var backup = LibrarySync.normalized(try library.makeBackup())
+    backup.movies.sort { $0.tmdbID < $1.tmdbID }
+    backup.shows.sort { $0.tmdbID < $1.tmdbID }
+    return try BackupCoding.compactEncoder.encode(backup)
+}
+
+@MainActor @Test func slicesNeverSplitAShow() throws {
+    let backup = try slicedLibraryBackup()
+    // Severance has 13 episodes, more than a slice holds: the boundary that would fall inside it falls after it.
+    let slices = LibraryService.slices(backup, size: 3)
+    #expect(slices.flatMap { Array($0.movies) } == Array(backup.movies.indices))
+    #expect(slices.flatMap { Array($0.shows) } == Array(backup.shows.indices))
+    #expect(slices.count > 2)
+    // Titles the apply only checks weigh nothing, so an apply that changes one show is one slice.
+    let one = LibrarySync.TitleChanges(movies: [], shows: [1])
+    #expect(LibraryService.slices(backup, changes: one, size: 3).count == 1)
+    #expect(LibraryService.slices(LibraryBackup(), size: 3).count == 1)
+}
+
+@MainActor @Test func applyingInSlicesMatchesApplyingAtOnce() async throws {
+    let backup = try slicedLibraryBackup()
+    let whole = try makeLibrary(), sliced = try makeLibrary()
+    // Something the merge doesn't hold, deleted only once every slice is in.
+    for library in [whole, sliced] {
+        library.context.insert(Movie(tmdbID: 999, title: "Gone"))
+        library.save()
+    }
+    #expect(try whole.applySyncedBackup(backup))
+    var asked: [Int] = []
+    let applied = try await sliced.applySyncedBackupInSlices(backup, sliceSize: 3) { saves in
+        asked.append(saves)
+        #expect(try! sliced.context.fetchCount(FetchDescriptor<Movie>(predicate: #Predicate { $0.tmdbID == 999 })) == 1)
+        return true
+    }
+    #expect(applied == true)
+    #expect(asked == Array(1...asked.count) && asked.count > 2, "one save per slice")
+    #expect(try normalizedData(sliced) == normalizedData(whole))
+    let show = try #require(sliced.show(tmdbID: 95396))
+    #expect(show.watchedEpisodeCount() == 5)
+    #expect(show.regularEpisodes.first?.notes?.map(\.text) == ["Great pilot"])
+    #expect(show.notes?.map(\.text) == ["Watch with Sam"])
+    #expect(show.tags?.map(\.name) == ["Rewatch"])
+    #expect(sliced.movie(tmdbID: 999) == nil)
+    // Applying again changes nothing and saves nothing.
+    #expect(try await sliced.applySyncedBackupInSlices(backup, sliceSize: 3) { _ in true } == false)
+}
+
+@MainActor @Test func applyingInSlicesStopsWhenAnEditLandsBetweenThem() async throws {
+    let backup = try slicedLibraryBackup()
+    let library = try makeLibrary()
+    library.context.insert(Movie(tmdbID: 999, title: "Not in the merge"))
+    library.save()
+    let applied = try await library.applySyncedBackupInSlices(backup, sliceSize: 3) { _ in false }
+    #expect(applied == nil)
+    // The first slice is saved; nothing after it was written, and nothing was deleted.
+    #expect(library.movie(tmdbID: 999) != nil)
+    #expect(library.movie(tmdbID: 27205) != nil)
+    #expect(!library.context.hasChanges)
+    #expect(try library.context.fetchCount(FetchDescriptor<TVShow>()) < backup.shows.count)
+    // A change waiting to be saved stops it too.
+    let other = try makeLibrary()
+    var pending = 0
+    let stopped = try await other.applySyncedBackupInSlices(backup, sliceSize: 3) { _ in
+        pending += 1
+        other.context.insert(Movie(tmdbID: 1000 + pending, title: "Pending"))
+        return true
+    }
+    #expect(stopped == nil && pending == 1)
+}
+
+@MainActor @Test func importingInSlicesMatchesImportingAtOnce() async throws {
+    let backup = try slicedLibraryBackup()
+    // Here already: Severance with another watched episode and its own note, and a tag of the same name.
+    let here = try makeLibrary()
+    let local = try insertSeverance(into: here)
+    here.setWatched(local.regularEpisodes[7], true, on: date("2025-02-01"))
+    here.addNote("Mine", to: local.regularEpisodes[0])
+    _ = here.createTag(name: "rewatch", colorName: "blue")
+    let localBackup = try here.makeBackup()
+    let whole = try makeLibrary(), sliced = try makeLibrary()
+    try whole.importBackup(localBackup)
+    try sliced.importBackup(localBackup)
+    let expected = try whole.importBackup(backup)
+    let summary = try await sliced.importBackupInSlices(backup, sliceSize: 3)
+    #expect(summary == expected)
+    #expect(summary.showsMerged == 1 && summary.showsAdded == 3 && summary.moviesAdded == 1 && summary.collectionsAdded == 0)
+    #expect(try normalizedData(sliced) == normalizedData(whole))
+    let show = try #require(sliced.show(tmdbID: 95396))
+    #expect(show.watchedEpisodeCount() == 6)
+    #expect(Set(show.regularEpisodes.first?.notes?.map(\.text) ?? []) == ["Great pilot", "Mine"])
+    #expect(show.tags?.map(\.name) == ["rewatch"], "matched by name, in a slice after the tags were read")
+
+    // Importing again duplicates nothing.
+    let again = try await sliced.importBackupInSlices(backup, sliceSize: 3)
+    #expect(again.showsAdded == 0 && again.moviesAdded == 0)
+    #expect(try normalizedData(sliced) == normalizedData(whole))
+    #expect(try sliced.context.fetchCount(FetchDescriptor<Episode>()) == whole.context.fetchCount(FetchDescriptor<Episode>()))
+}
+

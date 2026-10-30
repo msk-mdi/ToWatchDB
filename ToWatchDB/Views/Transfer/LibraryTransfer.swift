@@ -169,11 +169,12 @@ private struct LibraryFileTransfers: ViewModifier {
             let isScoped = url.startAccessingSecurityScopedResource()
             defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                // Reading and decoding the whole library happens off the main thread; only applying it stays on it.
+                // Reading and decoding the whole library happens off the main thread; only applying it stays on it,
+                // a slice at a time.
                 let backup = try await Task.detached(priority: .userInitiated) {
                     try BackupCoding.decode(Data(contentsOf: url))
                 }.value
-                message = ("Import Complete", try appState.library.importBackup(backup).description)
+                message = ("Import Complete", try await appState.library.importBackupInSlices(backup).description)
             } catch {
                 showError(error.localizedDescription)
             }

@@ -272,7 +272,17 @@ public final class DropboxSync {
                             continue
                         }
                         Log.sync.info("Merged the file: \(changes.movies.count, privacy: .public) movies and \(changes.shows.count, privacy: .public) shows changed here")
-                        if try service.applySyncedBackup(merged, changes: changes) {
+                        // In slices, saving each (one save, one version), so a first sync doesn't hold the main thread.
+                        let applied = try await service.applySyncedBackupInSlices(merged, changes: changes) { saves in
+                            version() == localVersion + saves
+                        }
+                        // An edit landed between slices: the slices saved hold the merge, so merging again with
+                        // the edit is safe; applying on would have undone it. The base is only saved after a whole apply.
+                        guard let applied else {
+                            (local, localVersion) = try await snapshot(library: library, version: version)
+                            continue
+                        }
+                        if applied {
                             (local, localVersion) = try await snapshot(library: library, version: version)
                         }
                         break

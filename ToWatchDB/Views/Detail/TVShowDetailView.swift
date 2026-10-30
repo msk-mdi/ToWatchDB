@@ -172,9 +172,14 @@ struct TVShowDetailView: View {
                 }
 
                 if season != nil {
+                    // Every page shares it until the next save.
+                    let noted = appState.cached("episodes-with-notes") {
+                        (try? LibraryService.episodesWithNotes(in: appState.container.mainContext)) ?? []
+                    }
                     LazyVStack(spacing: 0) {
                         ForEach(episodes) { episode in
-                            EpisodeRow(episode: episode, onNotes: { notesEpisode = episode })
+                            EpisodeRow(episode: episode, hasNotes: noted.contains(episode.persistentModelID),
+                                       onNotes: { notesEpisode = episode })
                             Divider()
                         }
                     }
@@ -259,6 +264,8 @@ private final class DecodedCredits {
 private struct EpisodeRow: View {
     @Environment(AppState.self) private var appState
     let episode: Episode
+    /// From the page's one fetch of episode notes (`LibraryService.episodesWithNotes`), not `episode.notes`.
+    let hasNotes: Bool
     let onNotes: () -> Void
 
     var body: some View {
@@ -280,7 +287,7 @@ private struct EpisodeRow: View {
                 HStack(spacing: 6) {
                     Text("\(episode.episodeNumber).").monospacedDigit().foregroundStyle(.secondary)
                     Text(episode.name ?? "Episode \(episode.episodeNumber)").fontWeight(.medium)
-                    if !(episode.notes ?? []).isEmpty {
+                    if hasNotes {
                         Image(systemName: "note.text").foregroundStyle(.secondary).font(.caption)
                     }
                 }

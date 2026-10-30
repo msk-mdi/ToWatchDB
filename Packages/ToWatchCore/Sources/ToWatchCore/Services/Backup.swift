@@ -317,6 +317,13 @@ public extension LibraryService {
         return result
     }
 
+    /// The episodes that have a note, from one fetch of the notes on episodes. A show page's rows read
+    /// `episode.notes` for their note glyph, which ran a query per row and again on every season switch.
+    nonisolated static func episodesWithNotes(in context: ModelContext) throws -> Set<PersistentIdentifier> {
+        let notes = try context.fetch(FetchDescriptor<Note>(predicate: #Predicate { $0.episode != nil }))
+        return Set(notes.compactMap { $0.episode?.persistentModelID })
+    }
+
     func exportBackupData() throws -> Data {
         try BackupCoding.encoder.encode(makeBackup())
     }

@@ -70,9 +70,13 @@ struct ShowEntity: AppEntity {
     /// `next`: the show's next episode to watch, when the caller already found it.
     @MainActor
     init(_ show: TVShow, next: Episode?) {
-        id = show.tmdbID
-        name = show.name
-        detail = next.map { "Next: \($0.code)" } ?? show.firstAirDate?.yearString
+        self.init(id: show.tmdbID, name: show.name, detail: next.map { "Next: \($0.code)" } ?? show.firstAirDate?.yearString)
+    }
+
+    init(id: Int, name: String, detail: String?) {
+        self.id = id
+        self.name = name
+        self.detail = detail
     }
 }
 
@@ -93,21 +97,45 @@ struct ShowQuery: EntityStringQuery {
 
     /// Shows with an episode to watch come first: they're what people ask about.
     func suggestedEntities() async throws -> [ShowEntity] {
-        await MainActor.run {
+        // The app's progress map when it's already built, so every show's episodes aren't walked again. Otherwise
+        // in a context of its own: updating the shortcut parameters asks for these soon after launch, and walking
+        // every episode on the main thread then froze the app for about a second per 300 shows.
+        let ready: [Suggestion]? = await MainActor.run {
+            guard let progress = AppState.shared?.showProgressIfReady() else { return nil }
             let shows = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
-            // The app's progress map, when the app is running (updating the shortcut parameters at launch asks
-            // for these), so every show's episodes aren't walked again. Each show's next episode found once, not
-            // twice per comparison.
-            let progress = AppState.shared?.showProgress()
-            return shows
-                .map { show in
-                    let next: Episode? = if let progress { progress[show.persistentModelID]?.nextEpisode } else { show.nextEpisodeToWatch() }
-                    return (show: show, next: next)
-                }
-                .sorted { ($0.next != nil ? 0 : 1, $0.show.name) < ($1.next != nil ? 0 : 1, $1.show.name) }
-                .prefix(30)
-                .map { ShowEntity($0.show, next: $0.next) }
+            return Self.suggestions(shows, progress: progress)
         }
+        if let ready { return ready.map(ShowEntity.init) }
+        let container = await MainActor.run { SharedLibrary.container }
+        let suggestions = await Task.detached(priority: .utility) {
+            let context = ModelContext(container)
+            let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
+            return Self.suggestions(shows, progress: (try? TVShow.progressSummaries(in: context)) ?? [:])
+        }.value
+        return suggestions.map(ShowEntity.init)
+    }
+
+    /// A suggested show, as plain values so it can come from a background context.
+    fileprivate struct Suggestion: Sendable {
+        let id: Int
+        let name: String
+        let detail: String?
+    }
+
+    /// Each show's next episode found once, not twice per comparison. `shows` and `progress` are from one context.
+    private static func suggestions(_ shows: [TVShow], progress: [PersistentIdentifier: ShowProgress]) -> [Suggestion] {
+        shows
+            .map { show in (name: show.name, id: show.tmdbID, next: progress[show.persistentModelID]?.nextEpisode?.code,
+                            year: show.firstAirDate?.yearString) }
+            .sorted { ($0.next != nil ? 0 : 1, $0.name) < ($1.next != nil ? 0 : 1, $1.name) }
+            .prefix(30)
+            .map { Suggestion(id: $0.id, name: $0.name, detail: $0.next.map { "Next: \($0)" } ?? $0.year) }
+    }
+}
+
+private extension ShowEntity {
+    init(_ suggestion: ShowQuery.Suggestion) {
+        self.init(id: suggestion.id, name: suggestion.name, detail: suggestion.detail)
     }
 }
 

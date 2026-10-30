@@ -64,6 +64,15 @@ public extension TVShow {
         return (progress, showOf)
     }
 
+    /// `progressIndex` without its models, so it can be worked out in a context of its own off the main thread and
+    /// handed over: on an iPhone, building it on the main thread froze the app for about a second per 300 shows.
+    /// `ShowProgress.resolve` turns it back into progress in another context.
+    static func progressSnapshotIndex(in context: ModelContext, asOf now: Date = .now) throws
+        -> (progress: [PersistentIdentifier: ShowProgressSnapshot], showOf: [PersistentIdentifier: PersistentIdentifier]) {
+        let index = try progressIndex(in: context, asOf: now)
+        return (index.progress.mapValues(ShowProgressSnapshot.init), index.showOf)
+    }
+
     /// `progressSummary` over the episodes `forEachEpisode` visits: the show's regular episodes, in any order.
     private func progressSummary(asOf now: Date, forEachEpisode: ((Episode) -> Void) -> Void) -> ShowProgress {
         var aired = 0, watchedAired = 0, watchedAny = 0
@@ -155,6 +164,50 @@ public struct ShowProgress {
 
     /// Aired regular episodes not watched yet.
     public var remainingCount: Int { airedCount - watchedAiredCount }
+
+    /// Snapshots back as progress in `context`. The episodes are fetched in one go and looked up by ID; a show
+    /// whose episode is gone (deleted since the snapshot was taken) is left out, so nothing deleted is handed out.
+    public static func resolve(_ snapshots: [PersistentIdentifier: ShowProgressSnapshot],
+                               in context: ModelContext) throws -> [PersistentIdentifier: ShowProgress] {
+        let ids = Array(Set(snapshots.values.flatMap { [$0.nextEpisodeID, $0.nextEpisodeToAirID].compactMap { $0 } }))
+        let fetched = try context.fetch(FetchDescriptor<Episode>(predicate: #Predicate { ids.contains($0.persistentModelID) }))
+        let episodes = Dictionary(fetched.map { ($0.persistentModelID, $0) }) { first, _ in first }
+        return snapshots.compactMapValues { snapshot in
+            var next: Episode?, nextToAir: Episode?
+            if let id = snapshot.nextEpisodeID {
+                guard let episode = episodes[id] else { return nil }
+                next = episode
+            }
+            if let id = snapshot.nextEpisodeToAirID {
+                guard let episode = episodes[id] else { return nil }
+                nextToAir = episode
+            }
+            return ShowProgress(status: snapshot.status, fraction: snapshot.fraction, nextEpisode: next, nextEpisodeToAir: nextToAir,
+                                airedCount: snapshot.airedCount, watchedAiredCount: snapshot.watchedAiredCount,
+                                lastWatched: snapshot.lastWatched)
+        }
+    }
+}
+
+/// `ShowProgress` with its episodes as IDs, so it can cross from a background context to the main one.
+public struct ShowProgressSnapshot: Sendable {
+    public let status: WatchStatus
+    public let fraction: Double
+    public let nextEpisodeID: PersistentIdentifier?
+    public let nextEpisodeToAirID: PersistentIdentifier?
+    public let airedCount: Int
+    public let watchedAiredCount: Int
+    public let lastWatched: Date?
+
+    public init(_ progress: ShowProgress) {
+        status = progress.status
+        fraction = progress.fraction
+        nextEpisodeID = progress.nextEpisode?.persistentModelID
+        nextEpisodeToAirID = progress.nextEpisodeToAir?.persistentModelID
+        airedCount = progress.airedCount
+        watchedAiredCount = progress.watchedAiredCount
+        lastWatched = progress.lastWatched
+    }
 }
 
 public extension Season {

@@ -1,4 +1,5 @@
 import ImageIO
+import Network
 import SwiftUI
 
 /// Decoded TMDB images kept in memory. `AsyncImage` keeps nothing between appearances: every time a page was
@@ -39,18 +40,32 @@ final class ImageCache: @unchecked Sendable {
     }
 
     /// Downloads in progress, so views showing the same image (a title on two pages, an actor in two casts)
-    /// share one download and one decode.
-    private var inFlight: [URL: Task<Entry, Error>] = [:]
+    /// share one download and one decode, with how many are waiting for each.
+    private var inFlight: [URL: Download] = [:]
     private let lock = NSLock()
 
-    /// Fetches (through the shared URL cache) and decodes off the main thread.
+    private struct Download {
+        let id: UUID
+        let task: Task<Entry, Error>
+        var waiters: Int
+    }
+
+    /// Fetches (through the shared URL cache) and decodes off the main thread. When every view waiting for a
+    /// download is cancelled (scrolled away, page closed), the download is cancelled too: flicking through a grid on
+    /// cellular otherwise fetched every poster it passed.
     func load(_ url: URL) async throws -> Entry {
         if let image = image(for: url) { return Entry(image) }
-        let task = lock.withLock {
-            if let task = inFlight[url] { return task }
+        let (id, task) = lock.withLock {
+            if var download = inFlight[url] {
+                download.waiters += 1
+                inFlight[url] = download
+                return (download.id, download.task)
+            }
+            let id = UUID()
             // Unstructured, so one view scrolling away (cancelling its wait) doesn't cancel the others'.
             let task = Task.detached(priority: .userInitiated) { [self] in
-                defer { lock.withLock { inFlight[url] = nil } }
+                // Only its own entry: a new download of the URL may have replaced it after a cancellation.
+                defer { lock.withLock { if inFlight[url]?.id == id { inFlight[url] = nil } } }
                 let (data, response) = try await URLSession.shared.data(from: url)
                 if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
                     throw BadStatus(code: status)
@@ -63,12 +78,24 @@ final class ImageCache: @unchecked Sendable {
                 store(entry, for: url)
                 return entry
             }
-            inFlight[url] = task
-            return task
+            inFlight[url] = Download(id: id, task: task, waiters: 1)
+            return (id, task)
         }
-        // A download that a view stops waiting for (scrolled away) still finishes into the cache, so scrolling
-        // back finds it.
-        return try await task.value
+        // A view that stops waiting while others still wait leaves the download going for them.
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            lock.withLock {
+                guard var download = inFlight[url], download.id == id else { return }
+                download.waiters -= 1
+                if download.waiters > 0 {
+                    inFlight[url] = download
+                } else {
+                    inFlight[url] = nil
+                    download.task.cancel()
+                }
+            }
+        }
     }
 }
 
@@ -137,5 +164,25 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
             guard let retryDelay else { return }
             do { try await Task.sleep(for: .seconds(retryDelay)) } catch { return }
         }
+    }
+}
+
+/// Whether the network is in Low Data Mode, for views that can make do with smaller images or none. `URLSession`
+/// doesn't use less on its own.
+@Observable @MainActor
+final class NetworkConditions {
+    static let shared = NetworkConditions()
+
+    private(set) var isConstrained = false
+    @ObservationIgnored private let monitor = NWPathMonitor()
+
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let isConstrained = path.isConstrained
+            MainActor.assumeIsolated {
+                if self?.isConstrained != isConstrained { self?.isConstrained = isConstrained }
+            }
+        }
+        monitor.start(queue: .main)
     }
 }

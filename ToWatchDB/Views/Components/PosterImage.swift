@@ -1,13 +1,15 @@
 import SwiftUI
 import ToWatchCore
 
-/// A 2:3 poster with a placeholder while loading or when TMDB has no artwork.
+/// A 2:3 poster with a placeholder while loading or when TMDB has no artwork. In Low Data Mode, a w185 poster
+/// rather than w342.
 struct PosterImage: View {
     let path: String?
     var size: TMDBImageSize = .poster
     var cornerRadius: CGFloat = 8
 
     var body: some View {
+        let size = size == .poster && NetworkConditions.shared.isConstrained ? .small : size
         Color.secondary.opacity(0.15)
             .aspectRatio(2 / 3, contentMode: .fit)
             .overlay {
@@ -28,14 +30,14 @@ struct PosterImage: View {
     }
 }
 
-/// Wide backdrop image that fades into the window background.
+/// Wide backdrop image that fades into the window background. In Low Data Mode, the gradient alone.
 struct BackdropImage: View {
     @Environment(\.themeColor) private var themeColor
     let path: String?
     var height: CGFloat = 320
 
     var body: some View {
-        RemoteImage(url: TMDBImage.url(path, size: .backdrop)) { image in
+        RemoteImage(url: NetworkConditions.shared.isConstrained ? nil : TMDBImage.url(path, size: .backdrop)) { image in
             image.resizable().scaledToFill()
         } placeholder: { _ in
             LinearGradient(colors: [themeColor.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)

@@ -292,20 +292,27 @@ private struct GenreChart: View {
             if genres.isEmpty {
                 Text("No genres yet.").foregroundStyle(.secondary)
             } else {
+                // Laid out by hand rather than with Swift Charts: its category axis drew the names half a row off,
+                // over the bars.
                 let shown = Array(genres.prefix(8))
-                Chart(shown) { genre in
-                    BarMark(x: .value("Titles", genre.count), y: .value("Genre", genre.name))
-                        .cornerRadius(4)
-                        .foregroundStyle(themeColor)
-                        .annotation(position: .trailing, spacing: 6) {
-                            Text(genre.count.formatted()).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                let maxCount = max(shown.map(\.count).max() ?? 1, 1)
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    ForEach(shown) { genre in
+                        GridRow {
+                            Text(genre.name).font(.callout).lineLimit(1).fixedSize()
+                            GeometryReader { proxy in
+                                HStack(spacing: 6) {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(themeColor)
+                                        .frame(width: max((proxy.size.width - 32) * CGFloat(genre.count) / CGFloat(maxCount), 4))
+                                    Text(genre.count.formatted()).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                }
+                            }
+                            .frame(height: 16)
                         }
+                        .accessibilityElement(children: .combine)
+                    }
                 }
-                .chartXAxis(.hidden)
-                .chartYAxis {
-                    AxisMarks { _ in AxisValueLabel().font(.callout) }
-                }
-                .frame(height: CGFloat(shown.count) * 30 + 10)
             }
         }
     }

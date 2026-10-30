@@ -1589,3 +1589,23 @@ private func slicedLibraryBackup() throws -> LibraryBackup {
     #expect(try sliced.context.fetchCount(FetchDescriptor<Episode>()) == whole.context.fetchCount(FetchDescriptor<Episode>()))
 }
 
+@MainActor @Test func duplicateCheckFindsOnlyRepeatedIDs() throws {
+    let library = try makeLibrary()
+    library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+    library.context.insert(TVShow(tmdbID: 1, name: "Another"))
+    library.save()
+    // As the launch checks: in a context of its own, from what's saved.
+    let launch = { ModelContext(library.context.container) }
+    #expect(try !LibraryService.hasDuplicateTitles(in: launch()))
+
+    // A show held twice, and no movie: found, and the repair leaves none.
+    let copy = TVShow(tmdbID: show.tmdbID, name: show.name)
+    copy.addedDate = show.addedDate.addingTimeInterval(60)
+    library.context.insert(copy)
+    library.save()
+    #expect(try LibraryService.hasDuplicateTitles(in: launch()))
+    #expect(try library.mergeDuplicateTitles() == 1)
+    #expect(try !LibraryService.hasDuplicateTitles(in: launch()))
+    #expect(try library.context.fetchCount(FetchDescriptor<TVShow>()) == 2)
+}

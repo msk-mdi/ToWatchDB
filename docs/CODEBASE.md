@@ -349,7 +349,7 @@ parameters whenever it becomes active.
 
 | Member | Role |
 |---|---|
-| `container` | The SwiftData `ModelContainer`: `SharedLibrary.container` on disk, or in memory for debug sample data |
+| `container` | The SwiftData `ModelContainer`: `SharedLibrary.container` on disk, or in memory for debug sample data. Observed, so the scenes' `.modelContainer` follows it when the library on disk opens after a launch with the placeholder (`libraryOpened`, below) |
 | `selectedTab: AppTab` | The current page. `AppTab` covers the fixed pages plus `.space/.tag/.smartList(UUID)`. |
 | `requestedLibraryScope` | Tab-bar layouts: asks the Library tab's scope picker to switch (for example, ⌘3 → Backlog) |
 | `collectionEditor`, `fileRequest` | App-wide requests, handled by whichever window is active (§8) |
@@ -371,7 +371,18 @@ parameters whenever it becomes active.
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 
 `SharedLibrary` holds the on-disk container and a client factory. App Intents use the same container, so their
-changes appear in open windows immediately. In Debug sample-data runs `SharedLibrary.container` is the in-memory
+changes appear in open windows immediately.
+
+**Launched before the first unlock (iOS).** The store uses the default file protection, so it can't be read until the
+iPhone has been unlocked once since it started, and a Shortcuts automation or Siri can launch the app before that.
+`SharedLibrary` then opens an empty in-memory placeholder (`isPlaceholder`) instead of crashing, and keeps the store
+where it is. Nothing is written to the placeholder: syncs (`runDropboxSync`) and refreshes skip it, and actions get
+the library through `SharedLibrary.unlockedContainer` and `service`, which first try to open the store and otherwise
+throw `IntentError.locked` ("Unlock your iPhone or iPad and try again"). When the scene becomes active, or an action
+or background refresh runs, with `isProtectedDataAvailable`, `openIfUnlocked` opens the store and
+`AppState.libraryOpened` swaps it in: it moves the save observer, clears every cache and the progress map, bumps
+`libraryVersion`, runs the launch's repairs, and refreshes and syncs. macOS keeps crashing on a store it can't read,
+which no Mac does for this reason. In Debug sample-data runs `SharedLibrary.container` is the in-memory
 one, so Siri can't change the real library. `IntentRouter.shared` carries "go to this tab or title" requests
 from intents to `RootView`.
 
@@ -860,8 +871,9 @@ Tests keep their `ModelContainer`s alive (`liveContainers`). A context doesn't r
 default), check it in `matchesCommon`, and add a control in `SmartListEditor`.
 
 **Add a Siri action.**
-1. Add an `AppIntent` in `Intents.swift`. Use `SharedLibrary.service` for writes, `IntentRouter` for
-   navigation, and `SpokenSummaries` for any sentence worth testing.
+1. Add an `AppIntent` in `Intents.swift`. Use `try SharedLibrary.service` for writes and
+   `try SharedLibrary.unlockedContainer` for reads (never `SharedLibrary.container`, which may be the placeholder,
+   §5.2), `IntentRouter` for navigation, and `SpokenSummaries` for any sentence worth testing.
 2. Optionally add an `AppShortcut` with phrases that include `\(.applicationName)`.
 
 **Add a theme color.**

@@ -9,11 +9,14 @@ import ToWatchCore
 enum IntentError: Error, CustomLocalizedStringResourceConvertible {
     case notInLibrary(String)
     case noToken
+    /// The library can't be read before the device's first unlock (`SharedLibrary.unlockedContainer`).
+    case locked
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case let .notInLibrary(name): "\(name) isn't in your library anymore."
         case .noToken: "ToWatchDB needs a TMDB access token. Add one in Settings."
+        case .locked: "Unlock your iPhone or iPad and try again."
         }
     }
 }
@@ -26,7 +29,8 @@ struct GetNextEpisodesIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let shows = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
+        let context = try SharedLibrary.unlockedContainer.mainContext
+        let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
         let summary = SpokenSummaries.nextEpisodes(shows)
         return .result(value: summary, dialog: "\(summary)")
     }
@@ -41,7 +45,7 @@ struct GetUpcomingIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let items = UpcomingService.upcoming(in: SharedLibrary.container.mainContext)
+        let items = UpcomingService.upcoming(in: try SharedLibrary.unlockedContainer.mainContext)
         let summary = SpokenSummaries.upcoming(items, limit: limit)
         return .result(value: summary, dialog: "\(summary)")
     }
@@ -60,7 +64,7 @@ struct GetWatchStatsIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let context = SharedLibrary.container.mainContext
+        let context = try SharedLibrary.unlockedContainer.mainContext
         let statsPeriod = period.period
         let stats = StatsService.stats(in: context, period: statsPeriod)
         let summary = SpokenSummaries.stats(stats, periodLabel: statsPeriod.label)
@@ -127,7 +131,7 @@ struct MarkNextEpisodeWatchedIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.show(tmdbID: show.id) else { throw IntentError.notInLibrary(show.name) }
         guard let episode = model.nextEpisodeToWatch() else {
             return .result(dialog: "You're all caught up on \(model.name).")
@@ -155,7 +159,7 @@ struct MarkMovieWatchedIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.movie(tmdbID: movie.id) else { throw IntentError.notInLibrary(movie.title) }
         // Same rule as the app: a movie can't be watched before it comes out.
         guard model.isReleased(asOf: date ?? .now) else {
@@ -183,7 +187,7 @@ struct RateMovieIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.movie(tmdbID: movie.id) else { throw IntentError.notInLibrary(movie.title) }
         library.setRating(model, Double(stars * 2))
         return .result(dialog: "Rated \(model.title) \(stars) star\(stars == 1 ? "" : "s").")
@@ -206,7 +210,7 @@ struct RateShowIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.show(tmdbID: show.id) else { throw IntentError.notInLibrary(show.name) }
         library.setRating(model, Double(stars * 2))
         return .result(dialog: "Rated \(model.name) \(stars) star\(stars == 1 ? "" : "s").")
@@ -226,7 +230,7 @@ struct AddMovieToBacklogIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.movie(tmdbID: movie.id) else { throw IntentError.notInLibrary(movie.title) }
         library.setBacklog(model, true)
         return .result(dialog: "Moved \(model.title) to your backlog.")
@@ -246,7 +250,7 @@ struct AddShowToBacklogIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.show(tmdbID: show.id) else { throw IntentError.notInLibrary(show.name) }
         library.setBacklog(model, true)
         return .result(dialog: "Moved \(model.name) to your backlog.")
@@ -269,7 +273,7 @@ struct AddNoteToMovieIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.movie(tmdbID: movie.id) else { throw IntentError.notInLibrary(movie.title) }
         guard library.addNote(text, to: model) != nil else { return .result(dialog: "The note was empty, so nothing was saved.") }
         return .result(dialog: "Saved your note on \(model.title).")
@@ -292,7 +296,7 @@ struct AddNoteToShowIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let library = SharedLibrary.service
+        let library = try SharedLibrary.service
         guard let model = library.show(tmdbID: show.id) else { throw IntentError.notInLibrary(show.name) }
         guard library.addNote(text, to: model) != nil else { return .result(dialog: "The note was empty, so nothing was saved.") }
         return .result(dialog: "Saved your note on \(model.name).")
@@ -341,7 +345,7 @@ struct OpenMovieIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        let model = SharedLibrary.service.movie(tmdbID: movie.id)
+        let model = try SharedLibrary.service.movie(tmdbID: movie.id)
         IntentRouter.shared.title = model.map(TitleReference.init)
             ?? TitleReference(kind: .movie, tmdbID: movie.id, title: movie.title, posterPath: nil)
         return .result()
@@ -358,7 +362,7 @@ struct OpenShowIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        let model = SharedLibrary.service.show(tmdbID: show.id)
+        let model = try SharedLibrary.service.show(tmdbID: show.id)
         IntentRouter.shared.title = model.map(TitleReference.init)
             ?? TitleReference(kind: .tv, tmdbID: show.id, title: show.name, posterPath: nil)
         return .result()

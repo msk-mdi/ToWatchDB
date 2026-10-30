@@ -22,7 +22,7 @@ by the Siri shortcut update, before the user has opened any list.
 |---|---|---|---|
 | 1 | High, fixed | The Siri shortcut update builds the whole progress index on the main thread about a second after every launch | Launch, main thread |
 | 2 | High, fixed | First visit to Up Next or Library, a new day, or a large refresh rebuilds the progress index on the main thread | Main thread |
-| 3 | Medium | A launch before first unlock crashes on purpose (`fatalError`), including iOS prewarming and background Siri launches | Stability |
+| 3 | Medium, fixed | A launch before first unlock crashes on purpose (`fatalError`), including iOS prewarming and background Siri launches | Stability |
 | 4 | Medium, fixed | Every launch fetches every movie and show in full to look for duplicates | Launch |
 | 5 | Medium, fixed | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
 | 6 | Medium, fixed | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
@@ -112,6 +112,18 @@ Organizer's crash reports.
   error when the placeholder is in use.
 - At minimum, defer `AppState()` from the `App` struct's property initializer to the first scene body, so
   prewarming never touches the store.
+
+**Fixed (same day), the first recommendation.** On iOS, a store that exists but can't be read now opens an empty
+in-memory placeholder (`SharedLibrary.isPlaceholder`) and logs, instead of crashing. `AppState.container` is
+observed and swapped for the store when the scene becomes active (or an action or background refresh runs) with
+protected data available: the save observer moves, every cache and the progress map are cleared, the launch's
+repairs run, and the library refreshes and syncs. Syncs and refreshes skip the placeholder, and every intent and
+entity query goes through `SharedLibrary.unlockedContainer` or `service`, which try to open the store and
+otherwise throw `IntentError.locked`, so nothing is answered from or written to the placeholder. macOS keeps the
+`fatalError`. The second recommendation wasn't needed: a prewarm before the first unlock gets the placeholder
+too. Not run on a device: the path needs an iPhone restarted and not yet unlocked, and the first thing to check
+there is a Shortcuts automation that runs an action (it should fail with the unlock message, not crash), then
+unlocking and opening the app (the library should appear without a relaunch).
 
 ### 4. Medium: every launch fetches every movie and show in full to find duplicates
 
@@ -292,7 +304,8 @@ Listed so the next pass does not undo them.
 - TMDB requests have a 20 s timeout, their own cache sized for the season payloads, a single 429 retry, and
   one request per show for seasons 0 to 16.
 - `#Predicate` bodies avoid force unwraps, fetches use `propertiesToFetch` and `relationshipKeyPathsForPrefetching`
-  where it was measured to matter, and the only `fatalError`s are the two in store opening.
+  where it was measured to matter, and the only `fatalError`s are in store opening, when even an in-memory store
+  can't be made (and on a Mac, for a store it can't read).
 - Swift 6 strict concurrency is complete, `ImageCache` is the only `@unchecked Sendable`, and it is guarded
   by a lock.
 

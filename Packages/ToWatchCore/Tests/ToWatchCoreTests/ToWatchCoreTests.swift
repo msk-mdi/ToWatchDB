@@ -1647,3 +1647,17 @@ private final class PartlyOfflineProtocol: URLProtocol {
     let fresh = LibraryService(context: try makeLibrary().context, client: client)
     #expect(try await fresh.refreshStale() == .init())
 }
+
+@MainActor @Test func episodesWithNotesComeFromOneFetch() throws {
+    let library = try makeLibrary()
+    let movie = library.insertMovie(try fixture("movie_inception"))
+    let show = try insertSeverance(into: library)
+    let episodes = show.regularEpisodes
+    library.addNote("Pilot", to: episodes[0])
+    library.addNote("Again", to: episodes[0])
+    library.addNote("Finale", to: episodes[8])
+    library.addNote("On the show", to: show)
+    library.addNote("On the movie", to: movie)
+    let noted = try LibraryService.episodesWithNotes(in: ModelContext(library.context.container))
+    #expect(noted == [episodes[0].persistentModelID, episodes[8].persistentModelID])
+}

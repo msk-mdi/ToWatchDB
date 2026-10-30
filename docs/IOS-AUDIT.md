@@ -27,7 +27,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 5 | Medium, fixed | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
 | 6 | Medium, fixed | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
 | 7 | Low, fixed | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
-| 8 | Low | Each visible episode row runs a query for its notes | Detail page |
+| 8 | Low, fixed | Each visible episode row runs a query for its notes | Detail page |
 | 9 | Low | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
 | 10 | Low | No `#Index` on the columns every predicate filters by | Store |
 | 11 | Low | iPad rebuilds the page on every sidebar switch | iPad |
@@ -250,6 +250,12 @@ but every season switch pays again.
 **Recommendation.** The page already fetches the show's notes for `NotesSection`; fetch the episode notes of
 the show once with a predicate on `note.episode?.season?.show` (or reuse `notesByOwner`) and pass a set of
 episode IDs with notes down to the rows.
+
+**Fixed (same day).** `LibraryService.episodesWithNotes` fetches the notes on episodes once (`#Predicate {
+$0.episode != nil }`, nothing through the show, which the guide's predicate rules make awkward) and returns the
+episodes' IDs, read without faulting the episodes in. The page caches it with `appState.cached` until the next
+save, shared by every show page since it holds no models, and passes `hasNotes` to each row. Notes are few, so
+not narrowing the fetch to the show costs nothing measurable.
 
 ### 9. Low: every title page opens a request to the Seerr server, which can wait 15 s away from home
 

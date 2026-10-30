@@ -703,7 +703,9 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     at it, a sync with no local changes stops after one metadata request, and one with changes merges against
     the base without downloading. The sync file is compact JSON (`BackupCoding.compactEncoder`).
 17. **Group notes in one fetch.** `notesByOwner()` reads every note once for backups and syncs; reading
-    `movie.notes` or `episode.notes` runs a query per model.
+    `movie.notes` or `episode.notes` runs a query per model. A show page's episode rows get their note glyph from
+    `LibraryService.episodesWithNotes` (one fetch of the notes on episodes, cached until the next save) for the same
+    reason: each visible row ran a query, again on every season switch.
 18. **Group episodes in one fetch for every show's progress.** The first read of each `show.seasons` and
     `season.episodes` in a context materializes the relationship: `progressSummary()` on every show of a fresh
     context took about 3.4 s for 300 shows of 72 episodes (1 s for 80), and prefetching didn't help.

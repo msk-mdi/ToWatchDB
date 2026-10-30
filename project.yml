@@ -39,6 +39,9 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connect to your Seerr server to request movies and shows.
+        # iOS background app refresh: new episodes and Dropbox edits while the app isn't open (AppState.refreshInBackground).
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.mehdi.towatchdb.refresh]
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.mehdi.towatchdb.title
             UTTypeDescription: ToWatchDB Title

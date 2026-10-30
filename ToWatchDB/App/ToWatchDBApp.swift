@@ -62,6 +62,9 @@ struct ToWatchDBApp: App {
                     }
                     appState.syncWithDropbox(for: phase)
                     if phase == .active { Task { await appState.refreshLibraryIfDue() } }
+                    #if os(iOS)
+                    if phase == .background { appState.scheduleBackgroundRefresh() }
+                    #endif
                 }
                 .onChange(of: appIcon, initial: true) { _, icon in icon.applyAsAppIcon() }
         }
@@ -69,6 +72,11 @@ struct ToWatchDBApp: App {
         .commands { AppCommands(appState: appState) }
         #if os(macOS)
         .defaultSize(width: 1200, height: 800)
+        #else
+        // Registers the handler and completes the task when it returns; iOS ending it early cancels it.
+        .backgroundTask(.appRefresh(AppState.backgroundRefreshID)) { [appState] in
+            await appState.refreshInBackground()
+        }
         #endif
 
         // A single title in its own window ("Open in New Window" on iPad and Mac).

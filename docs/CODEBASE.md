@@ -242,7 +242,9 @@ one from `SharedLibrary.service`. A save that fails is rolled back, logged, and 
     touches watch data.
   - `refreshStale(maxAge:)` refreshes ongoing shows and unreleased movies older than 12 hours. It runs at
     launch and from Refresh buttons. A title that fails is skipped, but a 401 from TMDB (a wrong or revoked
-    token) stops the batch and throws after saving what came in; `AppState` says so once per launch.
+    token) stops the batch and throws after saving what came in; `AppState` says so once per launch. It returns a
+    `RefreshOutcome`: titles refreshed, titles that failed, and of those the ones that never got an answer
+    (offline, cut off by a suspension), which `AppState` retries at the next activation instead of an hour later.
 - **Watch state:**
   - `setWatched(movie/episode/season/show, _:on:)` and `markWatchedUpTo(_:)` change watch state.
   - Marking something watched clears the backlog flag. Marking an episode watched also un-abandons its show.
@@ -358,7 +360,8 @@ parameters whenever it becomes active.
 | `language`, `watchRegion` | Persisted in `UserDefaults` |
 | `token`, `client`, `library` | The TMDB token (saved override, else built-in), a client, and a `LibraryService` |
 | `perform(_:)` | Runs a throwing library operation and shows errors through `errorMessage` |
-| `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice |
+| `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice; inside a background task on iOS, so leaving the app doesn't cut it off |
+| `refreshInBackground()`, `scheduleBackgroundRefresh()` | iOS background app refresh (`com.mehdi.towatchdb.refresh`, the `fetch` background mode): refreshes, then syncs with Dropbox. Requested when the scene goes to the background, at the earliest 3 hours later; the scene's `.backgroundTask(.appRefresh)` runs it and cancels it when iOS ends it |
 | `cached(_:_:)` | Memoizes derived data until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
 | `computeOffMain(_:_:)`, `offMainValue(_:)` | Works a `Sendable` value out in a background context once per library version (stats); a page shows the last one until the new one lands (§7, item 4) |
 | `all(_:)` | Every model of a type, for `cached` closures; movies and shows are kept until a save inserts or deletes one, so filter them in memory (§7, item 15) |

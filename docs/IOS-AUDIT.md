@@ -25,7 +25,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 3 | Medium | A launch before first unlock crashes on purpose (`fatalError`), including iOS prewarming and background Siri launches | Stability |
 | 4 | Medium, fixed | Every launch fetches every movie and show in full to look for duplicates | Launch |
 | 5 | Medium, fixed | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
-| 6 | Medium | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
+| 6 | Medium, fixed | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
 | 7 | Low | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
 | 8 | Low | Each visible episode row runs a query for its notes | Detail page |
 | 9 | Low | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
@@ -192,6 +192,16 @@ session.
   of waiting an hour.
 - Optional: schedule a `BGAppRefreshTask` (with the `fetch` background mode) that runs `refreshStale` and
   a Dropbox sync, so the lists are current when the app opens.
+
+**Fixed (same day), all three.** `refreshLibrary` runs inside a `UIBackgroundTask` on iOS. `refreshStale` returns
+a `RefreshOutcome` that counts titles whose download never got an answer (a `URLError` or cancellation, not an
+error from TMDB, so a title TMDB removed doesn't retry forever); when there are any, the next activation refreshes
+again. A background app refresh (`com.mehdi.towatchdb.refresh`) is requested when the scene goes to the
+background and refreshes, then syncs. It uses SwiftUI's `.backgroundTask(.appRefresh)` scene modifier rather
+than registering with `BGTaskScheduler` by hand: it registers the handler, completes the task when the work
+returns, and cancels the work when iOS ends it. Not verified on a device: there is no simulator runtime here,
+and background refresh needs a device anyway (`e -l objc -- (void)[[BGTaskScheduler sharedScheduler]
+_simulateLaunchForTaskWithIdentifier:@"com.mehdi.towatchdb.refresh"]` in the debugger triggers it).
 
 ### 7. Low: poster downloads are never cancelled and ignore Low Data Mode and cellular
 

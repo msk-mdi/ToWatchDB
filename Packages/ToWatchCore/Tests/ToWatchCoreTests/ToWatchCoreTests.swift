@@ -1609,3 +1609,41 @@ private func slicedLibraryBackup() throws -> LibraryBackup {
     #expect(try !LibraryService.hasDuplicateTitles(in: launch()))
     #expect(try library.context.fetchCount(FetchDescriptor<TVShow>()) == 2)
 }
+
+/// Shows can't be reached (offline); movie 1 is gone from TMDB (404); movie 2 is Inception.
+private final class PartlyOfflineProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path() ?? ""
+        if path.contains("/tv/") {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        let found = path.hasSuffix("/movie/2")
+        let body = found ? Bundle.module.url(forResource: "movie_inception", withExtension: "json", subdirectory: "Fixtures")
+            .flatMap { try? Data(contentsOf: $0) } ?? Data() : Data(#"{"status_message":"Not found"}"#.utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: found ? 200 : 404, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor @Test func refreshTellsUnreachableTitlesApartFromFailedOnes() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [PartlyOfflineProtocol.self]
+    let client = TMDBClient(token: "token", language: "en-US", session: URLSession(configuration: configuration))
+    let library = LibraryService(context: try makeLibrary().context, client: client)
+    for id in 1...3 { library.context.insert(TVShow(tmdbID: id, name: "Show \(id)")) } // No status: ongoing.
+    for id in 1...2 { library.context.insert(Movie(tmdbID: id, title: "Movie \(id)")) } // No date: unreleased.
+    library.save()
+
+    let outcome = try await library.refreshStale(maxAge: 0)
+    #expect(outcome == .init(refreshed: 1, failed: 4, unreachable: 3))
+    #expect(library.movie(tmdbID: 2)?.title == "Inception")
+    // Nothing stale left to try: an empty outcome.
+    let fresh = LibraryService(context: try makeLibrary().context, client: client)
+    #expect(try await fresh.refreshStale() == .init())
+}

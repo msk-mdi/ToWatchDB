@@ -160,6 +160,9 @@ struct SettingsView: View {
                             .font(.callout)
                     }
                 }
+                LabeledContent("Version") {
+                    Text(appVersion).textSelection(.enabled)
+                }
             }
         }
         .formStyle(.grouped)
@@ -180,6 +183,14 @@ struct SettingsView: View {
             }
         }
         #endif
+    }
+
+    /// Like "2.1.1 (23)": the marketing version, then the build number.
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        guard let build = info?["CFBundleVersion"] as? String else { return version }
+        return "\(version) (\(build))"
     }
 
     private var imdbSection: some View {

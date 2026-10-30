@@ -18,6 +18,9 @@ iPhone does not. The two findings that matter most share one cause: the full per
 (`TVShow.progressIndex`) is built on the main thread, and on iOS it is triggered shortly after every launch
 by the Siri shortcut update, before the user has opened any list.
 
+Status, 2026-10-30: every finding but 10 is fixed (11 unchecked on an iPad). Finding 10 waits for a schema
+version. Nothing was run on a device; each section says what to check there.
+
 | # | Severity | Finding | Area |
 |---|---|---|---|
 | 1 | High, fixed | The Siri shortcut update builds the whole progress index on the main thread about a second after every launch | Launch, main thread |
@@ -29,7 +32,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 7 | Low, fixed | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
 | 8 | Low, fixed | Each visible episode row runs a query for its notes | Detail page |
 | 9 | Low, fixed | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
-| 10 | Low | No `#Index` on the columns every predicate filters by | Store |
+| 10 | Low, open | No `#Index` on the columns every predicate filters by | Store |
 | 11 | Low, fixed, unchecked on a device | iPad rebuilds the page on every sidebar switch | iPad |
 | 12 | Low, fixed | The decoded image cache is a 128 MB ceiling, with no reaction to memory warnings beyond NSCache's own | Memory |
 
@@ -286,6 +289,10 @@ scans these in milliseconds, so this is Low. It becomes worth doing when a schem
 another reason, since the guide notes an index alone is not treated as a migration and existing stores never
 get it.
 
+**Left open on purpose.** Adding an index means a new schema version with a migration plan stage (CODEBASE §8),
+tested on a copy of a real store, which is more risk than a Low finding is worth on its own. Do it with the next
+model change.
+
 ### 11. Low: iPad rebuilds the whole page on every sidebar switch
 
 **Where.** [RootView.swift:179](../ToWatchDB/Views/RootView.swift:179) wraps the detail in a
@@ -358,10 +365,11 @@ The findings above are from reading the code. To confirm the priorities with num
 
 1. Findings 1 and 2 together: done (build the index off the main thread). This removes the largest hang on
    every launch.
-2. Finding 4: a one-line `propertiesToFetch` change with a measurable launch win.
-3. Finding 3: stop crashing before first unlock.
-4. Finding 6: a background task around the launch refresh.
-5. Findings 5, 7, 8, 9 as time allows. Findings 10, 11, 12 when the related code is next touched.
+2. Finding 4: done, though not as suggested here: `propertiesToFetch` saved nothing, so the check moved off the
+   main thread.
+3. Finding 3: done.
+4. Finding 6: done, with a background app refresh.
+5. Findings 5, 7, 8, 9: done. Findings 11 and 12: done. Finding 10: with the next schema version.
 
 ## Verification run for this audit
 
@@ -377,3 +385,14 @@ After fixing findings 1 and 2, the same day: the iOS Simulator and macOS builds 
 errors, and the core suite passes with 76 tests (one new, for the snapshot round trip and a deletion between
 snapshot and resolve). The fix was not run on a device either: the first thing to check there is the Hangs
 track in Time Profiler during the first 3 s after launch and on the first tap of Up Next.
+
+After fixing findings 3 to 9, 11 and 12, the same day: the iOS Simulator and macOS builds pass with warnings as
+errors, and the core suite passes with 84 tests (eight new: slicing a backup, applying and importing in slices,
+an apply stopping when an edit lands between slices, a first Dropbox sync of six slices, the duplicate check, the
+refresh outcome, and the episodes with notes). The numbers quoted for findings 4 and 5 were measured on this Mac
+with throwaway benchmarks against on-disk stores. Nothing was run on a device or simulator. To check there: the
+Hangs track during a first sync and a backup import (5); a Shortcuts automation after a restart, before
+unlocking, then unlocking and opening the app (3); leaving the app right after launch, then reopening (6); a
+background refresh triggered from the debugger (6); Low Data Mode while scrolling the grid (7); a Seerr server off
+the home network (9); the iPad sidebar's navigation bars and search fields (11); and a memory warning from the
+simulator's Debug menu (12).

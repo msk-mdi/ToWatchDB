@@ -74,7 +74,7 @@ TMDB token: on first launch, paste your API Read Access Token (themoviedb.org â–
 - **`.ipa` (iPhone + iPad):** `Scripts/build-ipa.sh` builds an unsigned `dist/ToWatchDB.ipa`. Install it with a
   sideloading tool such as AltStore or Sideloadly, which signs it with your free Apple ID (renewed every 7 days).
 
-The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml` (currently 2.1.1, build 23).
+The version is `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `project.yml` (currently 2.1.2, build 24).
 Releases are on the [GitHub releases page](https://github.com/msk-mdi/ToWatchDB/releases): `ToWatchDB.app.zip`
 for Mac and `ToWatchDB.ipa` for iPhone and iPad.
 
@@ -82,7 +82,7 @@ To release: bump the version in `project.yml`, write `docs/release-notes/MacOS-<
 `docs/release-notes/iOS-<version>.md`, commit, then tag and push both:
 
 ```bash
-git tag MacOS-2.1.1 && git tag iOS-2.1.1 && git push origin main MacOS-2.1.1 iOS-2.1.1
+git tag MacOS-2.1.2 && git tag iOS-2.1.2 && git push origin main MacOS-2.1.2 iOS-2.1.2
 ```
 
 `.github/workflows/release.yml` builds each tag and publishes its release, with the notes and a changelog link.

@@ -23,7 +23,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 1 | High, fixed | The Siri shortcut update builds the whole progress index on the main thread about a second after every launch | Launch, main thread |
 | 2 | High, fixed | First visit to Up Next or Library, a new day, or a large refresh rebuilds the progress index on the main thread | Main thread |
 | 3 | Medium | A launch before first unlock crashes on purpose (`fatalError`), including iOS prewarming and background Siri launches | Stability |
-| 4 | Medium | Every launch fetches every movie and show in full to look for duplicates | Launch |
+| 4 | Medium, fixed | Every launch fetches every movie and show in full to look for duplicates | Launch |
 | 5 | Medium, fixed | A first Dropbox sync or a backup import writes the whole library on the main thread in one transaction | Main thread, memory |
 | 6 | Medium | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
 | 7 | Low | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
@@ -128,6 +128,15 @@ a repair for an old sync bug and are expected to be absent.
 - Fetch only `tmdbID` with `propertiesToFetch` for the duplicate check, and run the full repair only when
   the IDs show a duplicate. Better still, compare `fetchCount` with the count of distinct IDs.
 - Run the check after the first frame (from the root view's `.task`) rather than in `init`.
+
+**Fixed (same day).** `init` now starts the check in a background context (`hasDuplicateTitles`, reading only the
+IDs) and runs the repair on the main context only when it finds a copy. Every Dropbox sync and refresh waits for
+it (`AppState.runDropboxSync`), since a sync applied over a copy deletes the other with its watch data, which is
+why it ran in `init`.
+
+Measured while fixing: fetching only `tmdbID` costs the same as fetching every column (45 ms against 44 ms for
+1,300 titles in a fresh context on a Mac), as in finding 2, so the first recommendation saves nothing on its own
+and is withdrawn. SwiftData has no count of distinct values, so the `fetchCount` comparison isn't available either.
 
 ### 5. Medium: a first sync or backup import writes the whole library on the main thread in one go
 

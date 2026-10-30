@@ -170,13 +170,28 @@ final class AppState {
                 self?.errorMessage = "A change couldn't be saved, so it was undone. (\(error.localizedDescription))"
             }
             library.separateNotesSharingAnID()
-            do { try library.mergeDuplicateTitles() } catch {
-                Log.library.error("Couldn't merge duplicate titles: \(error.localizedDescription, privacy: .public)")
-            }
+            duplicateRepair = Task { await mergeDuplicateTitles() }
         }
         #if os(macOS)
         AppDelegate.appState = self
         #endif
+    }
+
+    /// The launch's repair of titles held twice. Syncs and refreshes wait for it: a sync applied over a copy would
+    /// keep one and delete the other with its watch data.
+    @ObservationIgnored private var duplicateRepair: Task<Void, Never>?
+
+    /// Looks for a title held twice in a context of its own, and folds copies together only if there are any
+    /// (there shouldn't be). Checking on the main thread held up the first frame of every launch.
+    private func mergeDuplicateTitles() async {
+        let container = container
+        let found = await Task.detached(priority: .userInitiated) {
+            (try? LibraryService.hasDuplicateTitles(in: ModelContext(container))) ?? true
+        }.value
+        guard found else { return }
+        do { try library.mergeDuplicateTitles() } catch {
+            Log.library.error("Couldn't merge duplicate titles: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func loadSecrets() {
@@ -564,8 +579,14 @@ final class AppState {
                 return
             }
             // Its own task, so a later call's cancel can't interrupt a sync midway.
-            Task { await dropbox.sync(library: { self.library }, version: { self.libraryVersion }) }
+            Task { await runDropboxSync() }
         }
+    }
+
+    /// Every sync starts here, after the launch's duplicate repair.
+    private func runDropboxSync() async {
+        await duplicateRepair?.value
+        await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
     }
 
     /// Whether a save hasn't reached Dropbox yet.
@@ -578,9 +599,7 @@ final class AppState {
         let sync = Task {
             // A sync already running would only queue another pass and return at once.
             await dropbox.waitForSync()
-            if hasUnsyncedChanges, !Task.isCancelled {
-                await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
-            }
+            if hasUnsyncedChanges, !Task.isCancelled { await runDropboxSync() }
         }
         let deadline = Task {
             try? await Task.sleep(for: timeout)
@@ -612,9 +631,7 @@ final class AppState {
                 // A sync already running would only queue another pass and return at once, ending the
                 // background task while that sync was still uploading.
                 await dropbox.waitForSync()
-                if hasUnsyncedChanges, backgroundSync != .invalid {
-                    await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
-                }
+                if hasUnsyncedChanges, backgroundSync != .invalid { await runDropboxSync() }
                 endBackgroundSync()
             }
             #else
@@ -654,6 +671,7 @@ final class AppState {
             }
         }
         // Same as a sync starting during a refresh, the other way around (both start at launch).
+        await duplicateRepair?.value
         await dropbox.waitForSync()
         do {
             try await library.refreshStale(maxAge: force ? 0 : 12 * 3600)

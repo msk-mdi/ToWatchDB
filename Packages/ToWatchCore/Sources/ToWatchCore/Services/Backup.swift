@@ -581,7 +581,7 @@ public extension LibraryService {
     /// Folds every title the library holds more than once into its earliest-added copy, the way a backup import
     /// merges (watched if either is, notes and collections combined), and returns how many copies went. There
     /// shouldn't be any, since adding checks again after the network, but sync used to keep one copy and delete
-    /// the others with their watch data. Runs at launch.
+    /// the others with their watch data. The app runs it at launch when `hasDuplicateTitles` finds a copy.
     @discardableResult
     func mergeDuplicateTitles() throws -> Int {
         func extraCopies<M: PersistentModel>(_ models: [M], id: (M) -> Int) -> [M] {
@@ -604,6 +604,19 @@ public extension LibraryService {
         }
         Log.library.error("Merged \(movies.count + shows.count, privacy: .public) duplicate titles")
         return movies.count + shows.count
+    }
+
+    /// Whether a movie or show is held twice, reading only their TMDB IDs. Nonisolated so the launch can check in a
+    /// context of its own: on the main thread it held up the first frame of every launch (about 45 ms for 1,300
+    /// titles on a Mac, the same as fetching them in full: the cost is making the objects, not reading the columns).
+    nonisolated static func hasDuplicateTitles(in context: ModelContext) throws -> Bool {
+        func repeats<M: PersistentModel>(_ id: KeyPath<M, Int>) throws -> Bool {
+            var titles = FetchDescriptor<M>()
+            titles.propertiesToFetch = [id]
+            var seen = Set<Int>()
+            return try context.fetch(titles).contains { !seen.insert($0[keyPath: id]).inserted }
+        }
+        return try repeats(\Movie.tmdbID) || repeats(\TVShow.tmdbID)
     }
 
     func importBackup(data: Data) throws -> ImportSummary {

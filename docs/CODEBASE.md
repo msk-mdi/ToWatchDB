@@ -537,7 +537,9 @@ the local date.
   smaller UUID.
   `applySyncedBackup` then makes the store match the merge exactly, writing only real changes. A title held
   twice is folded into its first-added copy at launch (`mergeDuplicateTitles`, merging like a backup import), so the
-  apply never meets one; it would keep one copy and delete the other with its watch data. Given
+  apply never meets one; it would keep one copy and delete the other with its watch data. The launch looks for copies
+  in a background context first (`hasDuplicateTitles`), and every sync and refresh waits for that check
+  (`AppState.runDropboxSync`). Given
   `LibrarySync.changes(from:to:)` (worked out off the main thread with the merge), it writes only the titles the
   merge changed and only checks the rest are still there: applying all of them walked every episode on the main
   thread (about 0.75 s for 300 shows) even for one edit. The driver applies with `applySyncedBackupInSlices`: a large apply

@@ -1204,6 +1204,39 @@ private final class UnauthorizedProtocol: URLProtocol {
     #expect(unknown.seasons.isEmpty)
 }
 
+/// Refuses every request the way App Transport Security refuses plain http outside the home network.
+private final class InsecureConnectionProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        client?.urlProtocol(self, didFailWithError: URLError(.appTransportSecurityRequiresSecureConnection))
+    }
+    override func stopLoading() {}
+}
+
+@Test func explainsSeerrAddressesBlockedOverHTTP() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [InsecureConnectionProtocol.self]
+    let session = URLSession(configuration: configuration)
+    let message = "Plain http only works for an IP address, a .local name, or a one-word name, so oracle.lan is "
+        + "blocked. Try http://oracle:5055, the server's IP address (like http://192.168.1.10:5055), or https."
+
+    do {
+        _ = try await SeerrClient.signIn(server: "http://oracle.lan:5055", with: .jellyfin(username: "a", password: "b"),
+                                         session: session)
+        Issue.record("Signing in should have failed")
+    } catch {
+        #expect(error.localizedDescription == message)
+    }
+    let client = try #require(SeerrClient(server: "http://oracle.lan:5055", apiKey: "key", session: session))
+    do {
+        _ = try await client.currentUser()
+        Issue.record("Checking the connection should have failed")
+    } catch {
+        #expect(error.localizedDescription == message)
+    }
+}
+
 /// Records the request and answers 201, like Seerr accepting it.
 private final class SeerrRecordingProtocol: URLProtocol {
     nonisolated(unsafe) static var lastRequest: URLRequest?

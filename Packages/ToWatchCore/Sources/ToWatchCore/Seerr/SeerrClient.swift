@@ -2,6 +2,8 @@ import Foundation
 
 public enum SeerrError: LocalizedError, Sendable {
     case invalidServer
+    /// App Transport Security refused plain http to this server: it's not an IP, a .local or single-label name.
+    case insecureConnection(URL)
     case unauthorized
     case signInFailed(String?)
     case noSession
@@ -12,6 +14,8 @@ public enum SeerrError: LocalizedError, Sendable {
         switch self {
         case .invalidServer:
             "The Seerr server address isn't a valid URL."
+        case let .insecureConnection(url):
+            insecureConnectionMessage(url)
         case .unauthorized:
             "Seerr didn't accept the sign-in, or it expired. Sign in again in Settings."
         case let .signInFailed(message):
@@ -23,6 +27,15 @@ public enum SeerrError: LocalizedError, Sendable {
         case let .decoding(detail):
             "Unexpected response from Seerr. \(detail)"
         }
+    }
+
+    /// Names the addresses that do work over http: the host's first label (oracle.lan → oracle), or its IP.
+    private func insecureConnectionMessage(_ url: URL) -> String {
+        let host = url.host() ?? "this server"
+        let port = url.port.map { ":\($0)" } ?? ""
+        let shortName = host.split(separator: ".").first.map { "http://\($0)\(port)" } ?? "http://seerr\(port)"
+        return "Plain http only works for an IP address, a .local name, or a one-word name, so \(host) is blocked. "
+            + "Try \(shortName), the server's IP address (like http://192.168.1.10\(port)), or https."
     }
 }
 
@@ -157,7 +170,7 @@ public struct SeerrClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await load(request, session: session)
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0
         guard (200..<300).contains(status) else {
@@ -191,6 +204,15 @@ public struct SeerrClient: Sendable {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
               url.host() != nil else { return nil }
         return url
+    }
+
+    /// Turns App Transport Security's refusal into an error that says which address to use instead.
+    private static func load(_ request: URLRequest, session: URLSession) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch let error as URLError where error.code == .appTransportSecurityRequiresSecureConnection {
+            throw SeerrError.insecureConnection(request.url!)
+        }
     }
 
     private static func isLocalNetworkAddress(_ address: String) -> Bool {
@@ -243,7 +265,7 @@ public struct SeerrClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await Self.load(request, session: session)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         // Seerr answers 403 both when nobody is signed in and when the user lacks a permission (say, to
         // request 4K). Checking who's signed in tells the two apart.

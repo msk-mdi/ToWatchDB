@@ -604,7 +604,8 @@ the local date.
   title's availability, per-season state, and open requests; `request` and `deleteRequest` change them. Cookies
   stay out of the shared cookie storage. `normalizedURL` cleans a typed address: without a scheme it uses
   `http://` for home-network addresses (an IP, a `.local` or single-label name, which App Transport Security
-  allows over http) and `https://` for anything else.
+  allows over http) and `https://` for anything else. When App Transport Security still refuses plain http (say,
+  `http://oracle.lan`), `SeerrError.insecureConnection` suggests the one-word name or the IP instead.
 - **Settings ▸ Seerr** saves the server in `UserDefaults` and the sign-in in `SecretStore` (`SeerrAuthStore`).
 - **`SeerrRequestButton`** on each title page shows Request on Seerr (a season picker for shows), Requested on
   Seerr, or Watch Now, with a Delete Request button per request. While a request is in progress it checks the

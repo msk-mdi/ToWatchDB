@@ -362,7 +362,7 @@ parameters whenever it becomes active.
 | `perform(_:)` | Runs a throwing library operation and shows errors through `errorMessage` |
 | `refreshLibrary(force:)` | Refreshes stale titles, guarded against running twice; inside a background task on iOS, so leaving the app doesn't cut it off |
 | `refreshInBackground()`, `scheduleBackgroundRefresh()` | iOS background app refresh (`com.mehdi.towatchdb.refresh`, the `fetch` background mode): refreshes, then syncs with Dropbox. Requested when the scene goes to the background, at the earliest 3 hours later; the scene's `.backgroundTask(.appRefresh)` runs it and cancels it when iOS ends it |
-| `cached(_:_:)` | Memoizes derived data until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. |
+| `cached(_:_:)` | Memoizes derived data until the next save. A `ModelContext.didSave` observer bumps a version. Not observed, so it's safe to call from `body`. On iOS a memory warning empties it, with the TMDB responses and the kept title lists |
 | `computeOffMain(_:_:)`, `offMainValue(_:)` | Works a `Sendable` value out in a background context once per library version (stats); a page shows the last one until the new one lands (§7, item 4) |
 | `all(_:)` | Every model of a type, for `cached` closures; movies and shows are kept until a save inserts or deletes one, so filter them in memory (§7, item 15) |
 | `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |

@@ -27,7 +27,7 @@ fast and stable. Read it before making non-trivial changes. For setup and a feat
    - [Entry point and scenes](#51-entry-point-and-scenes)
    - [AppState](#52-appstate)
    - [Navigation and layouts](#53-navigation-and-layouts)
-   - [PageHost: kept-alive pages on macOS](#54-pagehost-kept-alive-pages-on-macos)
+   - [PageHost: kept-alive pages on macOS and iPad](#54-pagehost-kept-alive-pages-on-macos-and-ipad)
    - [Screens](#55-screens)
    - [Shared components](#56-shared-components)
    - [Appearance: accent color, app icon, layout](#57-appearance-accent-color-app-icon-layout)
@@ -410,7 +410,7 @@ from intents to `RootView`.
 - **Detail destinations.** `appDestinations()` registers them for every stack: `Movie`, `TVShow`,
   `MediaSummary`, `LibraryScope`, `OrganizeRoute`, `StatsRoute`.
 
-### 5.4 PageHost: kept-alive pages on macOS
+### 5.4 PageHost: kept-alive pages on macOS and iPad
 
 `Views/Components/PageHost.swift`. Rebuilding a page on every switch (view graph, layout, toolbar) cost
 **70–350 ms** of main-thread time on macOS, which showed as a stall. On macOS, `PageHost` keeps the last 8
@@ -439,7 +439,12 @@ A hidden page is still in the view tree, so it must not contribute window chrome
 | `.searchable` | `PageSearch` (Search page) or a plain field in the toolbar (Library) | A hidden page's search field can't be switched off otherwise |
 | `.focusedSceneValue(\.focusedTitle, x)` | `isActivePage ? x : nil` | Keeps the Title menu acting on the visible title |
 
-iOS keeps the simpler `NavigationStack { … }.id(selectedTab)`.
+The iPad's sidebar layout uses `PageHost` too: it used `NavigationStack { … }.id(selectedTab)`, which rebuilt the
+page and refilled its poster grid on every sidebar switch. On iOS the pages' own toolbar items (Refresh, Settings)
+go through `.pageToolbar` for the same reason as on Mac; on iPhone every page is active, so nothing changes there.
+`LibraryView` keeps a plain `.searchable` on iOS: switching it off on hidden pages would rebuild the grid on every
+switch. Not yet checked on an iPad: whether each kept page's stack shows its own navigation bar in the split
+view's detail column, and that a hidden Library page's search field doesn't show.
 
 ### 5.5 Screens
 
@@ -638,7 +643,7 @@ the local date.
 | Area | macOS | iPadOS | iOS (iPhone) |
 |---|---|---|---|
 | Layout | Sidebar or top bar | Sidebar or top bar | Compact tabs |
-| Page switching | `PageHost` (kept alive) | Rebuilt (`.id`) | `TabView` |
+| Page switching | `PageHost` (kept alive) | `PageHost` in the sidebar layout, `TabView` in the top bar | `TabView` |
 | Sidebar selection | Custom, theme-colored, selects on mouse-down | Native, icon turns white | n/a |
 | Settings | `Settings` scene (⌘,) | Sheet from the gear | Sheet from the gear |
 | Library filters | Toolbar (sidebar layout) or page header (top bar) | Filter & Sort menu, `.searchable` | Same as iPad |

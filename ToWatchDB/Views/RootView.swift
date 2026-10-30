@@ -168,15 +168,13 @@ struct RootView: View {
                 .frame(minWidth: 220)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
-            #if os(macOS)
+            // Pages kept alive, iPad too: a fresh stack per list rebuilt the page (and refilled its poster grid) on
+            // every switch. A hidden page is popped to its root, so going back doesn't land on a stale detail.
             PageHost(selected: appState.selectedTab, hasOwnRefreshButton: $hasOwnRefreshButton) { tab in
                 screen(for: tab).appDestinations()
             }
+            #if os(macOS)
             .windowRefreshButton(appState, isVisible: !hasOwnRefreshButton)
-            #else
-            // A fresh stack per list, so going back to a list doesn't land on a stale detail page.
-            NavigationStack { screen(for: appState.selectedTab).appDestinations() }
-                .id(appState.selectedTab)
             #endif
         }
         .navigationSplitViewStyle(.balanced)
@@ -432,10 +430,11 @@ extension View {
             .navigationDestination(for: StatsRoute.self) { _ in StatsView() }
     }
 
-    /// iOS toolbar button that opens Settings; macOS has a Settings menu item instead.
+    /// iOS toolbar button that opens Settings; macOS has a Settings menu item instead. On the visible page only
+    /// (iPad keeps pages alive, `PageHost`).
     func settingsToolbarButton(_ appState: AppState, isVisible: Bool = true) -> some View {
         #if os(iOS)
-        toolbar {
+        pageToolbar {
             if isVisible {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Settings", systemImage: "gearshape") { appState.isShowingSettings = true }

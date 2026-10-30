@@ -41,7 +41,7 @@ struct DiscoverView: View {
         .pageTitle("Discover")
         #if os(iOS)
         // On Mac the window has the Refresh button (see RootView).
-        .toolbar {
+        .pageToolbar {
             ToolbarItem {
                 Button("Refresh", systemImage: "arrow.clockwise") { Task { await appState.loadTrending(force: true) } }
                     .disabled(appState.client == nil)

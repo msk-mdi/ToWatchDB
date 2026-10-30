@@ -86,8 +86,8 @@ git tag MacOS-2.1.1 && git tag iOS-2.1.1 && git push origin main MacOS-2.1.1 iOS
 ```
 
 `.github/workflows/release.yml` builds each tag and publishes its release, with the notes and a changelog link.
-The Dropbox app key comes from the `DROPBOX_APP_KEY` repository variable (Settings ▸ Secrets and variables ▸
-Actions ▸ Variables); without it the release has no Dropbox sync. Builds are signed ad hoc, as the scripts do.
+The released app's Dropbox app key is in the workflow (a `DROPBOX_APP_KEY` repository variable overrides it).
+Builds are signed ad hoc, as the scripts do.
 
 ## Layout
 

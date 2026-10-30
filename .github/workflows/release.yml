@@ -46,18 +46,14 @@ jobs:
             echo "PREVIOUS=$previous"
           } >> "$GITHUB_ENV"
 
-      # Release builds carry no TMDB token. The Dropbox app key isn't secret (sign-in uses PKCE), so it's a
-      # repository variable; without one, Settings explains how to turn sync on.
+      # Release builds carry no TMDB token. The Dropbox app key isn't secret (sign-in uses PKCE, and every
+      # release has it in its Info.plist), so it's written here; a DROPBOX_APP_KEY repository variable overrides it.
       - name: Configure the build
         env:
-          DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY || 'zt91mu2pw7eyuro' }}
         run: |
           brew install xcodegen
-          if [[ -n $DROPBOX_APP_KEY ]]; then
-            echo "DROPBOX_APP_KEY = $DROPBOX_APP_KEY" > Config/Secrets.xcconfig
-          else
-            echo "::warning::No DROPBOX_APP_KEY repository variable: this build has no Dropbox sync"
-          fi
+          echo "DROPBOX_APP_KEY = $DROPBOX_APP_KEY" > Config/Secrets.xcconfig
 
       - name: Build for Mac
         if: env.PLATFORM == 'MacOS'

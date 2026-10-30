@@ -18,7 +18,9 @@ final class AppState {
     /// The app's state, for Siri and Shortcuts actions, when its library is the one they use.
     static weak var shared: AppState?
 
-    let container: ModelContainer
+    /// The library. Observed: the scenes' `.modelContainer` follows it when the library on disk opens after a launch
+    /// before the first unlock, which started with a placeholder (`SharedLibrary.isPlaceholder`).
+    private(set) var container: ModelContainer
 
     var selectedTab: AppTab = .discover
     /// Tab bar layouts: a library scope to show in the Library tab's scope picker.
@@ -138,6 +140,24 @@ final class AppState {
     init(inMemory: Bool = false) {
         isInMemory = inMemory
         container = inMemory == SharedLibrary.isInMemory ? SharedLibrary.container : SharedLibrary.makeContainer(inMemory: inMemory)
+        loadSecrets()
+        if container === SharedLibrary.container {
+            Self.shared = self
+            errorMessage = SharedLibrary.openFailure
+        }
+        attachLibrary()
+        #if os(macOS)
+        AppDelegate.appState = self
+        #endif
+    }
+
+    /// Whether the library is the empty stand-in for one that can't be read yet. Nothing syncs or refreshes into it.
+    private var isPlaceholder: Bool { container === SharedLibrary.container && SharedLibrary.isPlaceholder }
+
+    /// Watches the container's saves and repairs its library: at launch, and again when the library on disk opens
+    /// after a launch with the placeholder.
+    private func attachLibrary() {
+        if let saveObserver { NotificationCenter.default.removeObserver(saveObserver) }
         saveObserver = NotificationCenter.default.addObserver(
             // No queue: the version must change synchronously with the save, before any view redraws with the
             // new data, or a redraw could store a value computed from stale data under the new version.
@@ -166,19 +186,35 @@ final class AppState {
                 if self.libraryVersion != self.dropbox.syncedVersion { self.syncWithDropbox(after: .seconds(5)) }
             }
         }
-        loadSecrets()
-        if container === SharedLibrary.container {
-            Self.shared = self
-            errorMessage = SharedLibrary.openFailure
-            LibraryService.saveFailed = { [weak self] error in
-                self?.errorMessage = "A change couldn't be saved, so it was undone. (\(error.localizedDescription))"
-            }
-            library.separateNotesSharingAnID()
-            duplicateRepair = Task { await mergeDuplicateTitles() }
+        guard container === SharedLibrary.container, !isPlaceholder else { return }
+        LibraryService.saveFailed = { [weak self] error in
+            self?.errorMessage = "A change couldn't be saved, so it was undone. (\(error.localizedDescription))"
         }
-        #if os(macOS)
-        AppDelegate.appState = self
-        #endif
+        library.separateNotesSharingAnID()
+        duplicateRepair = Task { await mergeDuplicateTitles() }
+    }
+
+    /// Switches to the library on disk once `SharedLibrary` could open it in place of the placeholder (the app was
+    /// launched before the iPhone's first unlock), dropping everything worked out from the empty placeholder.
+    func libraryOpened() {
+        guard container !== SharedLibrary.container, !SharedLibrary.isPlaceholder else { return }
+        container = SharedLibrary.container
+        titleCache.removeAll()
+        derivedCache.removeAll()
+        offMainCache.removeAll()
+        responseCache.removeAll()
+        shortcutsHash = nil
+        progressCache = nil
+        progressChanges = []
+        progressRebuildNeeded = false
+        // Pages redraw, and nothing cached from the placeholder is served, stale or not.
+        libraryVersion += 1
+        lastDeletionVersion = libraryVersion
+        attachLibrary()
+        warmShowProgress()
+        // The launch's refresh skipped the placeholder.
+        Task { await refreshLibrary() }
+        syncWithDropbox()
     }
 
     /// The launch's repair of titles held twice. Syncs and refreshes wait for it: a sync applied over a copy would
@@ -587,14 +623,16 @@ final class AppState {
         }
     }
 
-    /// Every sync starts here, after the launch's duplicate repair.
+    /// Every sync starts here, after the launch's duplicate repair, and never from the placeholder: merging the file
+    /// into an empty library would sync nothing real.
     private func runDropboxSync() async {
         await duplicateRepair?.value
+        guard !isPlaceholder else { return }
         await dropbox.sync(library: { self.library }, version: { self.libraryVersion })
     }
 
     /// Whether a save hasn't reached Dropbox yet.
-    var hasUnsyncedChanges: Bool { dropbox.isConnected && !isInMemory && libraryVersion != dropbox.syncedVersion }
+    var hasUnsyncedChanges: Bool { dropbox.isConnected && !isInMemory && !isPlaceholder && libraryVersion != dropbox.syncedVersion }
 
     /// Syncs before the app quits, waiting at most `timeout`: an edit made just before quitting otherwise waited
     /// for the next launch to reach other devices.
@@ -618,6 +656,8 @@ final class AppState {
     func syncWithDropbox(for phase: ScenePhase) {
         switch phase {
         case .active:
+            // Both couldn't be read if the app was launched before the iPhone's first unlock.
+            if isPlaceholder { SharedLibrary.openIfUnlocked() }
             if secretsUnread { loadSecrets() }
             if libraryVersion != dropbox.syncedVersion || dropbox.lastSynced.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true {
                 syncWithDropbox()
@@ -670,6 +710,7 @@ final class AppState {
     /// the app opens. Cancelled when iOS ends it; what was refreshed by then is saved.
     func refreshInBackground() async {
         scheduleBackgroundRefresh()
+        SharedLibrary.openIfUnlocked()
         await refreshLibrary()
         dropbox.checkConnectionIfNeeded()
         guard dropbox.isConnected, !isInMemory, !Task.isCancelled else { return }
@@ -694,7 +735,8 @@ final class AppState {
 
     /// Picks up new episodes and release-date changes. `force` ignores the 12-hour freshness window.
     func refreshLibrary(force: Bool = false) async {
-        guard client != nil, !isRefreshing else { return }
+        // Not the placeholder: `lastRefresh` would put off refreshing the real library for an hour.
+        guard client != nil, !isRefreshing, !isPlaceholder else { return }
         isRefreshing = true
         lastRefresh = .now
         #if os(iOS)
@@ -743,31 +785,82 @@ enum SharedLibrary {
     #else
     static let isInMemory = false
     #endif
-    static let container = makeContainer(inMemory: isInMemory)
+    /// The library on disk, or an empty in-memory placeholder while the store can't be read yet (an iPhone launched
+    /// in the background before its first unlock) until `openIfUnlocked` replaces it.
+    private(set) static var container = makeContainer(inMemory: isInMemory)
+    private static var placeholder: ModelContainer?
+
+    /// Whether `container` is the placeholder. Nothing may be written to it: it's thrown away.
+    static var isPlaceholder: Bool { container === placeholder }
+
+    /// Opens the library on disk in place of the placeholder, once the device is unlocked, and tells the app.
+    /// Returns whether the library on disk is open.
+    @discardableResult
+    static func openIfUnlocked() -> Bool {
+        guard isPlaceholder else { return true }
+        #if os(iOS)
+        guard UIApplication.shared.isProtectedDataAvailable else { return false }
+        #endif
+        guard let opened = openContainer(inMemory: false) else { return false }
+        opened.mainContext.autosaveEnabled = false
+        container = opened
+        placeholder = nil
+        Log.library.info("Opened the library after the first unlock")
+        AppState.shared?.libraryOpened()
+        return true
+    }
+
+    /// The library for Siri and Shortcuts actions, opened now if it couldn't be at launch. Throws while the device
+    /// hasn't been unlocked since it started, so an action never answers from the placeholder or writes to it.
+    static var unlockedContainer: ModelContainer {
+        get throws {
+            guard openIfUnlocked() else { throw IntentError.locked }
+            return container
+        }
+    }
 
     /// Why the library on disk couldn't be opened at launch, for an alert once the app is up.
     private(set) static var openFailure: String?
 
     static func makeContainer(inMemory: Bool) -> ModelContainer {
-        let container = openContainer(inMemory: inMemory)
+        let container: ModelContainer
+        if let opened = openContainer(inMemory: inMemory) {
+            container = opened
+        } else {
+            // Crashing instead (as this did) crashed every launch before the first unlock: a Shortcuts automation or
+            // Siri after a reboot launches the app in the background. The placeholder stands in until it's unlocked.
+            do {
+                container = try ModelContainer(for: ToWatchSchema.current, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            } catch {
+                fatalError("Couldn't open the library database: \(error)")
+            }
+            placeholder = container
+        }
         // Every change is saved explicitly. Autosave also saved batches (a refresh, a list import) halfway,
         // each save redrawing every page and scheduling a Dropbox sync.
         container.mainContext.autosaveEnabled = false
         return container
     }
 
-    private static func openContainer(inMemory: Bool) -> ModelContainer {
+    /// Nil on iOS when the store exists but can't be read yet: before the device's first unlock.
+    private static func openContainer(inMemory: Bool) -> ModelContainer? {
         let schema = ToWatchSchema.current
         let configuration = ModelConfiguration("ToWatchDB", isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
         do {
             return try ModelContainer(for: schema, migrationPlan: ToWatchMigrationPlan.self, configurations: configuration)
         } catch {
             // A store that exists but can't be read yet (an iPhone launched in the background before its first
-            // unlock) is fine on the next launch: moving it aside would lose it.
+            // unlock) opens once the device is unlocked: moving it aside would lose it.
             let url = configuration.url
             let isLocked = FileManager.default.fileExists(atPath: url.path()) && (try? FileHandle(forReadingFrom: url)) == nil
-            guard !inMemory, !isLocked else {
+            guard !inMemory else { fatalError("Couldn't open the library database: \(error)") }
+            if isLocked {
+                #if os(iOS)
+                Log.library.error("The library can't be read until the device is unlocked; opening it then")
+                return nil
+                #else
                 fatalError("Couldn't open the library database: \(error)")
+                #endif
             }
             // Crashing here crashed every launch, with no way back (a schema change without a migration, a
             // downgrade, a damaged file). The store is kept aside and the app starts with an empty library, which
@@ -809,8 +902,13 @@ enum SharedLibrary {
         return TMDBClient(token: token, language: language.isEmpty ? TMDBClient.language(for: .current) : language)
     }
 
-    static var service: LibraryService { LibraryService(context: container.mainContext, client: makeClient(),
-                                          imdb: OMDbKeyStore.load().map { IMDbClient(apiKey: $0) }) }
+    /// For Siri and Shortcuts actions; throws like `unlockedContainer`.
+    static var service: LibraryService {
+        get throws {
+            LibraryService(context: try unlockedContainer.mainContext, client: makeClient(),
+                           imdb: OMDbKeyStore.load().map { IMDbClient(apiKey: $0) })
+        }
+    }
 
     static var watchRegion: String {
         UserDefaults.standard.string(forKey: "watchRegion") ?? Locale.current.region?.identifier ?? "US"

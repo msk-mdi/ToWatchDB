@@ -26,26 +26,28 @@ struct MovieEntity: AppEntity {
 
 struct MovieQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [MovieEntity] {
-        await MainActor.run {
+        try await MainActor.run {
             // One service: building it reads (and on Mac decrypts) the TMDB token.
-            let library = SharedLibrary.service
+            let library = try SharedLibrary.service
             return identifiers.compactMap { library.movie(tmdbID: $0).map(MovieEntity.init) }
         }
     }
 
     func entities(matching string: String) async throws -> [MovieEntity] {
-        await MainActor.run {
+        try await MainActor.run {
             // Matched in the store instead of loading every movie.
             let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.title.localizedStandardContains(string) })
-            return ((try? SharedLibrary.container.mainContext.fetch(descriptor)) ?? []).map(MovieEntity.init)
+            let context = try SharedLibrary.unlockedContainer.mainContext
+            return ((try? context.fetch(descriptor)) ?? []).map(MovieEntity.init)
         }
     }
 
     func suggestedEntities() async throws -> [MovieEntity] {
-        await MainActor.run {
+        try await MainActor.run {
             var descriptor = FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.addedDate, order: .reverse)])
             descriptor.fetchLimit = 30
-            return ((try? SharedLibrary.container.mainContext.fetch(descriptor)) ?? []).map(MovieEntity.init)
+            let context = try SharedLibrary.unlockedContainer.mainContext
+            return ((try? context.fetch(descriptor)) ?? []).map(MovieEntity.init)
         }
     }
 }
@@ -82,16 +84,17 @@ struct ShowEntity: AppEntity {
 
 struct ShowQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [ShowEntity] {
-        await MainActor.run {
-            let library = SharedLibrary.service
+        try await MainActor.run {
+            let library = try SharedLibrary.service
             return identifiers.compactMap { library.show(tmdbID: $0).map { ShowEntity($0) } }
         }
     }
 
     func entities(matching string: String) async throws -> [ShowEntity] {
-        await MainActor.run {
+        try await MainActor.run {
             let descriptor = FetchDescriptor<TVShow>(predicate: #Predicate { $0.name.localizedStandardContains(string) })
-            return ((try? SharedLibrary.container.mainContext.fetch(descriptor)) ?? []).map { ShowEntity($0) }
+            let context = try SharedLibrary.unlockedContainer.mainContext
+            return ((try? context.fetch(descriptor)) ?? []).map { ShowEntity($0) }
         }
     }
 
@@ -100,13 +103,13 @@ struct ShowQuery: EntityStringQuery {
         // The app's progress map when it's already built, so every show's episodes aren't walked again. Otherwise
         // in a context of its own: updating the shortcut parameters asks for these soon after launch, and walking
         // every episode on the main thread then froze the app for about a second per 300 shows.
-        let ready: [Suggestion]? = await MainActor.run {
-            guard let progress = AppState.shared?.showProgressIfReady() else { return nil }
-            let shows = (try? SharedLibrary.container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
-            return Self.suggestions(shows, progress: progress)
+        let (container, ready): (ModelContainer, [Suggestion]?) = try await MainActor.run {
+            let container = try SharedLibrary.unlockedContainer
+            guard let progress = AppState.shared?.showProgressIfReady() else { return (container, nil) }
+            let shows = (try? container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
+            return (container, Self.suggestions(shows, progress: progress))
         }
         if let ready { return ready.map(ShowEntity.init) }
-        let container = await MainActor.run { SharedLibrary.container }
         let suggestions = await Task.detached(priority: .utility) {
             let context = ModelContext(container)
             let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
@@ -189,8 +192,8 @@ struct CollectionQuery: EntityStringQuery {
     }
 
     func suggestedEntities() async throws -> [CollectionEntity] {
-        await MainActor.run {
-            let context = SharedLibrary.container.mainContext
+        try await MainActor.run {
+            let context = try SharedLibrary.unlockedContainer.mainContext
             let spaces = ((try? context.fetch(FetchDescriptor<Space>(sortBy: [SortDescriptor(\.name)]))) ?? [])
                 .map { CollectionEntity(kind: .space, uuid: $0.uuid, name: $0.name, symbol: $0.symbolName) }
             let lists = ((try? context.fetch(FetchDescriptor<SmartList>(sortBy: [SortDescriptor(\.name)]))) ?? [])

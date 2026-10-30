@@ -258,6 +258,36 @@ private let now = date("2026-09-23").addingTimeInterval(12 * 3600)
     #expect(index.showOf.count == seasons.count + seasons.flatMap { $0.episodes ?? [] }.count)
 }
 
+@MainActor @Test func progressSnapshotsResolveInAnotherContext() throws {
+    let library = try makeLibrary()
+    let show = try insertSeverance(into: library)
+    let episodes = show.regularEpisodes
+    library.setWatched(episodes[0], true, on: date("2026-03-01"))
+    let empty = TVShow(tmdbID: 1, name: "No Episodes")
+    library.context.insert(empty)
+    library.save()
+
+    // Taken in a context of its own, as the app's background rebuild does, and resolved in the main one.
+    let snapshots = try TVShow.progressSnapshotIndex(in: ModelContext(library.context.container), asOf: now)
+    #expect(snapshots.progress.count == 2)
+    #expect(snapshots.showOf.count == (show.seasons ?? []).count + (show.seasons ?? []).flatMap { $0.episodes ?? [] }.count)
+    let resolved = try ShowProgress.resolve(snapshots.progress, in: library.context)
+    #expect(resolved.count == 2)
+    let progress = try #require(resolved[show.persistentModelID]), single = show.progressSummary(asOf: now)
+    #expect(progress.status == single.status)
+    #expect(progress.nextEpisode?.code == "S01E02")
+    #expect(progress.nextEpisode?.modelContext === library.context)
+    #expect(progress.nextEpisodeToAir?.code == single.nextEpisodeToAir?.code)
+    #expect(progress.lastWatched == date("2026-03-01"))
+    #expect(resolved[empty.persistentModelID]?.nextEpisode == nil)
+
+    // An episode deleted after the snapshot: its show is left out rather than handed a deleted model.
+    library.delete(try #require(progress.nextEpisode))
+    let afterDeletion = try ShowProgress.resolve(snapshots.progress, in: library.context)
+    #expect(afterDeletion[show.persistentModelID] == nil)
+    #expect(afterDeletion[empty.persistentModelID] != nil)
+}
+
 @MainActor @Test func refreshMergeKeepsWatchData() throws {
     let library = try makeLibrary()
     let show = try insertSeverance(into: library)

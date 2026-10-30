@@ -18,8 +18,9 @@ struct ToWatchDBApp: App {
     #else
     @State private var appState = AppState()
     #endif
-    /// What the App Shortcut parameters were last updated with (see `AppState.shortcutsContent`).
-    @State private var shortcutsContent: Int?
+    /// What the App Shortcut parameters were last updated with (see `AppState.shortcutsContent`). Kept across
+    /// launches: a launch where nothing changed skips the update, which asks for every show's progress.
+    @AppStorage("shortcutsContent") private var shortcutsContent = 0
 
     init() {
         // Posters are requested constantly while scrolling; a larger shared cache keeps them local. Mostly on disk:
@@ -39,6 +40,8 @@ struct ToWatchDBApp: App {
                     #endif
                     await DebugTools.runIfRequested(appState)
                     #endif
+                    // Every show's progress, in the background, before the first list is opened or Siri asks.
+                    appState.warmShowProgress()
                     await appState.refreshLibrary()
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in

@@ -276,17 +276,24 @@ final class AppState {
 
     @ObservationIgnored private var shortcutsHash: (version: Int, day: Date, value: Int)?
 
+    /// A stable hash (FNV-1a), not `Hasher`: its seed changes with every launch, so the value kept from the last
+    /// launch would never match and Siri was taught again (asking for every show's progress) at every launch.
+    /// Titles in ID order for the same reason: a fetch without a sort doesn't promise one.
     private nonisolated static func shortcutsContent(in context: ModelContext) -> Int {
-        var hasher = Hasher()
-        var movies = FetchDescriptor<Movie>()
-        movies.propertiesToFetch = [\.title]
-        for movie in (try? context.fetch(movies)) ?? [] { hasher.combine(movie.title) }
-        let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
-        for show in (try? context.fetch(FetchDescriptor<TVShow>())) ?? [] {
-            hasher.combine(show.name)
-            hasher.combine(progress[show.persistentModelID]?.nextEpisode?.code)
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        func combine(_ string: String?) {
+            for byte in (string ?? "").utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
+            hash = (hash ^ (string == nil ? 0x1e : 0x1f)) &* 0x0000_0100_0000_01b3 // Ends the field; nil isn't "".
         }
-        return hasher.finalize()
+        var movies = FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.tmdbID)])
+        movies.propertiesToFetch = [\.title]
+        for movie in (try? context.fetch(movies)) ?? [] { combine(movie.title) }
+        let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
+        for show in (try? context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.tmdbID)]))) ?? [] {
+            combine(show.name)
+            combine(progress[show.persistentModelID]?.nextEpisode?.code)
+        }
+        return Int(truncatingIfNeeded: hash)
     }
 
     /// The TMDB IDs in the library, for Discover and Search badges. Reads only the IDs. Hidden pages (kept alive
@@ -306,15 +313,27 @@ final class AppState {
     /// walks all of its episodes. It fetches every show itself, so a page whose query is narrower can't cache a
     /// partial map. Kept across saves: a save recomputes only the shows it changed, where recomputing every show
     /// walked every episode in the library after each click.
+    ///
+    /// The full map is built in a context of its own off the main thread (`rebuildShowProgress`): at launch, before
+    /// any page asks (`warmShowProgress`), and again on a new day or after more changes than are worth tracing,
+    /// the last map serving meanwhile. Built on the main thread, it froze the first list opened each day for
+    /// about a second per 300 shows, longer on an iPhone. Only a page that asks before the launch warm-up lands
+    /// (or a Siri launch, which has no warm-up) still builds it here.
     func showProgress() -> [PersistentIdentifier: ShowProgress] {
         _ = libraryVersion // Pages showing progress redraw after saves.
+        _ = progressGeneration // And when a map built in the background lands.
         let day = Calendar.current.startOfDay(for: .now)
         let context = container.mainContext
-        guard var cache = progressCache, cache.day == day else {
+        guard var cache = progressCache else {
             let index = (try? TVShow.progressIndex(in: context)) ?? (progress: [:], showOf: [:])
             progressCache = (day, index.progress, index.showOf)
             progressChanges = []
+            progressRebuildNeeded = false
             return index.progress
+        }
+        if cache.day != day || progressRebuildNeeded {
+            rebuildShowProgressLater()
+            return cache.progress
         }
         guard !progressChanges.isEmpty else { return cache.progress }
         var shows: [PersistentIdentifier: TVShow] = [:]
@@ -335,18 +354,68 @@ final class AppState {
         return cache.progress
     }
 
+    /// Builds the progress map in the background if there's none yet, so the first list opened finds it ready.
+    /// Called once the first frame is up.
+    func warmShowProgress() {
+        guard progressCache == nil else { return }
+        rebuildShowProgressLater()
+    }
+
+    /// The progress map if it's built and current, without building it. The Siri entity query asks: with none
+    /// ready, it works its own out in the background rather than making the main thread do it.
+    func showProgressIfReady() -> [PersistentIdentifier: ShowProgress]? {
+        guard let cache = progressCache, cache.day == Calendar.current.startOfDay(for: .now), !progressRebuildNeeded else { return nil }
+        return showProgress()
+    }
+
+    private func rebuildShowProgressLater() {
+        guard progressRebuild == nil else { return }
+        progressRebuild = Task {
+            await rebuildShowProgress()
+            progressRebuild = nil
+        }
+    }
+
+    /// Works every show's progress out in a context of its own and swaps it in. A save landing meanwhile would
+    /// leave the map behind it (a change noted during the build can't be told from one the build saw), so then
+    /// it's built again, a few times at most; the next page redraw asks again after that.
+    private func rebuildShowProgress() async {
+        for _ in 1...3 {
+            let version = libraryVersion, day = Calendar.current.startOfDay(for: .now), container = container
+            let index = await Task.detached(priority: .userInitiated) {
+                try? TVShow.progressSnapshotIndex(in: ModelContext(container))
+            }.value
+            guard let index else { return }
+            guard version == libraryVersion else { continue }
+            // A page built the map itself meanwhile (before the warm-up landed): it's the same map.
+            if let cache = progressCache, cache.day == day, !progressRebuildNeeded { return }
+            guard let progress = try? ShowProgress.resolve(index.progress, in: container.mainContext) else { return }
+            progressCache = (day, progress, index.showOf)
+            progressChanges = []
+            progressRebuildNeeded = false
+            progressGeneration += 1
+            return
+        }
+    }
+
     /// `showProgress` as of `day`, with the show each season and episode it read belongs to; and the shows,
     /// seasons, and episodes saved since, which it recomputes.
     @ObservationIgnored private var progressCache: (day: Date, progress: [PersistentIdentifier: ShowProgress],
                                                     showOf: [PersistentIdentifier: PersistentIdentifier])?
     @ObservationIgnored private var progressChanges: [PersistentIdentifier] = []
+    /// Whether the map must be built again from scratch; until the build lands, the current one serves.
+    @ObservationIgnored private var progressRebuildNeeded = false
+    @ObservationIgnored private var progressRebuild: Task<Void, Never>?
+    /// Bumped when a map built in the background lands. Observed, so pages showing progress redraw with it.
+    private var progressGeneration = 0
     /// The models a show's progress is worked out from.
     private static let progressEntities: Set<String> = ["TVShow", "Season", "Episode"]
 
     /// Drops deleted shows and queues the shows that lost a season or episode. A deletion used to rebuild every
     /// show's progress, reading every episode again (about 0.7 s for 300 shows), when a refresh dropped one episode.
     /// A season or episode saved since the progress was last read can't be traced to its show (deleted, it can't be
-    /// read), so then everything is worked out again.
+    /// read), so then everything is worked out again, in the background. Either way, no entry that points at a
+    /// deleted episode is kept: the map serves until the rebuild lands, and a deleted model can't be read.
     private func noteProgressDeletions(_ deleted: [PersistentIdentifier]) {
         let deleted = deleted.filter { Self.progressEntities.contains($0.entityName) }
         guard !deleted.isEmpty, var cache = progressCache else { return }
@@ -354,13 +423,17 @@ final class AppState {
         var shows: [PersistentIdentifier] = []
         for id in deleted where id.entityName != "TVShow" {
             guard let show = cache.showOf.removeValue(forKey: id) else {
-                progressCache = nil
-                progressChanges = []
-                return
+                progressRebuildNeeded = true
+                continue
             }
             if !deletedIDs.contains(show) { shows.append(show) }
         }
         for id in deleted where id.entityName == "TVShow" { cache.progress[id] = nil }
+        if deleted.contains(where: { $0.entityName != "TVShow" }) {
+            cache.progress = cache.progress.filter { _, progress in
+                progress.nextEpisode?.isLive != false && progress.nextEpisodeToAir?.isLive != false
+            }
+        }
         progressCache = cache
         // A deleted model can't be read to find its show.
         progressChanges.removeAll { deletedIDs.contains($0) }
@@ -370,9 +443,10 @@ final class AppState {
     private func noteProgressChanges(_ changed: [PersistentIdentifier]) {
         guard progressCache != nil else { return }
         progressChanges += changed.filter { Self.progressEntities.contains($0.entityName) }
-        // A refresh of the whole library: computing everything again is cheaper than finding each show.
+        // A refresh of the whole library: computing everything again (in the background) is cheaper than finding
+        // each show.
         if progressChanges.count > 2000 {
-            progressCache = nil
+            progressRebuildNeeded = true
             progressChanges = []
         }
     }

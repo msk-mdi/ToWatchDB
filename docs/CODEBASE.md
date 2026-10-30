@@ -125,7 +125,7 @@ Scripts/
 docs/CODEBASE.md                This file
 ```
 
-About 15,900 lines of Swift in total (version 2.1.0).
+About 16,100 lines of Swift in total (version 2.1.0).
 
 ---
 
@@ -360,7 +360,8 @@ parameters whenever it becomes active.
 | `computeOffMain(_:_:)`, `offMainValue(_:)` | Works a `Sendable` value out in a background context once per library version (stats); a page shows the last one until the new one lands (§7, item 4) |
 | `all(_:)` | Every model of a type, for `cached` closures; movies and shows are kept until a save inserts or deletes one, so filter them in memory (§7, item 15) |
 | `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |
-| `shortcutsContent()` | Hash of the names and next episodes Siri is taught, worked out off the main thread once per library version and day (§5.11) |
+| `shortcutsContent()` | Stable hash (FNV-1a, so it survives a relaunch) of the names and next episodes Siri is taught, worked out off the main thread once per library version and day (§5.11) |
+| `warmShowProgress()`, `showProgressIfReady()` | Builds the progress map in the background at launch; the map only if it's built and current, for the Siri entity query |
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 
 `SharedLibrary` holds the on-disk container and a client factory. App Intents use the same container, so their
@@ -598,8 +599,10 @@ the local date.
 
 - **Siri phrases:** `ToWatchShortcuts` has 9 App Shortcuts, for example "What's next in ToWatchDB" and "Mark
   ⟨show⟩ watched in ToWatchDB". `updateAppShortcutParameters()` runs when the app becomes active and
-  `appState.shortcutsContent()` (the title names and each show's next episode) changed, so Siri learns your
-  current show and movie names without walking every episode on each activation.
+  `appState.shortcutsContent()` (the title names and each show's next episode) changed since the last update,
+  which is remembered across launches, so Siri learns your current show and movie names without walking every
+  episode on each activation. The update asks `ShowQuery.suggestedEntities()` for every show's next episode:
+  it uses the app's progress map when that's built, and a background context otherwise (§7, item 18).
 - **Opening actions** set `IntentRouter.shared`, and `RootView` navigates.
 - **Signing:** the system only runs intents from apps signed with a team (§3).
 
@@ -646,7 +649,10 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
    and Next to Watch read it instead of walking episodes themselves. A save recomputes only the shows whose
    show, season, or episode it inserted or updated. A deleted show is dropped, and a show that lost a season or
    episode is recomputed (the map records each one's show, since a deleted model can't be read). A new day, more
-   than 2,000 changes, or a deleted season or episode it never read rebuild it all (§7, item 18).
+   than 2,000 changes, or a deleted season or episode it never read rebuild it all, in a background context
+   (`rebuildShowProgress`, §7, item 18), the last map serving meanwhile with any entry that points at a deleted
+   episode dropped. The launch warms it up (`warmShowProgress`) before the first list is opened; only a page that
+   asks before that lands builds it on the main thread.
 9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
    save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.
@@ -677,8 +683,11 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
     `season.episodes` in a context materializes the relationship: `progressSummary()` on every show of a fresh
     context took about 3.4 s for 300 shows of 72 episodes (1 s for 80), and prefetching didn't help.
     `TVShow.progressSummaries(in:)` fetches the episodes once and groups them through their season, which
-    takes about 0.6 s. `showProgress()` uses it for a full rebuild, and `shortcutsContent()` uses it in a
-    background context.
+    takes about 0.6 s, which is the cost of materializing the objects: fetching only the five columns progress
+    reads saves nothing (0.41 s against 0.42 s for 21,600 episodes). So it never runs on the main thread when
+    it can be helped: `showProgress()` rebuilds through `TVShow.progressSnapshotIndex(in:)` in a context of its
+    own and `ShowProgress.resolve` fetches the next episodes back into the main context in one go (6 ms for 300);
+    `shortcutsContent()` and the Siri entity query (`ShowQuery.suggestedEntities`) use a background context too.
 
 To measure page switches, see §9.
 

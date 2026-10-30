@@ -1,3 +1,6 @@
+#if os(iOS)
+import BackgroundTasks
+#endif
 import Foundation
 import Observation
 import SwiftUI
@@ -107,6 +110,7 @@ final class AppState {
     @ObservationIgnored private var hasReportedRejectedToken = false
     #if os(iOS)
     @ObservationIgnored private var backgroundSync: UIBackgroundTaskIdentifier = .invalid
+    @ObservationIgnored private var backgroundRefresh: UIBackgroundTaskIdentifier = .invalid
     #endif
 
     /// TMDB `language` parameter; empty means follow the system.
@@ -643,6 +647,36 @@ final class AppState {
     }
 
     #if os(iOS)
+    private func endBackgroundRefresh() {
+        guard backgroundRefresh != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundRefresh)
+        backgroundRefresh = .invalid
+    }
+
+    /// Identifies the background app refresh in Info.plist (`BGTaskSchedulerPermittedIdentifiers`).
+    static let backgroundRefreshID = "com.mehdi.towatchdb.refresh"
+
+    /// Asks iOS for a background app refresh in a few hours, when it sees fit. A new request replaces the last.
+    func scheduleBackgroundRefresh() {
+        guard !isInMemory else { return }
+        let request = BGAppRefreshTaskRequest(identifier: Self.backgroundRefreshID)
+        request.earliestBeginDate = .now.addingTimeInterval(3 * 3600)
+        do { try BGTaskScheduler.shared.submit(request) } catch {
+            Log.refresh.error("Couldn't schedule a background refresh: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The background app refresh: new episodes, then other devices' edits, so Up Next and Upcoming are current when
+    /// the app opens. Cancelled when iOS ends it; what was refreshed by then is saved.
+    func refreshInBackground() async {
+        scheduleBackgroundRefresh()
+        await refreshLibrary()
+        dropbox.checkConnectionIfNeeded()
+        guard dropbox.isConnected, !isInMemory, !Task.isCancelled else { return }
+        await dropbox.waitForSync()
+        await runDropboxSync()
+    }
+
     private func endBackgroundSync() {
         guard backgroundSync != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundSync)
@@ -663,8 +697,18 @@ final class AppState {
         guard client != nil, !isRefreshing else { return }
         isRefreshing = true
         lastRefresh = .now
+        #if os(iOS)
+        // Opening the app and leaving within seconds is the common case: without a background task, iOS suspended
+        // the refresh with its downloads in flight, and the titles they were for stayed stale.
+        backgroundRefresh = UIApplication.shared.beginBackgroundTask(withName: "Library Refresh") { [weak self] in
+            self?.endBackgroundRefresh()
+        }
+        #endif
         defer {
             isRefreshing = false
+            #if os(iOS)
+            endBackgroundRefresh()
+            #endif
             if syncsAfterRefresh {
                 syncsAfterRefresh = false
                 syncWithDropbox()
@@ -674,7 +718,9 @@ final class AppState {
         await duplicateRepair?.value
         await dropbox.waitForSync()
         do {
-            try await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
+            let outcome = try await library.refreshStale(maxAge: force ? 0 : 12 * 3600)
+            // Cut off (offline, or suspended anyway): the next activation tries again rather than an hour later.
+            if outcome.unreachable > 0 { lastRefresh = .distantPast }
         } catch {
             // Said once per launch: the refresh runs again at every activation, and the token stays wrong until
             // it's changed in Settings.

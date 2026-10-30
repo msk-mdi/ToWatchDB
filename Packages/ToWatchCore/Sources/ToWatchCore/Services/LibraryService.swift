@@ -125,12 +125,22 @@ public struct LibraryService {
         refreshIMDbRatingsLater(shows: [show])
     }
 
+    /// What `refreshStale` did.
+    public struct RefreshOutcome: Sendable, Equatable {
+        public var refreshed = 0
+        /// Titles not refreshed: their download failed, or they were deleted meanwhile.
+        public var failed = 0
+        /// Of those, the ones whose download never got an answer (offline, cut off when iOS suspended the app, or
+        /// cancelled): worth trying again soon, unlike a title TMDB answered with an error.
+        public var unreachable = 0
+    }
+
     /// Refreshes ongoing shows and unreleased movies that haven't been refreshed within `maxAge`.
-    /// Failures are skipped so one bad item doesn't block the rest; returns how many were refreshed. Throws when
+    /// Failures are skipped so one bad item doesn't block the rest, and counted in the outcome. Throws when
     /// TMDB turns the token down, after saving what was refreshed: every other title would fail the same way,
     /// and a revoked token otherwise failed one request per title at every launch without a word.
     @discardableResult
-    public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async throws -> Int {
+    public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async throws -> RefreshOutcome {
         let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
         // The store narrows it down (this runs at every launch and activation); the checks after are exact.
         // No force unwraps in these predicates: SwiftData can't translate them, the fetch throws, and `try?` turned
@@ -144,19 +154,20 @@ public struct LibraryService {
             ($0.releaseDate ?? future) > today && ($0.lastRefreshed ?? past) < cutoff
         }))) ?? []).filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
 
-        guard let client, !shows.isEmpty || !movies.isEmpty else { return 0 }
+        guard let client, !shows.isEmpty || !movies.isEmpty else { return RefreshOutcome() }
 
         // A few titles download at a time (a show's seasons already download in parallel), and the library is
         // saved once at the end: every save redraws each open page, so saving per title made a refresh of
         // many shows keep the main thread busy.
         let showsByID = Dictionary(shows.map { ($0.tmdbID, $0) }) { first, _ in first }
         let moviesByID = Dictionary(movies.map { ($0.tmdbID, $0) }) { first, _ in first }
-        var count = 0
+        var count = 0, unreachable = 0
         var rejection: (any Error)?
         await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) { id in
             await Self.result { try await client.tvShowWithSeasons(id: id) }
         } apply: { id, result in
             rejection = rejection ?? Self.tokenRejection(in: result)
+            if Self.isUnreachable(result) { unreachable += 1 }
             // A title deleted while downloading (by the user or a sync) is skipped: writing to it can trap.
             guard let (detail, seasons) = try? result.get(), let show = showsByID[id], show.isLive else { return }
             show.apply(detail)
@@ -168,6 +179,7 @@ public struct LibraryService {
                 await Self.result { try await client.movie(id: id) }
             } apply: { id, result in
                 rejection = rejection ?? Self.tokenRejection(in: result)
+                if Self.isUnreachable(result) { unreachable += 1 }
                 guard let detail = try? result.get(), let movie = moviesByID[id], movie.isLive else { return }
                 movie.apply(detail)
                 count += 1
@@ -180,8 +192,14 @@ public struct LibraryService {
             Log.refresh.error("TMDB turned down the token: \(rejection.localizedDescription, privacy: .public)")
             throw rejection
         }
-        if failed > 0 { Log.refresh.error("\(failed, privacy: .public) titles weren't refreshed (failed, or deleted meanwhile)") }
-        return count
+        if failed > 0 { Log.refresh.error("\(failed, privacy: .public) titles weren't refreshed (failed, or deleted meanwhile; \(unreachable, privacy: .public) unreachable)") }
+        return RefreshOutcome(refreshed: count, failed: failed, unreachable: unreachable)
+    }
+
+    /// Whether a download failed without an answer from TMDB: a network error or a cancelled task.
+    static func isUnreachable<T>(_ result: Result<T, any Error>) -> Bool {
+        guard case let .failure(error) = result else { return false }
+        return error is URLError || error is CancellationError
     }
 
     // MARK: IMDb ratings

@@ -28,7 +28,7 @@ by the Siri shortcut update, before the user has opened any list.
 | 6 | Medium, fixed | A refresh interrupted by backgrounding leaves titles stale for an hour and has no background task | Background |
 | 7 | Low, fixed | Poster downloads are never cancelled and ignore Low Data Mode and cellular | Network, data |
 | 8 | Low, fixed | Each visible episode row runs a query for its notes | Detail page |
-| 9 | Low | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
+| 9 | Low, fixed | Every title page opens a request to the Seerr server, which can wait 15 s off the home network | Network |
 | 10 | Low | No `#Index` on the columns every predicate filters by | Store |
 | 11 | Low | iPad rebuilds the page on every sidebar switch | iPad |
 | 12 | Low | The decoded image cache is a 128 MB ceiling, with no reaction to memory warnings beyond NSCache's own | Memory |
@@ -269,6 +269,11 @@ waits, so the cost is a wasted socket and a brief stall of the page's `.task`, n
 
 **Recommendation.** Remember the last failure and back off for a few minutes, or check `NWPathMonitor` for a
 Wi-Fi path before trying a private address. Both are small changes.
+
+**Fixed (same day), the first.** A status check that fails with a `URLError` (no answer, as opposed to an error
+from Seerr) is remembered in `AppState`, and title pages skip their check for 5 minutes after it. Test Connection
+in Settings and signing in clear it. The first page off the home network still waits for its timeout, and its
+Local Network prompt is unchanged.
 
 ### 10. Low: no `#Index` on the columns the predicates filter by
 

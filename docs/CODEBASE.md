@@ -602,7 +602,9 @@ the local date.
 - **`SeerrRequestButton`** on each title page shows Request on Seerr (a season picker for shows), Requested on
   Seerr, or Watch Now, with a Delete Request button per request. While a request is in progress it checks the
   status every 30 seconds, but only on the visible page. After a request or deletion its buttons stay disabled
-  until the new status loads. The season sheet shows the status it was opened with, so a failed check can't
+  until the new status loads. A check that gets no answer at all (a `URLError`, like a home server away from home)
+  makes every page skip its check for 5 minutes (`AppState.isSeerrUnreachable`); Test Connection and signing in
+  clear it. The season sheet shows the status it was opened with, so a failed check can't
   empty it.
 
 ### 5.11 Siri & Shortcuts (App Intents)

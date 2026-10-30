@@ -570,8 +570,20 @@ final class AppState {
     /// Seerr client for requesting titles, if a server is set up.
     var seerr: SeerrClient? { seerrAuth.flatMap { SeerrClient(server: seerrServer, auth: $0) } }
 
+    /// When a title page last couldn't reach the Seerr server at all (a home server, away from home). Pages skip
+    /// their status check for 5 minutes after: each one held a request open for up to 15 s.
+    @ObservationIgnored private var seerrUnreachableSince: Date?
+
+    var isSeerrUnreachable: Bool { seerrUnreachableSince.map { Date.now.timeIntervalSince($0) < 300 } ?? false }
+
+    /// `true` after a check failed without an answer; `false` to try again now (Test Connection, a new sign-in).
+    func noteSeerrUnreachable(_ isUnreachable: Bool) {
+        seerrUnreachableSince = isUnreachable ? .now : nil
+    }
+
     /// Saves a connected Seerr client and who it's signed in as; `nil` forgets the server and sign-in.
     func setSeerr(_ client: SeerrClient?, userName: String? = nil) {
+        noteSeerrUnreachable(false)
         let defaults = UserDefaults.standard
         if let client {
             defaults.set(client.baseURL.absoluteString, forKey: "seerrServer")

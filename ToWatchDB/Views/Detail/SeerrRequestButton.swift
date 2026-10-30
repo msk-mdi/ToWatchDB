@@ -131,15 +131,26 @@ struct SeerrRequestButton: View {
 
     /// Loads the status, then checks it every 30 seconds while a request is in progress, so Requested turns
     /// into Watch Now when the title arrives. Stops with the page, and while it's hidden (kept alive on Mac).
-    /// Hidden when Seerr can't be reached.
+    /// Hidden when Seerr can't be reached, and not asked again for a few minutes after it couldn't be.
     private func watch(_ seerr: SeerrClient) async {
         while !Task.isCancelled {
+            guard !appState.isSeerrUnreachable else {
+                status = nil
+                isRequesting = false
+                return
+            }
             do {
                 status = try await seerr.title(kind == .movie ? .movie : .tv, tmdbID: tmdbID)
             } catch is CancellationError {
                 return
             } catch let error as URLError where error.code == .cancelled {
                 // The task was replaced (after a request, say); the new one sets the status and buttons.
+                return
+            } catch is URLError {
+                // No answer at all, unlike a Seerr error: the next pages skip asking for a while.
+                appState.noteSeerrUnreachable(true)
+                status = nil
+                isRequesting = false
                 return
             } catch {
                 status = nil

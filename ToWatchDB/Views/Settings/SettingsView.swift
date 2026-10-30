@@ -361,6 +361,8 @@ struct SettingsView: View {
 
     private func testSeerr() {
         guard let client = appState.seerr else { return }
+        // Title pages ask again after this, whatever it finds.
+        appState.noteSeerrUnreachable(false)
         isTestingSeerr = true
         seerrTestResult = nil
         Task {

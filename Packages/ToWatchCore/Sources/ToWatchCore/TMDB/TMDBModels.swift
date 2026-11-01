@@ -179,8 +179,11 @@ public struct TMDBErrorBody: Decodable, Sendable {
 public enum TMDBDate {
     public static func parse(_ string: String?) -> Date? {
         guard let string, !string.isEmpty else { return nil }
-        return try? Date(string, strategy: Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
+        return try? Date(string, strategy: dayStyle)
     }
+
+    /// Built once: a refresh parses a date per episode, thousands of them.
+    private static let dayStyle = Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day()
 
     /// The user's current calendar day as a TMDB date (its UTC midnight). Comparing against the UTC day instead
     /// made tomorrow's episodes count as aired on a US evening, and kept yesterday's as "today" in Asia.

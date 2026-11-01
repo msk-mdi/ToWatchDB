@@ -370,16 +370,12 @@ final class AppState {
         return Int(truncatingIfNeeded: hash)
     }
 
-    /// The TMDB IDs in the library, for Discover and Search badges. Reads only the IDs. Hidden pages (kept alive
-    /// on Mac) pass `allowStale` so a save doesn't refetch them for a page nobody sees.
+    /// The TMDB IDs in the library, for Discover and Search badges. From the cached titles: fetching only the IDs
+    /// cost as much as fetching the titles (about 45 ms per 1,300), after every save. Hidden pages (kept alive on
+    /// Mac) pass `allowStale` so a save doesn't redo it for a page nobody sees.
     func libraryIDs(allowStale: Bool = false) -> LibraryIDs {
         cached("library-ids", allowStale: allowStale) {
-            var movies = FetchDescriptor<Movie>()
-            movies.propertiesToFetch = [\.tmdbID]
-            var shows = FetchDescriptor<TVShow>()
-            shows.propertiesToFetch = [\.tmdbID]
-            let context = container.mainContext
-            return LibraryIDs(movies: (try? context.fetch(movies)) ?? [], shows: (try? context.fetch(shows)) ?? [])
+            LibraryIDs(movies: all(), shows: all())
         }
     }
 
@@ -933,11 +929,11 @@ enum SharedLibrary {
         return TMDBClient(token: token, language: language.isEmpty ? TMDBClient.language(for: .current) : language)
     }
 
-    /// For Siri and Shortcuts actions; throws like `unlockedContainer`.
+    /// For Siri and Shortcuts actions; throws like `unlockedContainer`. Without TMDB or OMDb: every action only
+    /// reads and writes the library, and reading their keys took a Keychain call each (a decrypt on Mac) per action.
     static var service: LibraryService {
         get throws {
-            LibraryService(context: try unlockedContainer.mainContext, client: makeClient(),
-                           imdb: OMDbKeyStore.load().map { IMDbClient(apiKey: $0) })
+            LibraryService(context: try unlockedContainer.mainContext, client: nil)
         }
     }
 

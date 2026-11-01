@@ -65,6 +65,7 @@ targets:
         "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=iphone*]": AppIcon-Orange AppIcon-Yellow AppIcon-Green AppIcon-Teal AppIcon-Blue AppIcon-Indigo AppIcon-Purple AppIcon-Pink AppIcon-Graphite
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
+        DEAD_CODE_STRIPPING: YES
         SWIFT_STRICT_CONCURRENCY: complete
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO

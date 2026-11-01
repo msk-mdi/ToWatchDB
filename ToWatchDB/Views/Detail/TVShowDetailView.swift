@@ -94,9 +94,9 @@ struct TVShowDetailView: View {
         .onAppear {
             // Open on the season containing the next episode to watch.
             if selectedSeason == nil {
-                selectedSeason = show.nextEpisodeToWatch()?.seasonNumber
-                    ?? show.sortedSeasons.first { $0.seasonNumber > 0 }?.seasonNumber
-                    ?? show.sortedSeasons.first?.seasonNumber
+                selectedSeason = progress.nextEpisode?.seasonNumber
+                    ?? seasons.first { $0.seasonNumber > 0 }?.seasonNumber
+                    ?? seasons.first?.seasonNumber
             }
         }
     }
@@ -172,18 +172,7 @@ struct TVShowDetailView: View {
                 }
 
                 if season != nil {
-                    // Every page shares it until the next save.
-                    let noted = appState.cached("episodes-with-notes") {
-                        (try? LibraryService.episodesWithNotes(in: appState.container.mainContext)) ?? []
-                    }
-                    LazyVStack(spacing: 0) {
-                        ForEach(episodes) { episode in
-                            EpisodeRow(episode: episode, hasNotes: noted.contains(episode.persistentModelID),
-                                       onNotes: { notesEpisode = episode })
-                            Divider()
-                        }
-                    }
-                    .frame(maxWidth: 900)
+                    EpisodeList(episodes: episodes) { notesEpisode = $0 }
                 }
             }
             // A refresh or sync can remove the selected season; the page then had no episodes and no valid pick.
@@ -225,7 +214,7 @@ struct TVShowDetailView: View {
         var facts: [(String, String)] = []
         if let status = show.showStatus { facts.append(("Status", status)) }
         if !show.networks.isEmpty { facts.append(("Network", show.networks.formatted())) }
-        let creators = credits.creators.map(\.name)
+        let creators = credits.crew.map(\.name)
         if !creators.isEmpty { facts.append(("Created by", creators.formatted())) }
         if let runtime = show.episodeRuntime { facts.append(("Episode Length", runtime.runtimeString)) }
         if let original = show.originalName, original != show.name { facts.append(("Original Title", original)) }
@@ -242,22 +231,26 @@ struct TVShowDetailView: View {
     }
 }
 
-/// Cast and creators, decoded only when their data changes: the page redraws on every episode toggle.
-/// Not observed, so updating it from `body` doesn't trigger another redraw.
-private final class DecodedCredits {
-    private var castData: Data?
-    private var creatorsData: Data?
-    private var isLoaded = false
-    private(set) var cast: [PersonCredit] = []
-    private(set) var creators: [PersonCredit] = []
+/// The episodes of the selected season. Its own view because of the notes lookup: read in the page, it tied the
+/// whole page to every save in the library, so each one walked every episode again in every open show page.
+private struct EpisodeList: View {
+    @Environment(AppState.self) private var appState
+    let episodes: [Episode]
+    let onNotes: (Episode) -> Void
 
-    func update(for show: TVShow) {
-        guard !isLoaded || show.castData != castData || show.creatorsData != creatorsData else { return }
-        isLoaded = true
-        castData = show.castData
-        creatorsData = show.creatorsData
-        cast = show.cast
-        creators = show.creators
+    var body: some View {
+        // Every page shares it until the next save.
+        let noted = appState.cached("episodes-with-notes") {
+            (try? LibraryService.episodesWithNotes(in: appState.container.mainContext)) ?? []
+        }
+        LazyVStack(spacing: 0) {
+            ForEach(episodes) { episode in
+                EpisodeRow(episode: episode, hasNotes: noted.contains(episode.persistentModelID),
+                           onNotes: { onNotes(episode) })
+                Divider()
+            }
+        }
+        .frame(maxWidth: 900)
     }
 }
 

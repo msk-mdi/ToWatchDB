@@ -1694,3 +1694,17 @@ private final class PartlyOfflineProtocol: URLProtocol {
     let noted = try LibraryService.episodesWithNotes(in: ModelContext(library.context.container))
     #expect(noted == [episodes[0].persistentModelID, episodes[8].persistentModelID])
 }
+
+@MainActor @Test func staleTitlesLeaveEndedShowsOutInTheStore() throws {
+    let library = try makeLibrary()
+    let statuses: [String?] = [nil, "Returning Series", "In Production", "Planned", "Pilot", "Ended", "Canceled"]
+    for (id, status) in statuses.enumerated() {
+        let show = TVShow(tmdbID: id, name: "Show \(id)")
+        show.showStatus = status
+        library.context.insert(show)
+    }
+    library.save()
+
+    let stale = library.staleTitles(maxAge: 0, now: .now)
+    #expect(Set(stale.shows.map(\.tmdbID)) == [0, 1, 2, 3, 4])
+}

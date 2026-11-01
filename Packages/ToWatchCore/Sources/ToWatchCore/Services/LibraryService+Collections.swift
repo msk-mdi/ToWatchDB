@@ -166,13 +166,6 @@ public extension LibraryService {
         return try? context.fetch(descriptor).first
     }
 
-    /// Every genre in the library, for building smart-list rules.
-    func allGenres() -> [String] {
-        let movies = (try? context.fetch(FetchDescriptor<Movie>())) ?? []
-        let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
-        return Set(movies.flatMap(\.genres) + shows.flatMap(\.genres)).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-    }
-
     private func forEachSmartList(_ change: (inout SmartListRules) -> Void) {
         for list in (try? context.fetch(FetchDescriptor<SmartList>())) ?? [] {
             var rules = list.rules

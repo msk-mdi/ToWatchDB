@@ -27,7 +27,6 @@ struct MovieEntity: AppEntity {
 struct MovieQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [MovieEntity] {
         try await MainActor.run {
-            // One service: building it reads (and on Mac decrypts) the TMDB token.
             let library = try SharedLibrary.service
             return identifiers.compactMap { library.movie(tmdbID: $0).map(MovieEntity.init) }
         }
@@ -94,7 +93,11 @@ struct ShowQuery: EntityStringQuery {
         try await MainActor.run {
             let descriptor = FetchDescriptor<TVShow>(predicate: #Predicate { $0.name.localizedStandardContains(string) })
             let context = try SharedLibrary.unlockedContainer.mainContext
-            return ((try? context.fetch(descriptor)) ?? []).map { ShowEntity($0) }
+            let shows = (try? context.fetch(descriptor)) ?? []
+            // The next episode from the app's progress map, or none (the year instead): Shortcuts asks while the user
+            // types, a short string matches many shows, and finding each one's walked all its episodes.
+            let progress = AppState.shared?.showProgressIfReady()
+            return shows.map { ShowEntity($0, next: progress?[$0.persistentModelID]?.nextEpisode) }
         }
     }
 

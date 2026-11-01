@@ -135,25 +135,34 @@ public struct LibraryService {
         public var unreachable = 0
     }
 
+    /// The ongoing shows and unreleased movies last refreshed more than `maxAge` ago.
+    func staleTitles(maxAge: TimeInterval, now: Date) -> (shows: [TVShow], movies: [Movie]) {
+        let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
+        // The store narrows it down (this runs at every launch and activation); the checks after are exact. It
+        // leaves out TMDB's two ended statuses too: never refreshed here, ended shows all stayed stale and were
+        // loaded each time. `contains` over the ongoing statuses can't be translated with an optional status.
+        // No force unwraps in these predicates: SwiftData can't translate them, the fetch throws, and `try?` turned
+        // that into an empty list. A missing value coalesces to the one that keeps the title in.
+        let cutoff = now.addingTimeInterval(-maxAge), today = TMDBDate.today(now)
+        let past = Date.distantPast, future = Date.distantFuture
+        let ended = "Ended", canceled = "Canceled", unknown = ""
+        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate {
+            !$0.isAbandoned && ($0.lastRefreshed ?? past) < cutoff
+                && ($0.showStatus ?? unknown) != ended && ($0.showStatus ?? unknown) != canceled
+        }))) ?? []).filter { $0.isOngoing && isStale($0.lastRefreshed) }
+        let movies = ((try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate {
+            ($0.releaseDate ?? future) > today && ($0.lastRefreshed ?? past) < cutoff
+        }))) ?? []).filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
+        return (shows, movies)
+    }
+
     /// Refreshes ongoing shows and unreleased movies that haven't been refreshed within `maxAge`.
     /// Failures are skipped so one bad item doesn't block the rest, and counted in the outcome. Throws when
     /// TMDB turns the token down, after saving what was refreshed: every other title would fail the same way,
     /// and a revoked token otherwise failed one request per title at every launch without a word.
     @discardableResult
     public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async throws -> RefreshOutcome {
-        let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
-        // The store narrows it down (this runs at every launch and activation); the checks after are exact.
-        // No force unwraps in these predicates: SwiftData can't translate them, the fetch throws, and `try?` turned
-        // that into an empty list. A missing date coalesces to the end that keeps the title in.
-        let cutoff = now.addingTimeInterval(-maxAge), today = TMDBDate.today(now)
-        let past = Date.distantPast, future = Date.distantFuture
-        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate {
-            !$0.isAbandoned && ($0.lastRefreshed ?? past) < cutoff
-        }))) ?? []).filter { $0.isOngoing && isStale($0.lastRefreshed) }
-        let movies = ((try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate {
-            ($0.releaseDate ?? future) > today && ($0.lastRefreshed ?? past) < cutoff
-        }))) ?? []).filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
-
+        let (shows, movies) = staleTitles(maxAge: maxAge, now: now)
         guard let client, !shows.isEmpty || !movies.isEmpty else { return RefreshOutcome() }
 
         // A few titles download at a time (a show's seasons already download in parallel), and the library is

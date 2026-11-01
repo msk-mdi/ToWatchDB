@@ -29,9 +29,21 @@ struct GetNextEpisodesIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let context = try SharedLibrary.unlockedContainer.mainContext
-        let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
-        let summary = SpokenSummaries.nextEpisodes(shows)
+        // The app's progress map when it's already built. Otherwise in a context of its own: a Siri launch has no
+        // warm-up, and walking every show's episodes on the main thread took about 3 s per 300 shows.
+        let container = try SharedLibrary.unlockedContainer
+        let summary: String
+        if let progress = AppState.shared?.showProgressIfReady() {
+            let shows = (try? container.mainContext.fetch(FetchDescriptor<TVShow>())) ?? []
+            summary = SpokenSummaries.nextEpisodes(shows) { progress[$0.persistentModelID] }
+        } else {
+            summary = await Task.detached(priority: .userInitiated) {
+                let context = ModelContext(container)
+                let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
+                let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
+                return SpokenSummaries.nextEpisodes(shows) { progress[$0.persistentModelID] }
+            }.value
+        }
         return .result(value: summary, dialog: "\(summary)")
     }
 }
@@ -64,9 +76,12 @@ struct GetWatchStatsIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let context = try SharedLibrary.unlockedContainer.mainContext
+        let container = try SharedLibrary.unlockedContainer
         let statsPeriod = period.period
-        let stats = StatsService.stats(in: context, period: statsPeriod)
+        // In a context of its own, as the Stats page does: it reads every watched episode, about 0.45 s per 300 shows.
+        let stats = await Task.detached(priority: .userInitiated) {
+            StatsService.stats(in: ModelContext(container), period: statsPeriod)
+        }.value
         let summary = SpokenSummaries.stats(stats, periodLabel: statsPeriod.label)
         return .result(value: summary, dialog: "\(summary)")
     }

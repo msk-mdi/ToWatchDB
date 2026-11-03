@@ -13,11 +13,6 @@ public extension TVShow {
         return count
     }
 
-    /// Fraction of aired regular episodes that are watched (0...1).
-    func progress(asOf now: Date = .now) -> Double {
-        progressSummary(asOf: now).fraction
-    }
-
     /// - Abandoned wins over everything.
     /// - Watched: every aired regular episode is watched (a returning show you're caught up on counts as watched).
     /// - Watching: at least one episode watched but some aired ones aren't.
@@ -102,7 +97,7 @@ public extension TVShow {
         }
         return ShowProgress(status: status, fraction: aired == 0 ? 0 : Double(watchedAired) / Double(aired),
                             nextEpisode: next, nextEpisodeToAir: nextToAir, airedCount: aired, watchedAiredCount: watchedAired,
-                            lastWatched: lastWatched)
+                            watchedCount: watchedAny, lastWatched: lastWatched)
     }
 
     /// The first aired, unwatched regular episode, in airing order.
@@ -159,6 +154,8 @@ public struct ShowProgress {
     public let nextEpisodeToAir: Episode?
     public let airedCount: Int
     public let watchedAiredCount: Int
+    /// Regular episodes watched, aired or not.
+    public let watchedCount: Int
     /// Most recent date any regular episode was marked watched.
     public let lastWatched: Date?
 
@@ -184,7 +181,7 @@ public struct ShowProgress {
             }
             return ShowProgress(status: snapshot.status, fraction: snapshot.fraction, nextEpisode: next, nextEpisodeToAir: nextToAir,
                                 airedCount: snapshot.airedCount, watchedAiredCount: snapshot.watchedAiredCount,
-                                lastWatched: snapshot.lastWatched)
+                                watchedCount: snapshot.watchedCount, lastWatched: snapshot.lastWatched)
         }
     }
 }
@@ -197,6 +194,7 @@ public struct ShowProgressSnapshot: Sendable {
     public let nextEpisodeToAirID: PersistentIdentifier?
     public let airedCount: Int
     public let watchedAiredCount: Int
+    public let watchedCount: Int
     public let lastWatched: Date?
 
     public init(_ progress: ShowProgress) {
@@ -206,6 +204,7 @@ public struct ShowProgressSnapshot: Sendable {
         nextEpisodeToAirID = progress.nextEpisodeToAir?.persistentModelID
         airedCount = progress.airedCount
         watchedAiredCount = progress.watchedAiredCount
+        watchedCount = progress.watchedCount
         lastWatched = progress.lastWatched
     }
 }

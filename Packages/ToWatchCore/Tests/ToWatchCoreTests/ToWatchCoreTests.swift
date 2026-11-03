@@ -510,7 +510,7 @@ private var utcCalendar: Calendar {
     #expect(all.totalMinutes == 148 + 100 + s1Minutes)
     #expect(all.posterPaths.first == show.posterPath, "most recent first")
 
-    #expect(StatsService.watchYears(in: library.context, calendar: calendar) == [2025, 2024])
+    #expect(StatsService.stats(in: library.context, periods: [], calendar: calendar).years == [2025, 2024])
     for period in [StatsPeriod.year(2025), .year(2024), .allTime] {
         #expect(StatsService.stats(in: library.context, period: period, now: now, calendar: calendar)
                 == StatsService.stats(movies: [movie, undated], shows: [show], period: period, now: now, calendar: calendar))

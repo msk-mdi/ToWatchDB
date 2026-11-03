@@ -41,8 +41,6 @@ extension DropboxSync.Vault {
 enum OMDbKeyStore {
     private static let account = "omdb-api-key"
 
-    static func load() -> String? { SecretStore.load(account) }
-
     static func read() throws -> String? { try SecretStore.read(account) }
 
     @discardableResult
@@ -55,8 +53,6 @@ enum OMDbKeyStore {
 /// The Seerr API key or sign-in session, kept with the other secrets (see `SecretStore`).
 enum SeerrAuthStore {
     private static let account = "seerr-auth"
-
-    static func load() -> SeerrAuth? { (try? read()) ?? nil }
 
     static func read() throws -> SeerrAuth? {
         try SecretStore.read(account).flatMap { try? JSONDecoder().decode(SeerrAuth.self, from: Data($0.utf8)) }

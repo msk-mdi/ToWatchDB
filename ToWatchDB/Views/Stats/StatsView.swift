@@ -74,8 +74,11 @@ struct StatsView: View {
         .task(id: isActive ? "\(key)-\(appState.libraryVersion)" : nil) {
             guard isActive else { return }
             let period = period
-            await appState.computeOffMain(key) { StatsService.stats(in: $0, period: period) }
-            await appState.computeOffMain("watch-years") { StatsService.watchYears(in: $0) }
+            // One read of the library for both.
+            await appState.computeOffMain([key, "watch-years"]) { context in
+                let (stats, years) = StatsService.stats(in: context, periods: [period])
+                return [stats[0], years]
+            }
         }
         .pageTitle("Stats")
         .pageToolbar {

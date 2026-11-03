@@ -111,16 +111,29 @@ public enum StatsService {
     /// Not tied to the main actor: the app runs it in a context of its own off the main thread.
     public static func stats(in context: ModelContext, period: StatsPeriod,
                              now: Date = .now, calendar: Calendar = StatsPeriod.calendar, topCount: Int = 10) -> WatchStats {
+        stats(in: context, periods: [period], now: now, calendar: calendar, topCount: topCount).stats[0]
+    }
+
+    /// Stats for each of `periods`, and the years with a dated watch (newest first), from one read of the library:
+    /// the Stats page wants a period and the years together, and reading every watched episode for each took
+    /// about 0.45 s per 300 shows, after every save.
+    public static func stats(in context: ModelContext, periods: [StatsPeriod], now: Date = .now,
+                             calendar: Calendar = StatsPeriod.calendar, topCount: Int = 10) -> (stats: [WatchStats], years: [Int]) {
         let movies = (try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate { $0.isWatched }))) ?? []
         let shows = (try? context.fetch(FetchDescriptor<TVShow>())) ?? []
         var episodes = FetchDescriptor<Episode>(predicate: #Predicate { $0.isWatched })
         episodes.relationshipKeyPathsForPrefetching = [\.season]
         var byShow: [PersistentIdentifier: [Episode]] = [:]
+        var dates = movies.compactMap(\.watchedDate)
         for episode in (try? context.fetch(episodes)) ?? [] {
+            if let date = episode.watchedDate { dates.append(date) }
             if let show = episode.season?.show { byShow[show.persistentModelID, default: []].append(episode) }
         }
-        return stats(movies: movies, shows: shows, watchedEpisodes: { byShow[$0.persistentModelID] ?? [] },
-                     period: period, now: now, calendar: calendar, topCount: topCount)
+        let stats = periods.map { period in
+            Self.stats(movies: movies, shows: shows, watchedEpisodes: { byShow[$0.persistentModelID] ?? [] },
+                       period: period, now: now, calendar: calendar, topCount: topCount)
+        }
+        return (stats, Set(dates.map { calendar.component(.year, from: $0) }).sorted(by: >))
     }
 
     /// `watchedEpisodes` gives a show's watched episodes, in any order.
@@ -191,17 +204,6 @@ public enum StatsService {
             stats.activity = buckets(events, over: bucketRange, granularity: stats.granularity, calendar: calendar)
         }
         return stats
-    }
-
-    /// Years that have at least one dated watch, newest first. Reads only the watch dates.
-    public static func watchYears(in context: ModelContext, calendar: Calendar = StatsPeriod.calendar) -> [Int] {
-        var movies = FetchDescriptor<Movie>(predicate: #Predicate { $0.watchedDate != nil })
-        movies.propertiesToFetch = [\.watchedDate]
-        var episodes = FetchDescriptor<Episode>(predicate: #Predicate { $0.watchedDate != nil })
-        episodes.propertiesToFetch = [\.watchedDate]
-        let dates = ((try? context.fetch(movies)) ?? []).compactMap(\.watchedDate)
-            + ((try? context.fetch(episodes)) ?? []).compactMap(\.watchedDate)
-        return Set(dates.map { calendar.component(.year, from: $0) }).sorted(by: >)
     }
 
     // MARK: Helpers

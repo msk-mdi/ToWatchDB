@@ -432,6 +432,8 @@ public extension LibraryService {
     func applySyncedBackupInSlices(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges? = nil,
                                    sliceSize: Int = LibraryService.sliceSize,
                                    isUndisturbed: (_ savedSlices: Int) -> Bool) async throws -> Bool? {
+        Self.slicedApplies += 1
+        defer { Self.slicedApplies -= 1 }
         var saves = 0, changed = false
         do {
             var apply = try SyncApply(backup, changes: changes, in: self)

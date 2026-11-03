@@ -93,7 +93,7 @@ struct LibraryView: View {
                 PosterGrid {
                     if sort == .genre {
                         // A section per genre; each title appears once, under its main genre.
-                        ForEach(genreSections(items), id: \.genre) { section in
+                        ForEach(sections(items), id: \.genre) { section in
                             Section {
                                 ForEach(section.items) { item in
                                     LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
@@ -291,6 +291,12 @@ struct LibraryView: View {
     }
 
     /// Consecutive runs of the same main genre; the list is already sorted by genre.
+    /// `genreSections`, cached with the list while no text filter narrows it.
+    private func sections(_ items: [LibraryItem]) -> [(genre: String?, items: [LibraryItem])] {
+        guard searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return genreSections(items) }
+        return appState.cached("\(listKey)-sections-\(genreFilter ?? "")", allowStale: !isActive) { genreSections(items) }
+    }
+
     private func genreSections(_ items: [LibraryItem]) -> [(genre: String?, items: [LibraryItem])] {
         var sections: [(genre: String?, items: [LibraryItem])] = []
         for item in items {
@@ -350,14 +356,21 @@ struct LibraryView: View {
     /// Scoped, status-filtered, and sorted items, cached per library version: a show's status and last-watched
     /// date walk its episodes, so they come from the shared progress map. A hidden page keeps its last list.
     private func scopedSortedItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
-        let key = "library-\(scope)-\(sort)-\(String(describing: statusFilter))"
-        return appState.cached(key, allowStale: !isActive) { scopedItems(progress) }
+        appState.cached(listKey, allowStale: !isActive) { scopedItems(progress) }
     }
 
-    /// The genre and text filters run on the cached list, so they only match genres and titles.
+    private var listKey: String { "library-\(scope)-\(sort)-\(String(describing: statusFilter))" }
+
+    /// The genre and text filters run on the cached list, so they only match genres and titles. The genre filter's
+    /// result is cached with it: each title's genres are read from the store, and the page redraws on every
+    /// keystroke in the filter field.
     private func filtered(_ items: [LibraryItem]) -> [LibraryItem] {
         var items = items
-        if let genreFilter { items = items.filter { $0.genres.contains(genreFilter) } }
+        if let genreFilter {
+            items = appState.cached("\(listKey)-genre-\(genreFilter)", allowStale: !isActive) {
+                items.filter { $0.genres.contains(genreFilter) }
+            }
+        }
         let query = searchText.trimmingCharacters(in: .whitespaces)
         if !query.isEmpty { items = items.filter { $0.title.localizedStandardContains(query) } }
         return items

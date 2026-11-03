@@ -291,7 +291,8 @@ one from `SharedLibrary.service`. A save that fails is rolled back, logged, and 
     show, the longest movie, activity buckets (day, month, or year depending on the range), poster paths for
     Year in Review, and undated watches. `stats(in:)` fetches only watched movies and episodes, one query each.
   - `StatsPeriod` covers all time, a year, this week, this month, and the last N days, on the local calendar.
-  - `watchYears(in:)` lists the years that have watch history, fetching only watch dates.
+  - `stats(in:periods:)` works out several periods and lists the years that have watch history from one read
+    of the library; the Stats page asks for its period and the years together.
 - **`SpokenSummaries`:** builds the sentences Siri speaks. They live in the core package so they can be tested.
 
 ### 4.6 Backup and CSV
@@ -368,7 +369,7 @@ parameters whenever it becomes active.
 | `computeOffMain(_:_:)`, `offMainValue(_:)` | Works a `Sendable` value out in a background context once per library version (stats); a page shows the last one until the new one lands (§7, item 4) |
 | `all(_:)` | Every model of a type, for `cached` closures; movies and shows are kept until a save inserts or deletes one, so filter them in memory (§7, item 15) |
 | `libraryIDs(allowStale:)`, `showProgress()` | The TMDB IDs in the library (Discover and Search badges), cached and fetched alone; every show's progress, kept across saves (§7, item 8) |
-| `shortcutsContent()` | Stable hash (FNV-1a, so it survives a relaunch) of the names and next episodes Siri is taught, worked out off the main thread once per library version and day (§5.11) |
+| `shortcutsContent()` | Stable hash (FNV-1a, so it survives a relaunch) of the names and next episodes Siri is taught, once per library version and day: from the progress map when it's built, otherwise off the main thread, one walk at a time (§5.11) |
 | `warmShowProgress()`, `showProgressIfReady()` | Builds the progress map in the background at launch; the map only if it's built and current, for the Siri entity query |
 | `tokenOverride`, `seerrAuth` | Read from `SecretStore` at launch; read again on activation if they couldn't be read then |
 

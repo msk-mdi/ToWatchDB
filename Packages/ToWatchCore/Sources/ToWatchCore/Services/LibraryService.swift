@@ -563,6 +563,10 @@ public struct LibraryService {
     /// observer, which runs during the save: a sync after such a save found nothing to upload.
     public private(set) static var isSavingRefresh = false
 
+    /// Backups and sync files being applied a slice at a time. Each slice saves, so work that starts over after a
+    /// save (the app's progress map) can wait for the last one.
+    public internal(set) static var slicedApplies = 0
+
     /// List imports under way. Their changes wait in the context until they finish, so a refresh saving meanwhile
     /// saves them too, and isn't only a refresh.
     static var listImports = 0

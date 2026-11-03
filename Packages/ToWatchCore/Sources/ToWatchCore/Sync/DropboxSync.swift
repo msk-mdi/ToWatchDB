@@ -78,8 +78,17 @@ public final class DropboxSync {
         if !hasUnsyncedEdits, syncedRev != nil { syncedVersion = 0 }
     }
 
-    /// Called on every save of the library.
-    public func noteSave() {
+    /// Called on every save of the library. `version` is the library's version after it.
+    ///
+    /// `refreshOnly`: the save holds only TMDB and IMDb data a refresh fetched. A sync then snapshotted, encoded,
+    /// and compared the whole library (about 2 s per 300 shows) only to find nothing to upload: the file is for
+    /// what the user owns, and each device refreshes the rest itself. Synced right before it, the library counts
+    /// as synced after it; what it changed goes along with the next upload.
+    public func noteSave(version: Int, refreshOnly: Bool = false) {
+        if refreshOnly, !hasUnsyncedEdits, !isSyncing, syncedVersion == version - 1 {
+            syncedVersion = version
+            return
+        }
         if !hasUnsyncedEdits { hasUnsyncedEdits = true }
     }
 
@@ -224,10 +233,9 @@ public final class DropboxSync {
             do {
                 // Most syncs (each time the app comes to the front) find nothing new on either side. Checking the
                 // revision skips downloading, decoding and snapshotting the whole library for those.
-                let file: DropboxClient.File?
-                /// Whether `file` is the base: Dropbox still holds what the last sync uploaded or found.
-                var isBase = false
-                if attempt == 1, let syncedRev, let base = Self.loadBaseData(from: baseURL),
+                /// The base, when Dropbox still holds what the last sync uploaded or found.
+                var base: DropboxClient.File?
+                if attempt == 1, let syncedRev, FileManager.default.fileExists(atPath: baseURL.path(percentEncoded: false)),
                    try await authorized(session, { try await client.revision(path: Self.path, accessToken: $0) }) == syncedRev {
                     try checkSession()
                     if syncedVersion == version() {
@@ -237,10 +245,14 @@ public final class DropboxSync {
                         lastError = nil
                         return
                     }
-                    file = DropboxClient.File(data: base, rev: syncedRev)
-                    isBase = true
-                } else {
-                    file = try await authorized(session) { try await client.download(path: Self.path, accessToken: $0) }
+                    // Read only now, and off the main thread: it's the whole library, and most syncs return above.
+                    base = try await Self.offMain { [baseURL] in Self.loadBaseData(from: baseURL) }
+                        .map { DropboxClient.File(data: $0, rev: syncedRev) }
+                    try checkSession()
+                }
+                let isBase = base != nil
+                let file = if let base { base } else {
+                    try await authorized(session) { try await client.download(path: Self.path, accessToken: $0) }
                 }
                 try checkSession()
                 // Decoding, merging, and encoding the whole library took about a second on the main thread,
@@ -251,13 +263,16 @@ public final class DropboxSync {
                 // With the file still the base, merging gives back this device's library: skip merging and
                 // applying it. Unless the base isn't usable (a lost library), which merges as a first sync.
                 if let remote, !(isBase && LibrarySync.usableBase(remote, local: local) != nil) {
+                    // Read once, not per pass: it's the whole library, and it changes only after the merge. When the
+                    // file is the base, it's what was just decoded.
+                    let savedBase: LibraryBackup? = isBase ? remote : try await Self.offMain { [baseURL] in Self.loadBase(from: baseURL) }
                     for pass in 1... {
                         try Task.checkCancellation()
                         if pass > Self.maxPasses { throw LibraryKeptChanging() }
                         // Which titles the merge changes is worked out here too, so applying it writes only those.
-                        let (merged, changes) = try await Self.offMain { [local, baseURL] in
-                            let base = LibrarySync.usableBase(Self.loadBase(from: baseURL), local: local)
-                            let merged = LibrarySync.merge(base: base, local: local, remote: remote)
+                        let (merged, changes) = try await Self.offMain { [local] in
+                            let base = LibrarySync.usableBase(savedBase, local: local)
+                            let merged = LibrarySync.merge(decodedBase: base, local: local, decodedRemote: remote)
                             return (merged, LibrarySync.changes(from: local, to: merged))
                         }
                         try checkSession()
@@ -291,27 +306,27 @@ public final class DropboxSync {
                     // the old base, a retry after a conflict (or the next sync after a failed upload) took what
                     // this merge brought in for edits made here, and overwrote newer edits from other devices.
                     try checkSession()
-                    if let file { saveBase(file.data, rev: file.rev) }
+                    if let file, !isBase { try await saveBase(file.data, rev: file.rev, session: session) }
                 }
                 let snapshotVersion = localVersion
-                let (data, changed) = try await Self.offMain { [local] in
-                    (try BackupCoding.compressed(BackupCoding.compactEncoder.encode(local)),
-                     remote.map { !LibrarySync.sameContent($0, local) } ?? true)
+                // Encoded only to upload: a sync that finds the same library (after a refresh, say) leaves the base
+                // as it is, since it already holds the file at `file.rev`, saved above or by an earlier sync.
+                let data = try await Self.offMain { [local] in
+                    remote.map { LibrarySync.sameContent($0, local) } ?? false
+                        ? nil : try BackupCoding.compressed(BackupCoding.compactEncoder.encode(local))
                 }
-
-                var rev = file?.rev
-                if changed {
+                if let data {
                     Log.sync.info("Uploading the library (\(data.count / 1024, privacy: .public) KB)")
                     try checkSession()
-                    rev = try await authorized(session) {
+                    let rev = try await authorized(session) {
                         try await client.upload(data, path: Self.path, replacing: file?.rev, accessToken: $0)
                     }
+                    try checkSession()
+                    try await saveBase(data, rev: rev, session: session)
                 }
-                try checkSession()
-                saveBase(data, rev: rev)
                 syncedVersion = snapshotVersion
                 if snapshotVersion == version() { hasUnsyncedEdits = false }
-                Log.sync.info("Synced\(changed ? "" : " (the file already matched)", privacy: .public)")
+                Log.sync.info("Synced\(data != nil ? "" : " (the file already matched)", privacy: .public)")
                 lastSynced = .now
                 lastError = nil
                 return
@@ -429,14 +444,18 @@ public final class DropboxSync {
         loadBaseData(from: url).flatMap { try? BackupCoding.decode($0) }
     }
 
-    /// `rev` is the Dropbox revision whose content `data` matches, if known.
-    private func saveBase(_ data: Data, rev: String?) {
-        try? FileManager.default.createDirectory(at: baseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        do {
-            try data.write(to: baseURL, options: .atomic)
-            syncedRev = rev
-        } catch {
-            syncedRev = nil
+    /// `rev` is the Dropbox revision whose content `data` matches. Written off the main thread: it's the whole
+    /// library. Throws `CancellationError`, leaving no base, if the user connected or disconnected meanwhile.
+    private func saveBase(_ data: Data, rev: String?, session: Int) async throws {
+        let written = try await Self.offMain { [baseURL] in
+            try? FileManager.default.createDirectory(at: baseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            return (try? data.write(to: baseURL, options: .atomic)) != nil
         }
+        guard session == self.session else {
+            // Disconnecting removed the base before this write landed; it belongs to the old sign-in.
+            try? FileManager.default.removeItem(at: baseURL)
+            throw CancellationError()
+        }
+        syncedRev = written ? rev : nil
     }
 }

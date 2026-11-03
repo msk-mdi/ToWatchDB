@@ -24,7 +24,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var id: UUID? = nil
     }
 
-    public struct MovieRecord: Codable, Sendable {
+    public struct MovieRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var title: String
         public var originalTitle: String?
@@ -57,7 +57,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var tagIDs: [UUID]
     }
 
-    public struct EpisodeRecord: Codable, Sendable {
+    public struct EpisodeRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var episodeNumber: Int
         public var name: String?
@@ -71,7 +71,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var notes: [NoteRecord]
     }
 
-    public struct SeasonRecord: Codable, Sendable {
+    public struct SeasonRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var seasonNumber: Int
         public var name: String?
@@ -81,7 +81,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var episodes: [EpisodeRecord]
     }
 
-    public struct ShowRecord: Codable, Sendable {
+    public struct ShowRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var name: String
         public var originalName: String?

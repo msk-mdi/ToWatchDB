@@ -585,7 +585,11 @@ the local date.
   first asks Dropbox for the file's revision (`files/get_metadata`). If it's unchanged and nothing was saved
   here, the sync stops. If only this device changed, merging against the base would give back this library, so
   it uploads without merging (unless `usableBase` rejects the base). `hasUnsyncedEdits` (in `UserDefaults`, set
-  by every save) survives relaunches: without it, the first sync after each launch snapshotted the library.
+  by every save) survives relaunches: without it, the first sync after each launch snapshotted the library. A
+  sync that finds nothing to upload leaves the base as it is, without encoding the library. A save that holds
+  only what a TMDB or IMDb refresh fetched (`LibraryService.saveRefresh`, outside a list import, touching only
+  titles, seasons, and episodes) right after a sync moves `syncedVersion` forward instead of syncing: its changes
+  go along with the next upload. The base file is read and written off the main thread.
 - **Signed out vs. can't read:** only a refresh token Dropbox rejects (`invalid_grant`) or one that isn't saved
   disconnects. A secret that can't be read (a locked iPhone) fails the sync with `secretsUnavailable` and it
   tries again later; `isConnected` is read again before the next sync if it couldn't be read at launch. A token

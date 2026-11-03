@@ -194,7 +194,7 @@ public struct LibraryService {
                 count += 1
             } until: { rejection != nil }
         }
-        if count > 0 { save() }
+        if count > 0 { saveRefresh() }
         let failed = shows.count + movies.count - count
         Log.refresh.info("Refreshed \(count, privacy: .public) of \(shows.count, privacy: .public) shows and \(movies.count, privacy: .public) movies")
         if let rejection {
@@ -275,7 +275,7 @@ public struct LibraryService {
             }
             changed = true
         } until: { isRejected }
-        if changed { save() }
+        if changed { saveRefresh() }
     }
 
     /// The outcome of `body`, for batches that look at each failure.
@@ -321,7 +321,7 @@ public struct LibraryService {
             show.applyIMDbRating(rating, on: now)
             count += 1
         }
-        if count > 0 { save() }
+        if count > 0 { saveRefresh() }
         return count
     }
 
@@ -558,6 +558,22 @@ public struct LibraryService {
 
     /// Told about every save that failed and was rolled back. The app shows it.
     public static var saveFailed: ((any Error) -> Void)?
+
+    /// Whether the save under way holds only what a TMDB or IMDb refresh fetched. Read by the app's save
+    /// observer, which runs during the save: a sync after such a save found nothing to upload.
+    public private(set) static var isSavingRefresh = false
+
+    /// List imports under way. Their changes wait in the context until they finish, so a refresh saving meanwhile
+    /// saves them too, and isn't only a refresh.
+    static var listImports = 0
+
+    /// `save` for what a refresh fetched.
+    @discardableResult
+    func saveRefresh() -> Bool {
+        Self.isSavingRefresh = Self.listImports == 0
+        defer { Self.isSavingRefresh = false }
+        return save()
+    }
 
     /// Saves, rolling back the unsaved changes if that fails, for callers that must not go on as if it worked.
     public func commit() throws {

@@ -189,6 +189,10 @@ final class AppState {
             let inserted = identifiers(.insertedIdentifiers)
             let changed = inserted + identifiers(.updatedIdentifiers)
             MainActor.assumeIsolated {
+                // A refresh adds and drops only episodes, and changes only titles and episodes.
+                let refreshOnly = LibraryService.isSavingRefresh
+                    && (inserted + deleted).allSatisfy { Self.episodeEntities.contains($0.entityName) }
+                    && changed.allSatisfy { Self.titleEntities.contains($0.entityName) || Self.episodeEntities.contains($0.entityName) }
                 guard let self else { return }
                 self.libraryVersion += 1
                 if !deleted.isEmpty {
@@ -199,7 +203,7 @@ final class AppState {
                 if (inserted + deleted).contains(where: { Self.titleEntities.contains($0.entityName) }) { self.titleCache.removeAll() }
                 self.noteProgressDeletions(deleted)
                 self.noteProgressChanges(changed)
-                if !self.isInMemory { self.dropbox.noteSave() }
+                if !self.isInMemory { self.dropbox.noteSave(version: self.libraryVersion, refreshOnly: refreshOnly) }
                 // Here rather than in a view: on Mac, edits from a title window, Settings, or Siri with the main
                 // window closed weren't synced until it reopened.
                 if self.libraryVersion != self.dropbox.syncedVersion { self.syncWithDropbox(after: .seconds(5)) }
@@ -334,6 +338,7 @@ final class AppState {
 
     @ObservationIgnored private var titleCache: [ObjectIdentifier: [any PersistentModel]] = [:]
     private static let titleEntities: Set<String> = ["Movie", "TVShow"]
+    private static let episodeEntities: Set<String> = ["Season", "Episode"]
 
     /// A hash of what Siri is taught: title names and each show's next episode. Worked out off the main thread
     /// from what's saved, once per library version and day: it walks every episode, which froze the app about

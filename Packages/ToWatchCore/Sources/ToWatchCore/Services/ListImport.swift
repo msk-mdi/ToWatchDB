@@ -166,6 +166,8 @@ extension LibraryService {
     public func importList(_ entries: [ListEntry], mark: ListImportMark,
                            progress: (Int) -> Void = { _ in }) async throws -> ListImportResult {
         let client = try requireClient()
+        Self.listImports += 1
+        defer { Self.listImports -= 1 }
         let existingMovies = Set(((try? context.fetch(FetchDescriptor<Movie>())) ?? []).map(\.tmdbID))
         let existingShows = Set(((try? context.fetch(FetchDescriptor<TVShow>())) ?? []).map(\.tmdbID))
 

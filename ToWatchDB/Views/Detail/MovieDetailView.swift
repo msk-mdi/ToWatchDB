@@ -10,6 +10,7 @@ struct MovieDetailView: View {
     @State private var showDatePicker = false
     @State private var confirmDelete = false
     @State private var isRefreshing = false
+    @State private var credits = DecodedCredits()
 
     var body: some View {
         // A sync can delete the title while it's open; a deleted model can't be read.
@@ -24,6 +25,7 @@ struct MovieDetailView: View {
 
     @ViewBuilder
     private var page: some View {
+        let _ = credits.update(for: movie)
         DetailLayout(
             title: movie.title,
             subtitle: subtitle,
@@ -33,7 +35,7 @@ struct MovieDetailView: View {
             overview: movie.overview,
             genres: movie.genres,
             facts: facts,
-            cast: movie.cast
+            cast: credits.cast
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 ActionBar {
@@ -120,7 +122,7 @@ struct MovieDetailView: View {
         var facts: [(String, String)] = []
         if let date = movie.releaseDate { facts.append(("Release", date.tmdbDayString)) }
         if let status = movie.releaseStatus { facts.append(("Status", status)) }
-        let directors = movie.directors.map(\.name)
+        let directors = credits.crew.map(\.name)
         if !directors.isEmpty { facts.append((directors.count == 1 ? "Director" : "Directors", directors.formatted())) }
         if let original = movie.originalTitle, original != movie.title { facts.append(("Original Title", original)) }
         facts.append(("Added", movie.addedDate.formatted(date: .abbreviated, time: .omitted)))

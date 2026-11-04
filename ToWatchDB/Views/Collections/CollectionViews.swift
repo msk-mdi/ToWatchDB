@@ -12,10 +12,12 @@ struct CollectionMenus: View {
     let tags: [MediaTag]
 
     var body: some View {
-        // Memberships read once, and the library service made only when a toggle runs: macOS draws these for
-        // every poster in a grid.
-        let inSpaces = Set(title.spaces.map(\.persistentModelID))
-        let inTags = Set(title.tags.map(\.persistentModelID))
+        // Memberships read from the few spaces and tags, once per save for every menu, and the library service made
+        // only when a toggle runs: macOS draws these for every poster in a grid, and reading each title's own
+        // spaces and tags loaded two relationships per poster.
+        let memberships = appState.cached("collection-memberships") { CollectionMemberships(spaces: spaces, tags: tags) }
+        let inSpaces = memberships.spaces[title.persistentModelID] ?? []
+        let inTags = memberships.tags[title.persistentModelID] ?? []
         Menu("Spaces", systemImage: "square.stack") {
             ForEach(spaces) { space in
                 Toggle(isOn: Binding(get: { inSpaces.contains(space.persistentModelID) },
@@ -33,6 +35,34 @@ struct CollectionMenus: View {
             }
             if !tags.isEmpty { Divider() }
             Button("New Tag…", systemImage: "plus") { appState.collectionEditor = .newTag(assigning: title) }
+        }
+    }
+}
+
+/// The spaces and tags each title is in, keyed by title. Every caller passes every space and tag.
+private struct CollectionMemberships {
+    var spaces: [PersistentIdentifier: Set<PersistentIdentifier>] = [:]
+    var tags: [PersistentIdentifier: Set<PersistentIdentifier>] = [:]
+
+    init(spaces: [Space], tags: [MediaTag]) {
+        for space in spaces where space.isLive {
+            for id in (space.movies ?? []).map(\.persistentModelID) + (space.shows ?? []).map(\.persistentModelID) {
+                self.spaces[id, default: []].insert(space.persistentModelID)
+            }
+        }
+        for tag in tags where tag.isLive {
+            for id in (tag.movies ?? []).map(\.persistentModelID) + (tag.shows ?? []).map(\.persistentModelID) {
+                self.tags[id, default: []].insert(tag.persistentModelID)
+            }
+        }
+    }
+}
+
+private extension LibraryTitle {
+    var persistentModelID: PersistentIdentifier {
+        switch self {
+        case let .movie(movie): movie.persistentModelID
+        case let .show(show): show.persistentModelID
         }
     }
 }

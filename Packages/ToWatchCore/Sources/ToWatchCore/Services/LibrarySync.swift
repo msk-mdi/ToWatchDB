@@ -16,8 +16,15 @@ import SwiftData
 public enum LibrarySync {
     /// The merged library: apply it here with `applySyncedBackup`, then upload what results.
     public static func merge(base: LibraryBackup?, local: LibraryBackup, remote: LibraryBackup) -> LibraryBackup {
+        merge(decodedBase: base.map(normalized), local: local, decodedRemote: normalized(remote))
+    }
+
+    /// `merge` with a base and remote just decoded from files, whose dates already have whole seconds: only this
+    /// device's library is round-tripped. Each round trip encodes and decodes a whole library, and a sync merged
+    /// up to five times.
+    static func merge(decodedBase: LibraryBackup?, local: LibraryBackup, decodedRemote: LibraryBackup) -> LibraryBackup {
         // Dates in a file have whole seconds; round-trip this device's library so unchanged dates compare equal.
-        let (base, local, remote) = matchingTags(base.map(normalized), normalized(local), normalized(remote))
+        let (base, local, remote) = matchingTags(decodedBase, normalized(local), decodedRemote)
 
         var merged = local
         merged.spaces = keyed(base?.spaces, local.spaces, remote.spaces, key: \.uuid) { m in
@@ -208,14 +215,18 @@ public enum LibrarySync {
         }
         /// Titles `merged` lists that need writing. A title `local` lists twice is always written: which of its
         /// models the apply keeps isn't known here.
-        func changed<R: Encodable>(_ local: [R], _ merged: [R], id: (R) -> Int, stable: (R) -> R) -> Set<Int> {
+        func changed<R: Encodable & Equatable>(_ local: [R], _ merged: [R], id: (R) -> Int, stable: (R) -> R) -> Set<Int> {
             var byID: [Int: R] = [:], listedTwice = Set<Int>()
             for record in local where byID.updateValue(record, forKey: id(record)) != nil { listedTwice.insert(id(record)) }
             let encoder = BackupCoding.compactEncoder
             return Set(merged.compactMap { record in
                 let key = id(record)
-                guard !listedTwice.contains(key), let old = byID[key],
-                      let before = try? encoder.encode(stable(old)), before == (try? encoder.encode(stable(record))) else { return key }
+                guard !listedTwice.contains(key), let old = byID[key] else { return key }
+                // Equal records write the same; only unequal ones are encoded, to see if they differ in the file
+                // (a fraction of a second). Encoding every title took a whole-library encode, twice, per merge.
+                let (before, after) = (stable(old), stable(record))
+                if before == after { return nil }
+                guard let data = try? encoder.encode(before), data == (try? encoder.encode(after)) else { return key }
                 return nil
             })
         }
@@ -421,6 +432,8 @@ public extension LibraryService {
     func applySyncedBackupInSlices(_ backup: LibraryBackup, changes: LibrarySync.TitleChanges? = nil,
                                    sliceSize: Int = LibraryService.sliceSize,
                                    isUndisturbed: (_ savedSlices: Int) -> Bool) async throws -> Bool? {
+        Self.slicedApplies += 1
+        defer { Self.slicedApplies -= 1 }
         var saves = 0, changed = false
         do {
             var apply = try SyncApply(backup, changes: changes, in: self)

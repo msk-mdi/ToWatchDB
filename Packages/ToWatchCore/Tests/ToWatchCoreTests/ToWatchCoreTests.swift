@@ -510,7 +510,7 @@ private var utcCalendar: Calendar {
     #expect(all.totalMinutes == 148 + 100 + s1Minutes)
     #expect(all.posterPaths.first == show.posterPath, "most recent first")
 
-    #expect(StatsService.watchYears(in: library.context, calendar: calendar) == [2025, 2024])
+    #expect(StatsService.stats(in: library.context, periods: [], calendar: calendar).years == [2025, 2024])
     for period in [StatsPeriod.year(2025), .year(2024), .allTime] {
         #expect(StatsService.stats(in: library.context, period: period, now: now, calendar: calendar)
                 == StatsService.stats(movies: [movie, undated], shows: [show], period: period, now: now, calendar: calendar))
@@ -1693,4 +1693,18 @@ private final class PartlyOfflineProtocol: URLProtocol {
     library.addNote("On the movie", to: movie)
     let noted = try LibraryService.episodesWithNotes(in: ModelContext(library.context.container))
     #expect(noted == [episodes[0].persistentModelID, episodes[8].persistentModelID])
+}
+
+@MainActor @Test func staleTitlesLeaveEndedShowsOutInTheStore() throws {
+    let library = try makeLibrary()
+    let statuses: [String?] = [nil, "Returning Series", "In Production", "Planned", "Pilot", "Ended", "Canceled"]
+    for (id, status) in statuses.enumerated() {
+        let show = TVShow(tmdbID: id, name: "Show \(id)")
+        show.showStatus = status
+        library.context.insert(show)
+    }
+    library.save()
+
+    let stale = library.staleTitles(maxAge: 0, now: .now)
+    #expect(Set(stale.shows.map(\.tmdbID)) == [0, 1, 2, 3, 4])
 }

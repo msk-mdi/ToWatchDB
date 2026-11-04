@@ -5,23 +5,35 @@ import ToWatchCore
 /// Detail for a TMDB result. Shows the library detail once the title is added; otherwise a preview with "Add".
 struct RemoteDetailView: View {
     let summary: MediaSummary
-    @Query private var movies: [Movie]
-    @Query private var shows: [TVShow]
 
-    init(summary: MediaSummary) {
-        self.summary = summary
+    var body: some View {
+        // One query, of the summary's kind: both kept a query alive that refetched after every save.
         let id = summary.tmdbID
-        _movies = Query(filter: #Predicate<Movie> { $0.tmdbID == id })
-        _shows = Query(filter: #Predicate<TVShow> { $0.tmdbID == id })
+        switch summary.kind {
+        case .movie:
+            LibraryOrPreview(summary: summary, predicate: #Predicate<Movie> { $0.tmdbID == id }) { MovieDetailView(movie: $0) }
+        case .tv:
+            LibraryOrPreview(summary: summary, predicate: #Predicate<TVShow> { $0.tmdbID == id }) { TVShowDetailView(show: $0) }
+        }
+    }
+}
+
+/// The library's title for the summary when there is one, else the preview.
+private struct LibraryOrPreview<Model: PersistentModel, Detail: View>: View {
+    let summary: MediaSummary
+    @ViewBuilder let detail: (Model) -> Detail
+    @Query private var titles: [Model]
+
+    init(summary: MediaSummary, predicate: Predicate<Model>, @ViewBuilder detail: @escaping (Model) -> Detail) {
+        self.summary = summary
+        self.detail = detail
+        var descriptor = FetchDescriptor(predicate: predicate)
+        descriptor.fetchLimit = 1
+        _titles = Query(descriptor)
     }
 
     var body: some View {
-        switch summary.kind {
-        case .movie:
-            if let movie = movies.first { MovieDetailView(movie: movie) } else { RemotePreview(summary: summary) }
-        case .tv:
-            if let show = shows.first { TVShowDetailView(show: show) } else { RemotePreview(summary: summary) }
-        }
+        if let title = titles.first { detail(title) } else { RemotePreview(summary: summary) }
     }
 }
 

@@ -85,9 +85,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Picker("Where to Watch Country", selection: $appState.watchRegion) {
-                    ForEach(Self.regions, id: \.self) { code in
-                        Text(Locale.current.localizedString(forRegionCode: code) ?? code).tag(code)
-                    }
+                    ForEach(Self.regions, id: \.code) { Text($0.name).tag($0.code) }
                 }
                 .listPickerStyle()
             } header: {
@@ -400,14 +398,12 @@ struct SettingsView: View {
         }
     }
 
-    /// Every ISO country, sorted by localized name, for the Where to Watch default.
-    private static let regions: [String] = Locale.Region.isoRegions
+    /// Every ISO country, sorted by localized name, for the Where to Watch default. Named once: the form redraws
+    /// on every keystroke, and looking up about 250 names each time added up.
+    private static let regions: [(code: String, name: String)] = Locale.Region.isoRegions
         .filter { $0.subRegions.isEmpty && $0.identifier.count == 2 && $0.identifier.allSatisfy(\.isLetter) }
-        .map(\.identifier)
-        .sorted {
-            (Locale.current.localizedString(forRegionCode: $0) ?? $0)
-                .localizedStandardCompare(Locale.current.localizedString(forRegionCode: $1) ?? $1) == .orderedAscending
-        }
+        .map { ($0.identifier, Locale.current.localizedString(forRegionCode: $0.identifier) ?? $0.identifier) }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 
     /// iPhone always uses its tab bar; Mac and iPad can choose.
     private var hasLayoutChoice: Bool {

@@ -283,3 +283,30 @@ extension URL {
         return url
     }
 }
+
+/// A title's cast and its creators (a show) or directors (a movie), decoded from their JSON only when it changes:
+/// a page redraws on every toggle, rating, and episode change. Not observed, so updating it from `body` doesn't
+/// trigger another redraw.
+final class DecodedCredits {
+    private var castData: Data?
+    private var crewData: Data?
+    private var isLoaded = false
+    private(set) var cast: [PersonCredit] = []
+    private(set) var crew: [PersonCredit] = []
+
+    func update(for show: TVShow) {
+        update(castData: show.castData, crewData: show.creatorsData) { (show.cast, show.creators) }
+    }
+
+    func update(for movie: Movie) {
+        update(castData: movie.castData, crewData: movie.directorsData) { (movie.cast, movie.directors) }
+    }
+
+    private func update(castData: Data?, crewData: Data?, decode: () -> ([PersonCredit], [PersonCredit])) {
+        guard !isLoaded || castData != self.castData || crewData != self.crewData else { return }
+        isLoaded = true
+        self.castData = castData
+        self.crewData = crewData
+        (cast, crew) = decode()
+    }
+}

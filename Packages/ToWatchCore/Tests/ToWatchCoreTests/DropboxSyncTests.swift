@@ -167,6 +167,42 @@ struct DropboxSyncTests {
         #expect(mac.sync.syncedVersion == mac.version)
     }
 
+    @Test func aRefreshOnlySaveNeedsNoSyncAndRidesAlongWithTheNextEdit() async throws {
+        reset()
+        let mac = try Device()
+        let movie = mac.addMovie(1, "Arrival")
+        await mac.runSync()
+        movie.overview = "Refreshed from TMDB"
+        mac.library.save()
+        mac.sync.noteSave(version: mac.version, refreshOnly: true)
+        #expect(mac.sync.syncedVersion == mac.version)
+        await mac.runSync()
+        #expect(fakeDropbox.count("/2/files/download") == 1) // Only the first sync's, which found no file.
+        #expect(fakeDropbox.count("/2/files/upload") == 1)
+
+        mac.library.setWatched(movie, true, on: Date(timeIntervalSince1970: 1_700_000_000))
+        mac.sync.noteSave(version: mac.version)
+        await mac.runSync()
+        #expect(fakeDropbox.count("/2/files/upload") == 2)
+        #expect(try fileContents().movies.first?.overview == "Refreshed from TMDB")
+    }
+
+    @Test func aRefreshOnlySaveAfterUnsyncedEditsStillSyncs() async throws {
+        reset()
+        let mac = try Device()
+        let movie = mac.addMovie(1, "Arrival")
+        await mac.runSync()
+        mac.library.setWatched(movie, true, on: Date(timeIntervalSince1970: 1_700_000_000))
+        mac.sync.noteSave(version: mac.version)
+        movie.overview = "Refreshed from TMDB"
+        mac.library.save()
+        mac.sync.noteSave(version: mac.version, refreshOnly: true)
+        #expect(mac.sync.syncedVersion != mac.version)
+        await mac.runSync()
+        #expect(fakeDropbox.count("/2/files/upload") == 2)
+        #expect(try fileContents().movies.first?.isWatched == true)
+    }
+
     @Test func editsReachTheOtherDevice() async throws {
         reset()
         let mac = try Device(), phone = try Device()

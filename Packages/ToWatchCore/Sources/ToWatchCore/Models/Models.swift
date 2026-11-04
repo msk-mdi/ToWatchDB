@@ -159,8 +159,11 @@ public final class TVShow {
     /// Whether TMDB may still add episodes to this show.
     public var isOngoing: Bool {
         guard let showStatus else { return true }
-        return ["Returning Series", "In Production", "Planned", "Pilot"].contains(showStatus)
+        return Self.ongoingStatuses.contains(showStatus)
     }
+
+    /// TMDB statuses of a show that can still get new episodes.
+    static let ongoingStatuses = ["Returning Series", "In Production", "Planned", "Pilot"]
 }
 
 @Model

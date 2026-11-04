@@ -24,7 +24,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var id: UUID? = nil
     }
 
-    public struct MovieRecord: Codable, Sendable {
+    public struct MovieRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var title: String
         public var originalTitle: String?
@@ -57,7 +57,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var tagIDs: [UUID]
     }
 
-    public struct EpisodeRecord: Codable, Sendable {
+    public struct EpisodeRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var episodeNumber: Int
         public var name: String?
@@ -71,7 +71,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var notes: [NoteRecord]
     }
 
-    public struct SeasonRecord: Codable, Sendable {
+    public struct SeasonRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var seasonNumber: Int
         public var name: String?
@@ -81,7 +81,7 @@ public struct LibraryBackup: Codable, Sendable {
         public var episodes: [EpisodeRecord]
     }
 
-    public struct ShowRecord: Codable, Sendable {
+    public struct ShowRecord: Codable, Sendable, Equatable {
         public var tmdbID: Int
         public var name: String
         public var originalName: String?
@@ -465,6 +465,8 @@ public extension LibraryService {
     /// saved before a failure is kept, and importing the file again finishes it without duplicating anything.
     @discardableResult
     func importBackupInSlices(_ backup: LibraryBackup, sliceSize: Int = LibraryService.sliceSize) async throws -> ImportSummary {
+        Self.slicedApplies += 1
+        defer { Self.slicedApplies -= 1 }
         var summary = ImportSummary()
         for (index, slice) in Self.slices(backup, size: sliceSize).enumerated() {
             if index > 0 { await Task.yield() }
@@ -804,12 +806,15 @@ public extension LibraryService {
                          (movie.tags ?? []).map(\.name).sorted().joined(separator: "; "),
                          movie.addedDate.formatted(day)])
         }
+        // Every show's progress from one read of the episodes: a show at a time walked them through its seasons,
+        // about 3 s for 300 shows in a fresh context, and the watched count walked them again.
+        let progressByShow = try TVShow.progressSummaries(in: context, asOf: now)
         for show in try context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.name)])) {
-            let progress = show.progressSummary(asOf: now)
+            let progress = progressByShow[show.persistentModelID] ?? show.progressSummary(asOf: now)
             rows.append(["TV Show", String(show.tmdbID), show.name, year(show.firstAirDate), progress.status.label,
                          progress.lastWatched?.formatted(day) ?? "", show.userRating.map { String(format: "%g", $0) } ?? "",
                          show.isInBacklog ? "Yes" : "No", show.isFavorite ? "Yes" : "No",
-                         String(show.watchedEpisodeCount()), String(progress.airedCount),
+                         String(progress.watchedCount), String(progress.airedCount),
                          show.genres.joined(separator: "; "),
                          (show.spaces ?? []).map(\.name).sorted().joined(separator: "; "),
                          (show.tags ?? []).map(\.name).sorted().joined(separator: "; "),

@@ -116,12 +116,24 @@ public struct TMDBClient: Sendable {
     /// library hundreds of requests, enough to hit TMDB's rate limit. Any other season is fetched on its own.
     public func tvShowWithSeasons(id: Int) async throws -> (TMDBTVDetail, [TMDBSeasonDetail]) {
         let data = try await data("tv/\(id)", tvShowQuery(appending: (0..<17).map { "season/\($0)" }))
-        let detail: TMDBTVDetail = try Self.decode(data)
-        let appended = (try? Self.decoder.decode(AppendedSeasons.self, from: data))?.seasons ?? []
+        // One parse for both: the response runs to megabytes for a long show.
+        let decoded: ShowWithSeasons = try Self.decode(data)
+        let (detail, appended) = (decoded.detail, decoded.seasons)
         let have = Set(appended.map(\.seasonNumber))
         let missing = (detail.seasons ?? []).map(\.seasonNumber).filter { !have.contains($0) }
         let seasons = appended + (try await seasons(numbered: missing, showID: id))
         return (detail, seasons.sorted { $0.seasonNumber < $1.seasonNumber })
+    }
+
+    /// A show detail and its appended `season/N` entries, read from one parse of the response.
+    struct ShowWithSeasons: Decodable {
+        let detail: TMDBTVDetail
+        let seasons: [TMDBSeasonDetail]
+
+        init(from decoder: any Decoder) throws {
+            detail = try TMDBTVDetail(from: decoder)
+            seasons = (try? AppendedSeasons(from: decoder))?.seasons ?? []
+        }
     }
 
     /// The `season/N` entries of a show detail with seasons appended.

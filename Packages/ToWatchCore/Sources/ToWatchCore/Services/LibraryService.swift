@@ -135,25 +135,34 @@ public struct LibraryService {
         public var unreachable = 0
     }
 
+    /// The ongoing shows and unreleased movies last refreshed more than `maxAge` ago.
+    func staleTitles(maxAge: TimeInterval, now: Date) -> (shows: [TVShow], movies: [Movie]) {
+        let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
+        // The store narrows it down (this runs at every launch and activation); the checks after are exact. It
+        // leaves out TMDB's two ended statuses too: never refreshed here, ended shows all stayed stale and were
+        // loaded each time. `contains` over the ongoing statuses can't be translated with an optional status.
+        // No force unwraps in these predicates: SwiftData can't translate them, the fetch throws, and `try?` turned
+        // that into an empty list. A missing value coalesces to the one that keeps the title in.
+        let cutoff = now.addingTimeInterval(-maxAge), today = TMDBDate.today(now)
+        let past = Date.distantPast, future = Date.distantFuture
+        let ended = "Ended", canceled = "Canceled", unknown = ""
+        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate {
+            !$0.isAbandoned && ($0.lastRefreshed ?? past) < cutoff
+                && ($0.showStatus ?? unknown) != ended && ($0.showStatus ?? unknown) != canceled
+        }))) ?? []).filter { $0.isOngoing && isStale($0.lastRefreshed) }
+        let movies = ((try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate {
+            ($0.releaseDate ?? future) > today && ($0.lastRefreshed ?? past) < cutoff
+        }))) ?? []).filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
+        return (shows, movies)
+    }
+
     /// Refreshes ongoing shows and unreleased movies that haven't been refreshed within `maxAge`.
     /// Failures are skipped so one bad item doesn't block the rest, and counted in the outcome. Throws when
     /// TMDB turns the token down, after saving what was refreshed: every other title would fail the same way,
     /// and a revoked token otherwise failed one request per title at every launch without a word.
     @discardableResult
     public func refreshStale(maxAge: TimeInterval = 12 * 3600, now: Date = .now) async throws -> RefreshOutcome {
-        let isStale: (Date?) -> Bool = { $0.map { now.timeIntervalSince($0) > maxAge } ?? true }
-        // The store narrows it down (this runs at every launch and activation); the checks after are exact.
-        // No force unwraps in these predicates: SwiftData can't translate them, the fetch throws, and `try?` turned
-        // that into an empty list. A missing date coalesces to the end that keeps the title in.
-        let cutoff = now.addingTimeInterval(-maxAge), today = TMDBDate.today(now)
-        let past = Date.distantPast, future = Date.distantFuture
-        let shows = ((try? context.fetch(FetchDescriptor<TVShow>(predicate: #Predicate {
-            !$0.isAbandoned && ($0.lastRefreshed ?? past) < cutoff
-        }))) ?? []).filter { $0.isOngoing && isStale($0.lastRefreshed) }
-        let movies = ((try? context.fetch(FetchDescriptor<Movie>(predicate: #Predicate {
-            ($0.releaseDate ?? future) > today && ($0.lastRefreshed ?? past) < cutoff
-        }))) ?? []).filter { !$0.isReleased(asOf: now) && isStale($0.lastRefreshed) }
-
+        let (shows, movies) = staleTitles(maxAge: maxAge, now: now)
         guard let client, !shows.isEmpty || !movies.isEmpty else { return RefreshOutcome() }
 
         // A few titles download at a time (a show's seasons already download in parallel), and the library is
@@ -185,7 +194,7 @@ public struct LibraryService {
                 count += 1
             } until: { rejection != nil }
         }
-        if count > 0 { save() }
+        if count > 0 { saveRefresh() }
         let failed = shows.count + movies.count - count
         Log.refresh.info("Refreshed \(count, privacy: .public) of \(shows.count, privacy: .public) shows and \(movies.count, privacy: .public) movies")
         if let rejection {
@@ -266,7 +275,7 @@ public struct LibraryService {
             }
             changed = true
         } until: { isRejected }
-        if changed { save() }
+        if changed { saveRefresh() }
     }
 
     /// The outcome of `body`, for batches that look at each failure.
@@ -312,7 +321,7 @@ public struct LibraryService {
             show.applyIMDbRating(rating, on: now)
             count += 1
         }
-        if count > 0 { save() }
+        if count > 0 { saveRefresh() }
         return count
     }
 
@@ -549,6 +558,26 @@ public struct LibraryService {
 
     /// Told about every save that failed and was rolled back. The app shows it.
     public static var saveFailed: ((any Error) -> Void)?
+
+    /// Whether the save under way holds only what a TMDB or IMDb refresh fetched. Read by the app's save
+    /// observer, which runs during the save: a sync after such a save found nothing to upload.
+    public private(set) static var isSavingRefresh = false
+
+    /// Backups and sync files being applied a slice at a time. Each slice saves, so work that starts over after a
+    /// save (the app's progress map) can wait for the last one.
+    public internal(set) static var slicedApplies = 0
+
+    /// List imports under way. Their changes wait in the context until they finish, so a refresh saving meanwhile
+    /// saves them too, and isn't only a refresh.
+    static var listImports = 0
+
+    /// `save` for what a refresh fetched.
+    @discardableResult
+    func saveRefresh() -> Bool {
+        Self.isSavingRefresh = Self.listImports == 0
+        defer { Self.isSavingRefresh = false }
+        return save()
+    }
 
     /// Saves, rolling back the unsaved changes if that fails, for callers that must not go on as if it worked.
     public func commit() throws {

@@ -189,6 +189,10 @@ final class AppState {
             let inserted = identifiers(.insertedIdentifiers)
             let changed = inserted + identifiers(.updatedIdentifiers)
             MainActor.assumeIsolated {
+                // A refresh adds and drops only episodes, and changes only titles and episodes.
+                let refreshOnly = LibraryService.isSavingRefresh
+                    && (inserted + deleted).allSatisfy { Self.episodeEntities.contains($0.entityName) }
+                    && changed.allSatisfy { Self.titleEntities.contains($0.entityName) || Self.episodeEntities.contains($0.entityName) }
                 guard let self else { return }
                 self.libraryVersion += 1
                 if !deleted.isEmpty {
@@ -199,7 +203,7 @@ final class AppState {
                 if (inserted + deleted).contains(where: { Self.titleEntities.contains($0.entityName) }) { self.titleCache.removeAll() }
                 self.noteProgressDeletions(deleted)
                 self.noteProgressChanges(changed)
-                if !self.isInMemory { self.dropbox.noteSave() }
+                if !self.isInMemory { self.dropbox.noteSave(version: self.libraryVersion, refreshOnly: refreshOnly) }
                 // Here rather than in a view: on Mac, edits from a title window, Settings, or Siri with the main
                 // window closed weren't synced until it reopened.
                 if self.libraryVersion != self.dropbox.syncedVersion { self.syncWithDropbox(after: .seconds(5)) }
@@ -304,17 +308,25 @@ final class AppState {
     /// library version. Stats walk every watched title and episode: in a view's body they held the main thread
     /// for about 0.45 s (300 shows) after every save while the page was showing.
     func computeOffMain<T: Sendable>(_ key: String, _ work: @escaping @Sendable (ModelContext) -> T) async {
+        await computeOffMain([key]) { [work($0)] }
+    }
+
+    /// `computeOffMain` for several keys worked out together, from one read of the library: `work` returns a value
+    /// for each key, in order. Runs if any of them isn't from the current library version.
+    func computeOffMain(_ keys: [String], _ work: @escaping @Sendable (ModelContext) -> [any Sendable]) async {
         let version = libraryVersion, today = Calendar.current.startOfDay(for: .now)
         if today != offMainCacheDay {
             // Many keys include the day, so older entries are never read again.
-            offMainCache = offMainCache.filter { $0.key == key }
+            offMainCache = offMainCache.filter { keys.contains($0.key) }
             offMainCacheDay = today
         }
-        if let entry = offMainCache[key], entry.version == version { return }
+        guard keys.contains(where: { offMainCache[$0]?.version != version }) else { return }
         let container = container
-        let value = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
-        // Still kept if the page moved on: it's right for `version`. A newer one that landed first wins.
-        if offMainCache[key].map({ $0.version <= version }) ?? true { offMainCache[key] = (version, value) }
+        let values = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
+        // Still kept if the page moved on: they're right for `version`. A newer one that landed first wins.
+        for (key, value) in zip(keys, values) where offMainCache[key].map({ $0.version <= version }) ?? true {
+            offMainCache[key] = (version, value)
+        }
     }
 
     /// Every model of a type, for `cached` closures. Pages used to `@Query` these, which refetched whole tables
@@ -334,52 +346,67 @@ final class AppState {
 
     @ObservationIgnored private var titleCache: [ObjectIdentifier: [any PersistentModel]] = [:]
     private static let titleEntities: Set<String> = ["Movie", "TVShow"]
+    private static let episodeEntities: Set<String> = ["Season", "Episode"]
 
-    /// A hash of what Siri is taught: title names and each show's next episode. Worked out off the main thread
-    /// from what's saved, once per library version and day: it walks every episode, which froze the app about
-    /// a second after each launch (3 s with a large library) when it ran on the main context.
+    /// A hash of what Siri is taught: title names and each show's next episode. Once per library version and day.
+    /// From the progress map when it's built, which takes a few milliseconds; otherwise worked out off the main
+    /// thread from what's saved: it walks every episode, which froze the app about a second after each launch
+    /// (3 s with a large library) when it ran on the main context.
     func shortcutsContent() async -> Int {
         let version = libraryVersion, day = Calendar.current.startOfDay(for: .now)
         if let shortcutsHash, shortcutsHash.version == version, shortcutsHash.day == day { return shortcutsHash.value }
+        if let progress = showProgressIfReady() {
+            let value = Self.shortcutsContent(movies: all(Movie.self), shows: all(TVShow.self)) {
+                progress[$0.persistentModelID]?.nextEpisode?.code
+            }
+            shortcutsHash = (version, day, value)
+            return value
+        }
+        // One walk at a time: each window asks when it becomes active, and iPad can have several.
+        if let running = shortcutsTask, running.version == version { return await running.task.value }
         let container = container
-        let value = await Task.detached(priority: .utility) { Self.shortcutsContent(in: ModelContext(container)) }.value
+        let task = Task.detached(priority: .utility) {
+            let context = ModelContext(container)
+            let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
+            return Self.shortcutsContent(movies: (try? context.fetch(FetchDescriptor<Movie>())) ?? [],
+                                         shows: (try? context.fetch(FetchDescriptor<TVShow>())) ?? []) {
+                progress[$0.persistentModelID]?.nextEpisode?.code
+            }
+        }
+        shortcutsTask = (version, task)
+        let value = await task.value
+        if shortcutsTask?.version == version { shortcutsTask = nil }
         // Under the version it started from: a save meanwhile makes the next call work it out again.
         shortcutsHash = (version, day, value)
         return value
     }
 
     @ObservationIgnored private var shortcutsHash: (version: Int, day: Date, value: Int)?
+    @ObservationIgnored private var shortcutsTask: (version: Int, task: Task<Int, Never>)?
 
     /// A stable hash (FNV-1a), not `Hasher`: its seed changes with every launch, so the value kept from the last
     /// launch would never match and Siri was taught again (asking for every show's progress) at every launch.
-    /// Titles in ID order for the same reason: a fetch without a sort doesn't promise one.
-    private nonisolated static func shortcutsContent(in context: ModelContext) -> Int {
+    /// Titles in ID order for the same reason: a fetch doesn't promise one.
+    private nonisolated static func shortcutsContent(movies: [Movie], shows: [TVShow], next: (TVShow) -> String?) -> Int {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         func combine(_ string: String?) {
             for byte in (string ?? "").utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
             hash = (hash ^ (string == nil ? 0x1e : 0x1f)) &* 0x0000_0100_0000_01b3 // Ends the field; nil isn't "".
         }
-        var movies = FetchDescriptor<Movie>(sortBy: [SortDescriptor(\.tmdbID)])
-        movies.propertiesToFetch = [\.title]
-        for movie in (try? context.fetch(movies)) ?? [] { combine(movie.title) }
-        let progress = (try? TVShow.progressSummaries(in: context)) ?? [:]
-        for show in (try? context.fetch(FetchDescriptor<TVShow>(sortBy: [SortDescriptor(\.tmdbID)]))) ?? [] {
+        for movie in movies.sorted(by: { $0.tmdbID < $1.tmdbID }) { combine(movie.title) }
+        for show in shows.sorted(by: { $0.tmdbID < $1.tmdbID }) {
             combine(show.name)
-            combine(progress[show.persistentModelID]?.nextEpisode?.code)
+            combine(next(show))
         }
         return Int(truncatingIfNeeded: hash)
     }
 
-    /// The TMDB IDs in the library, for Discover and Search badges. Reads only the IDs. Hidden pages (kept alive
-    /// on Mac) pass `allowStale` so a save doesn't refetch them for a page nobody sees.
+    /// The TMDB IDs in the library, for Discover and Search badges. From the cached titles: fetching only the IDs
+    /// cost as much as fetching the titles (about 45 ms per 1,300), after every save. Hidden pages (kept alive on
+    /// Mac) pass `allowStale` so a save doesn't redo it for a page nobody sees.
     func libraryIDs(allowStale: Bool = false) -> LibraryIDs {
         cached("library-ids", allowStale: allowStale) {
-            var movies = FetchDescriptor<Movie>()
-            movies.propertiesToFetch = [\.tmdbID]
-            var shows = FetchDescriptor<TVShow>()
-            shows.propertiesToFetch = [\.tmdbID]
-            let context = container.mainContext
-            return LibraryIDs(movies: (try? context.fetch(movies)) ?? [], shows: (try? context.fetch(shows)) ?? [])
+            LibraryIDs(movies: all(), shows: all())
         }
     }
 
@@ -455,6 +482,9 @@ final class AppState {
     /// it's built again, a few times at most; the next page redraw asks again after that.
     private func rebuildShowProgress() async {
         for _ in 1...3 {
+            // A first sync or a backup import saves a slice about every tenth of a second, and each save would
+            // abandon the build: built once it's done instead, the last map serving meanwhile.
+            while LibraryService.slicedApplies > 0 { try? await Task.sleep(for: .milliseconds(250)) }
             let version = libraryVersion, day = Calendar.current.startOfDay(for: .now), container = container
             let index = await Task.detached(priority: .userInitiated) {
                 try? TVShow.progressSnapshotIndex(in: ModelContext(container))
@@ -933,11 +963,11 @@ enum SharedLibrary {
         return TMDBClient(token: token, language: language.isEmpty ? TMDBClient.language(for: .current) : language)
     }
 
-    /// For Siri and Shortcuts actions; throws like `unlockedContainer`.
+    /// For Siri and Shortcuts actions; throws like `unlockedContainer`. Without TMDB or OMDb: every action only
+    /// reads and writes the library, and reading their keys took a Keychain call each (a decrypt on Mac) per action.
     static var service: LibraryService {
         get throws {
-            LibraryService(context: try unlockedContainer.mainContext, client: makeClient(),
-                           imdb: OMDbKeyStore.load().map { IMDbClient(apiKey: $0) })
+            LibraryService(context: try unlockedContainer.mainContext, client: nil)
         }
     }
 

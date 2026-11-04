@@ -23,6 +23,8 @@ struct SeerrRequestButton: View {
     /// Bumped after a request or deletion, to load the new status (and keep checking it).
     @State private var watchGeneration = 0
     @State private var deleting: SeerrRequest?
+    /// What the status was last loaded for, and when.
+    @State private var checked: (key: String, at: Date)?
 
     var body: some View {
         if let seerr = appState.seerr {
@@ -37,8 +39,8 @@ struct SeerrRequestButton: View {
             .fixedSize(horizontal: !isCompact, vertical: false)
             .buttonStyle(.bordered)
             .modifier(CompactWidth(isCompact: isCompact))
-            .task(id: "\(seerr.baseURL)|\(seerr.auth.hashValue)|\(kind.rawValue)-\(tmdbID)|\(watchGeneration)|\(isActive)") {
-                await watch(seerr)
+            .task(id: "\(watchKey(seerr))|\(isActive)") {
+                await watch(seerr, key: watchKey(seerr))
             }
             .confirmationDialog("Delete the request for “\(title)”?",
                                 isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -129,10 +131,21 @@ struct SeerrRequestButton: View {
         #endif
     }
 
+    /// The title, server, and generation the status is for: a change to any of them loads it again.
+    private func watchKey(_ seerr: SeerrClient) -> String {
+        "\(seerr.baseURL)|\(seerr.auth.hashValue)|\(kind.rawValue)-\(tmdbID)|\(watchGeneration)"
+    }
+
     /// Loads the status, then checks it every 30 seconds while a request is in progress, so Requested turns
     /// into Watch Now when the title arrives. Stops with the page, and while it's hidden (kept alive on Mac).
     /// Hidden when Seerr can't be reached, and not asked again for a few minutes after it couldn't be.
-    private func watch(_ seerr: SeerrClient) async {
+    private func watch(_ seerr: SeerrClient, key: String) async {
+        // Hiding a page and showing it again asked the server each time, on every page switch on Mac and iPad.
+        // A page being hidden keeps the status it has; one shown again asks only if the status may have moved on.
+        if let checked, checked.key == key, status != nil,
+           !isActive || (status?.isInProgress != true && Date.now.timeIntervalSince(checked.at) < 30) {
+            return
+        }
         while !Task.isCancelled {
             guard !appState.isSeerrUnreachable else {
                 status = nil
@@ -141,6 +154,7 @@ struct SeerrRequestButton: View {
             }
             do {
                 status = try await seerr.title(kind == .movie ? .movie : .tv, tmdbID: tmdbID)
+                checked = (key, .now)
             } catch is CancellationError {
                 return
             } catch let error as URLError where error.code == .cancelled {

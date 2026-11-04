@@ -119,12 +119,13 @@ public struct SmartListRules: Codable, Sendable, Hashable {
                              backlog: show.isInBacklog, favorite: show.isFavorite)
     }
 
-    /// The status is checked last: for a show it's the expensive part.
-    private func matchesCommon(status: @autoclosure () -> WatchStatus, genres itemGenres: [String], tags: [MediaTag]?, spaces: [Space]?,
+    /// The status is checked last: for a show it's the expensive part. Tags and spaces come just before it, and only
+    /// for a rule that has them: each is a to-many relationship read per title, and a smart list checks every title
+    /// after every save.
+    private func matchesCommon(status: @autoclosure () -> WatchStatus, genres itemGenres: [String],
+                               tags: @autoclosure () -> [MediaTag]?, spaces: @autoclosure () -> [Space]?,
                                rating: Double?, date: Date?, backlog: Bool, favorite: Bool) -> Bool {
         if !genres.isEmpty, genres.isDisjoint(with: itemGenres) { return false }
-        if !tagIDs.isEmpty, tagIDs.isDisjoint(with: (tags ?? []).map(\.uuid)) { return false }
-        if !spaceIDs.isEmpty, spaceIDs.isDisjoint(with: (spaces ?? []).map(\.uuid)) { return false }
         if let minimumRating, (rating ?? -1) < minimumRating { return false }
         if releasedFrom != nil || releasedThrough != nil {
             guard let year = date.map(Self.utcYear) else { return false }
@@ -133,6 +134,8 @@ public struct SmartListRules: Codable, Sendable, Hashable {
         }
         if backlogOnly, !backlog { return false }
         if favoritesOnly, !favorite { return false }
+        if !tagIDs.isEmpty, tagIDs.isDisjoint(with: (tags() ?? []).map(\.uuid)) { return false }
+        if !spaceIDs.isEmpty, spaceIDs.isDisjoint(with: (spaces() ?? []).map(\.uuid)) { return false }
         if !statuses.isEmpty, !statuses.contains(status()) { return false }
         return true
     }

@@ -127,9 +127,11 @@ struct RemoteImage<Content: View, Placeholder: View>: View {
             failed = false
             return
         }
-        if ImageCache.shared.image(for: url) != nil {
-            // The body already draws it from the cache; only clear an image left from a previous URL.
-            if loaded != nil { loaded = nil }
+        if let cached = ImageCache.shared.image(for: url) {
+            // Kept here too: drawn from the cache alone, it turned into the placeholder for good when the cache
+            // evicted it (memory pressure on an iPhone), since this task doesn't run again for the same URL.
+            if loaded !== cached { loaded = cached }
+            if failed { failed = false }
             return
         }
         loaded = nil

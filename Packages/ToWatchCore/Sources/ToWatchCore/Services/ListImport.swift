@@ -158,11 +158,18 @@ public struct ListImportResult: Sendable {
     public var failed: [ListEntry] = []
     /// Why the first failed entry failed.
     public var failureReason: String?
+    /// Entries not looked up because the import was stopped.
+    public var skipped = 0
 }
 
 extension LibraryService {
-    /// Finds each entry on TMDB and adds it, a few at a time, saving once at the end. `progress` gets the
-    /// number of entries handled so far.
+    /// Finds each entry on TMDB and adds it, a few at a time. `progress` gets the number of entries handled so far.
+    ///
+    /// Saved about every `sliceSize` titles and episodes, not once at the end: a list of 300 shows kept some 20,000
+    /// new episodes waiting in the context for the minutes the downloads took, saved them in one go on the main
+    /// thread, and lost them all if the app quit meanwhile. Cancelling the task stops it, keeping what was added;
+    /// so does TMDB not answering several entries in a row (each waited out its timeout), which lists the rest
+    /// as failed.
     public func importList(_ entries: [ListEntry], mark: ListImportMark,
                            progress: (Int) -> Void = { _ in }) async throws -> ListImportResult {
         let client = try requireClient()
@@ -174,11 +181,22 @@ extension LibraryService {
         var result = ListImportResult()
         var handled = 0
         var seen: Set<String> = []
+        var handledEntries: Set<Int> = []
+        /// Titles and episodes added since the last save, and entries in a row that got no answer.
+        var unsaved = 0, unanswered = 0
+        func added(_ weight: Int) {
+            unsaved += weight
+            guard unsaved >= Self.sliceSize else { return }
+            save()
+            unsaved = 0
+        }
         await Self.forEachConcurrently(Array(entries.indices), limit: 4) { index in
             await Self.fetch(entries[index], client: client, existingMovies: existingMovies, existingShows: existingShows)
         } apply: { index, payload in
             handled += 1
+            handledEntries.insert(index)
             defer { progress(handled) }
+            if case .failed(_, unanswered: true) = payload { unanswered += 1 } else { unanswered = 0 }
             // Every entry lands in exactly one count, so they add up to the number of titles in the list.
             func isFirst(_ key: String) -> Bool {
                 if seen.insert(key).inserted { return true }
@@ -188,7 +206,9 @@ extension LibraryService {
             switch payload {
             case .notFound:
                 result.notFound.append(entries[index])
-            case let .failed(reason):
+            case let .failed(reason, _):
+                // Cut off by stopping the import, not by TMDB.
+                guard !Task.isCancelled else { return result.skipped += 1 }
                 result.failed.append(entries[index])
                 if result.failureReason == nil { result.failureReason = reason }
             case let .existingMovie(id):
@@ -205,11 +225,17 @@ extension LibraryService {
                 guard isFirst("m\(detail.id)") else { return }
                 result.added += 1
                 file(upsertMovie(detail), mark)
+                added(1)
             case let .show(detail, seasons):
                 guard isFirst("s\(detail.id)") else { return }
                 result.added += 1
                 file(upsertShow(detail, seasons: seasons), mark)
+                added(1 + seasons.reduce(0) { $0 + $1.episodes.count })
             }
+        } until: { Task.isCancelled || unanswered >= Self.unansweredLimit }
+        // Entries never looked up: the import was stopped, or TMDB stopped answering.
+        for index in entries.indices where !handledEntries.contains(index) {
+            if Task.isCancelled { result.skipped += 1 } else { result.failed.append(entries[index]) }
         }
         result.notFound.sort { $0.line < $1.line }
         result.failed.sort { $0.line < $1.line }
@@ -220,7 +246,7 @@ extension LibraryService {
     private enum Payload: Sendable {
         case notFound
         /// The request failed: TMDB never said whether it has the title.
-        case failed(String)
+        case failed(String, unanswered: Bool)
         case existingMovie(Int), existingShow(Int)
         case movie(TMDBMovieDetail)
         case show(TMDBTVDetail, [TMDBSeasonDetail])
@@ -232,7 +258,7 @@ extension LibraryService {
         do {
             return try await match(entry, client: client, existingMovies: existingMovies, existingShows: existingShows)
         } catch {
-            return .failed(error.localizedDescription)
+            return .failed(error.localizedDescription, unanswered: error is URLError || error is CancellationError)
         }
     }
 

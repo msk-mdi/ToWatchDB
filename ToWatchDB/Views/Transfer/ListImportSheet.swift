@@ -18,6 +18,8 @@ struct ListImportSheet: View {
     @State private var phase: Phase = .ready
     /// Shown by this sheet: the app's error alert is on the main window, which may be behind Settings.
     @State private var errorMessage: String?
+    /// The import under way, so Stop can cancel it.
+    @State private var importTask: Task<Void, Never>?
 
     private enum Phase {
         case ready
@@ -108,6 +110,13 @@ struct ListImportSheet: View {
             if !result.failed.isEmpty {
                 LabeledContent("Couldn't Reach TMDB", value: result.failed.count.formatted())
             }
+            if result.skipped > 0 {
+                LabeledContent("Not Looked Up", value: result.skipped.formatted())
+            }
+        } footer: {
+            if result.skipped > 0 {
+                Text("The import was stopped. Import the list again to add the rest: titles already added aren't duplicated.")
+            }
         }
         if !result.failed.isEmpty {
             Section {
@@ -144,6 +153,8 @@ struct ListImportSheet: View {
                 Button("Import") { start() }.disabled(draft.entries.isEmpty)
             }
         case .importing:
+            // Keeps what was added so far.
+            ToolbarItem(placement: .cancellationAction) { Button("Stop") { importTask?.cancel() } }
             ToolbarItem(placement: .confirmationAction) { Button("Import") {}.disabled(true) }
         case .finished:
             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -152,7 +163,7 @@ struct ListImportSheet: View {
 
     private func start() {
         phase = .importing(done: 0)
-        Task {
+        importTask = Task {
             do {
                 let result = try await appState.library.importList(draft.entries, mark: mark) { done in
                     phase = .importing(done: done)

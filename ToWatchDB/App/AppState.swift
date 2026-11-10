@@ -314,20 +314,38 @@ final class AppState {
     /// `computeOffMain` for several keys worked out together, from one read of the library: `work` returns a value
     /// for each key, in order. Runs if any of them isn't from the current library version.
     func computeOffMain(_ keys: [String], _ work: @escaping @Sendable (ModelContext) -> [any Sendable]) async {
-        let version = libraryVersion, today = Calendar.current.startOfDay(for: .now)
+        let today = Calendar.current.startOfDay(for: .now)
         if today != offMainCacheDay {
             // Many keys include the day, so older entries are never read again.
             offMainCache = offMainCache.filter { keys.contains($0.key) }
             offMainCacheDay = today
         }
-        guard keys.contains(where: { offMainCache[$0]?.version != version }) else { return }
-        let container = container
-        let values = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
-        // Still kept if the page moved on: they're right for `version`. A newer one that landed first wins.
-        for (key, value) in zip(keys, values) where offMainCache[key].map({ $0.version <= version }) ?? true {
-            offMainCache[key] = (version, value)
+        guard keys.contains(where: { offMainCache[$0]?.version != libraryVersion }) else { return }
+        // One at a time per set of keys: a page asks again after every save, and each call used to start its own
+        // read of the library. During a backup import with Stats showing (a save every tenth of a second), dozens
+        // ran at once. The one running catches up with the saves that land meanwhile. Its own task, so the page's
+        // task being cancelled (by the next save) doesn't cut it short.
+        let id = keys.joined(separator: "\n")
+        if let running = offMainTasks[id] { return await running.value }
+        let task = Task {
+            while true {
+                // A first sync or a backup import saves a slice about every tenth of a second: once it's done.
+                while LibraryService.slicedApplies > 0 { try? await Task.sleep(for: .milliseconds(250)) }
+                let version = libraryVersion, container = container
+                guard keys.contains(where: { offMainCache[$0]?.version != version }) else { break }
+                let values = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
+                // A newer one that landed first wins.
+                for (key, value) in zip(keys, values) where offMainCache[key].map({ $0.version <= version }) ?? true {
+                    offMainCache[key] = (version, value)
+                }
+            }
+            offMainTasks[id] = nil
         }
+        offMainTasks[id] = task
+        await task.value
     }
+
+    @ObservationIgnored private var offMainTasks: [String: Task<Void, Never>] = [:]
 
     /// Every model of a type, for `cached` closures. Pages used to `@Query` these, which refetched whole tables
     /// after every save even when the cached value was reused (and on hidden pages kept alive on Mac).

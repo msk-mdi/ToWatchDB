@@ -172,29 +172,52 @@ public struct LibraryService {
         let moviesByID = Dictionary(movies.map { ($0.tmdbID, $0) }) { first, _ in first }
         var count = 0, unreachable = 0
         var rejection: (any Error)?
+        /// Titles refreshed since the last save, and downloads in a row that got no answer.
+        var unsaved = 0, unanswered = 0
+        // Saved every few titles as well as at the end: saved only at the end, a refresh of a large library that
+        // iOS suspended and then ended (the app left within seconds of opening) lost everything it had fetched,
+        // and started over at the next launch.
+        func refreshed() {
+            count += 1
+            unsaved += 1
+            guard unsaved >= Self.refreshSaveInterval else { return }
+            saveRefresh()
+            unsaved = 0
+        }
+        // A server that takes connections and never answers (or a refresh cancelled in the background) failed
+        // every remaining title in turn, each after its 20-second timeout.
+        func noteAnswer<T>(_ result: Result<T, any Error>) {
+            if Self.isUnreachable(result) {
+                unreachable += 1
+                unanswered += 1
+            } else {
+                unanswered = 0
+            }
+        }
+        let shouldStop = { rejection != nil || unanswered >= Self.unansweredLimit }
         await Self.forEachConcurrently(Array(showsByID.keys), limit: 4) { id in
             await Self.result { try await client.tvShowWithSeasons(id: id) }
         } apply: { id, result in
             rejection = rejection ?? Self.tokenRejection(in: result)
-            if Self.isUnreachable(result) { unreachable += 1 }
+            noteAnswer(result)
             // A title deleted while downloading (by the user or a sync) is skipped: writing to it can trap.
             guard let (detail, seasons) = try? result.get(), let show = showsByID[id], show.isLive else { return }
             show.apply(detail)
             merge(seasons, into: show)
-            count += 1
-        } until: { rejection != nil }
-        if rejection == nil {
+            refreshed()
+        } until: { shouldStop() }
+        if !shouldStop() {
             await Self.forEachConcurrently(Array(moviesByID.keys), limit: 4) { id in
                 await Self.result { try await client.movie(id: id) }
             } apply: { id, result in
                 rejection = rejection ?? Self.tokenRejection(in: result)
-                if Self.isUnreachable(result) { unreachable += 1 }
+                noteAnswer(result)
                 guard let detail = try? result.get(), let movie = moviesByID[id], movie.isLive else { return }
                 movie.apply(detail)
-                count += 1
-            } until: { rejection != nil }
+                refreshed()
+            } until: { shouldStop() }
         }
-        if count > 0 { saveRefresh() }
+        if unsaved > 0 { saveRefresh() }
         let failed = shows.count + movies.count - count
         Log.refresh.info("Refreshed \(count, privacy: .public) of \(shows.count, privacy: .public) shows and \(movies.count, privacy: .public) movies")
         if let rejection {
@@ -204,6 +227,13 @@ public struct LibraryService {
         if failed > 0 { Log.refresh.error("\(failed, privacy: .public) titles weren't refreshed (failed, or deleted meanwhile; \(unreachable, privacy: .public) unreachable)") }
         return RefreshOutcome(refreshed: count, failed: failed, unreachable: unreachable)
     }
+
+    /// How many titles a refresh applies between saves. Each save redraws the open pages, so not every title.
+    static let refreshSaveInterval = 25
+
+    /// How many downloads in a row can go unanswered before a batch gives up on the rest. Four run at a time, so
+    /// this is two rounds of timeouts.
+    static let unansweredLimit = 8
 
     /// Whether a download failed without an answer from TMDB: a network error or a cancelled task.
     static func isUnreachable<T>(_ result: Result<T, any Error>) -> Bool {

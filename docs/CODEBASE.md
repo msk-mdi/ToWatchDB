@@ -324,7 +324,9 @@ one from `SharedLibrary.service`. A save that fails is rolled back, logged, and 
   file is read and parsed off the main thread. `LibraryService.importList` searches
   TMDB for each (with the year, which matches any release date, then without), picks a result with
   `ListImport.bestMatch` (exact title first, then year; listed years are often regional), downloads 4 at a time,
-  and saves once. It can mark titles watched (no date) or backlog, never un-marking. File ▸ Import List of Titles….
+  and saves about every 500 titles and episodes (`LibraryService.sliceSize`), so a long list isn't lost if the app
+  quits. Stop in the sheet cancels it and keeps what was added; it also stops by itself when TMDB leaves 8 entries
+  in a row unanswered. It can mark titles watched (no date) or backlog, never un-marking. File ▸ Import List of Titles….
 - **CSV (`exportCSV(now:timeZone:)`):** one row per title, quoted per RFC 4180. Watch and added dates are
   written as **local** calendar days.
 
@@ -694,8 +696,11 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
 9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
    save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.
-10. **Refresh in parallel, save once.** `refreshStale` fetches 4 titles at a time and saves at the end; every
-    save redraws each open page. `apply` only writes episode and season fields that changed.
+10. **Refresh in parallel, save rarely.** `refreshStale` fetches 4 titles at a time and saves every 25 titles and
+    at the end; every save redraws each open page, but saved only at the end a refresh iOS cut short lost everything
+    it had fetched. It gives up on the rest after 8 downloads in a row without an answer. `apply` only writes
+    episode and season fields that changed. A forced refresh (the Refresh buttons) doesn't force IMDb ratings:
+    that asked OMDb for every title, a free key's whole day of lookups.
 11. **One download per image.** `ImageCache` shares in-flight downloads between views showing the same URL, counts
     the views waiting for each, and cancels it when the last one is cancelled: flicking through a grid on cellular
     fetched every poster it passed.

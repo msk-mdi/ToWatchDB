@@ -469,18 +469,49 @@ final class AppState {
         return showProgress()
     }
 
+    /// Whether a full map is being built in the background, so the one `showProgress()` returns may lack shows
+    /// (a first sync or a large import just added them) or be from yesterday.
+    var isShowProgressBehind: Bool { progressRebuild != nil }
+
+    /// A show's progress from `showProgress()`'s map. For a show the map lacks while a full map is being built, a
+    /// stand-in with nothing watched, not the show's own walk of its episodes: after a first sync the map lacks
+    /// every show, and the first list opened walked them all on the main thread (about 3.4 s for 300 shows).
+    /// Lists are worked out again when the built map lands.
+    func progress(of show: TVShow, in map: [PersistentIdentifier: ShowProgress]) -> ShowProgress {
+        map[show.persistentModelID] ?? (isShowProgressBehind ? show.pendingProgress : show.progressSummary())
+    }
+
     private func rebuildShowProgressLater() {
         guard progressRebuild == nil else { return }
         progressRebuild = Task {
-            await rebuildShowProgress()
+            let outcome = await rebuildShowProgress()
             progressRebuild = nil
+            switch outcome {
+            case .landed:
+                break
+            case .failed:
+                // The store couldn't be read: the next page builds the map itself, as before there was one.
+                progressCache = nil
+                fallthrough
+            case .outrun:
+                // Pages drew stand-ins for the shows the map lacks: they draw again, and ask for a build again.
+                derivedCache.removeAll()
+                progressGeneration += 1
+            }
         }
+    }
+
+    private enum ProgressRebuild {
+        case landed
+        /// Saves kept landing during every build.
+        case outrun
+        case failed
     }
 
     /// Works every show's progress out in a context of its own and swaps it in. A save landing meanwhile would
     /// leave the map behind it (a change noted during the build can't be told from one the build saw), so then
     /// it's built again, a few times at most; the next page redraw asks again after that.
-    private func rebuildShowProgress() async {
+    private func rebuildShowProgress() async -> ProgressRebuild {
         for _ in 1...3 {
             // A first sync or a backup import saves a slice about every tenth of a second, and each save would
             // abandon the build: built once it's done instead, the last map serving meanwhile.
@@ -489,17 +520,22 @@ final class AppState {
             let index = await Task.detached(priority: .userInitiated) {
                 try? TVShow.progressSnapshotIndex(in: ModelContext(container))
             }.value
-            guard let index else { return }
+            guard let index else { return .failed }
             guard version == libraryVersion else { continue }
             // A page built the map itself meanwhile (before the warm-up landed): it's the same map.
-            if let cache = progressCache, cache.day == day, !progressRebuildNeeded { return }
-            guard let progress = try? ShowProgress.resolve(index.progress, in: container.mainContext) else { return }
+            if let cache = progressCache, cache.day == day, !progressRebuildNeeded { return .landed }
+            guard let progress = try? ShowProgress.resolve(index.progress, in: container.mainContext) else { return .failed }
             progressCache = (day, progress, index.showOf)
             progressChanges = []
             progressRebuildNeeded = false
+            // Lists worked out from the map it replaces (Up Next, a library grid's filter and order) are cached
+            // under the library version, which a new map doesn't change: after midnight they kept yesterday's
+            // until the next save, so an episode airing today was missing from Up Next.
+            derivedCache.removeAll()
             progressGeneration += 1
-            return
+            return .landed
         }
+        return .outrun
     }
 
     /// `showProgress` as of `day`, with the show each season and episode it read belongs to; and the shows,
@@ -542,6 +578,7 @@ final class AppState {
         // A deleted model can't be read to find its show.
         progressChanges.removeAll { deletedIDs.contains($0) }
         progressChanges += shows
+        if progressRebuildNeeded { rebuildShowProgressLater() }
     }
 
     private func noteProgressChanges(_ changed: [PersistentIdentifier]) {
@@ -552,6 +589,8 @@ final class AppState {
         if progressChanges.count > 2000 {
             progressRebuildNeeded = true
             progressChanges = []
+            // Now, not when a page next asks: that page then drew from a map without the new shows.
+            rebuildShowProgressLater()
         }
     }
 

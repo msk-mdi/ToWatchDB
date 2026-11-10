@@ -378,7 +378,7 @@ struct LibraryView: View {
 
     private func showProgress(for item: LibraryItem, in progress: [PersistentIdentifier: ShowProgress]) -> ShowProgress? {
         guard case let .show(show) = item else { return nil }
-        return progress[show.persistentModelID] ?? show.progressSummary()
+        return appState.progress(of: show, in: progress)
     }
 
     private func scopedItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
@@ -408,7 +408,10 @@ struct LibraryView: View {
             items = items.filter { item in
                 switch item {
                 case let .movie(movie): rules.matches(movie)
-                case let .show(show): rules.matches(show, status: progress[show.persistentModelID]?.status)
+                // Without a status the rule walks the show's episodes, and only if its other criteria match.
+                case let .show(show):
+                    rules.matches(show, status: progress[show.persistentModelID]?.status
+                                  ?? (appState.isShowProgressBehind ? show.pendingProgress.status : nil))
                 }
             }
         default: break

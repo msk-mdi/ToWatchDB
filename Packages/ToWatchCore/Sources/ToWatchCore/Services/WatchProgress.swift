@@ -120,6 +120,13 @@ public extension TVShow {
         return next
     }
 
+    /// A stand-in for a show whose progress isn't worked out yet: nothing watched, no next episode. Reads no
+    /// episode, so it costs nothing where `progressSummary()` walks them all.
+    var pendingProgress: ShowProgress {
+        ShowProgress(status: isAbandoned ? .abandoned : .notWatched, fraction: 0, nextEpisode: nil, nextEpisodeToAir: nil,
+                     airedCount: 0, watchedAiredCount: 0, watchedCount: 0, lastWatched: nil)
+    }
+
     /// Most recent date any episode was marked watched, used to order "Next to Watch".
     var lastWatchedDate: Date? {
         var latest: Date?

@@ -6,6 +6,9 @@ import ToWatchCore
 struct DiscoverView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
+    @Environment(\.isSelectedTab) private var isSelectedTab
+    /// A hidden page or tab shows its last list instead of working it out again after every save.
+    private var allowsStale: Bool { !isActive || !isSelectedTab }
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -15,7 +18,7 @@ struct DiscoverView: View {
 
     var body: some View {
         let loadError = appState.trendingError
-        let ids = appState.libraryIDs(allowStale: !isActive)
+        let ids = appState.libraryIDs(allowStale: allowsStale)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if appState.client != nil && loadError == nil {

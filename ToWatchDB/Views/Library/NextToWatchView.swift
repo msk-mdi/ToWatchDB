@@ -6,11 +6,14 @@ import ToWatchCore
 struct NextToWatchView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
+    @Environment(\.isSelectedTab) private var isSelectedTab
+    /// A hidden page or tab shows its last list instead of working it out again after every save.
+    private var allowsStale: Bool { !isActive || !isSelectedTab }
 
     var body: some View {
         // Hidden (kept alive on Mac): show the last queue instead of recomputing after every save.
         // Keyed by day: an episode airing today joins the queue after midnight, not at the next save.
-        let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: !isActive) {
+        let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: allowsStale) {
             let progress = appState.showProgress()
             return Self.queue(appState.all(TVShow.self)) { appState.progress(of: $0, in: progress) }
         }

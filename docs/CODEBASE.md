@@ -694,7 +694,8 @@ These choices were made after profiling with Instruments (Time Profiler, macOS):
    episode dropped. The launch warms it up (`warmShowProgress`) before the first list is opened; only a page that
    asks before that lands builds it on the main thread.
 9. **Hidden pages don't recompute.** Kept-alive pages pass `allowStale: !isActivePage` to `appState.cached`, so a
-   save doesn't recompute stats, Upcoming, or grids nobody can see. Values from before a deletion are never
+   save doesn't recompute stats, Upcoming, or grids nobody can see. Tabs of a tab bar (iPhone, iPad's top bar) do the same through
+   `isSelectedTab`, set on each tab's stack: a `TabView` keeps the tabs it has shown alive too. Values from before a deletion are never
    served stale (they could hold deleted models). `libraryVersion` is observed, so cached pages redraw after saves.
 10. **Refresh in parallel, save rarely.** `refreshStale` fetches 4 titles at a time and saves every 25 titles and
     at the end; every save redraws each open page, but saved only at the end a refresh iOS cut short lost everything

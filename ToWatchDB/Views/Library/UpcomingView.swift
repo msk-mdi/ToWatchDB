@@ -6,12 +6,15 @@ import ToWatchCore
 struct UpcomingView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
+    @Environment(\.isSelectedTab) private var isSelectedTab
+    /// A hidden page or tab shows its last list instead of working it out again after every save.
+    private var allowsStale: Bool { !isActive || !isSelectedTab }
 
     var body: some View {
         let now = Date.now
         // The store returns only future titles and episodes. Cached per save and day (reading the cache redraws
         // the page after each save); a hidden page keeps the last list.
-        let (items, days) = appState.cached("upcoming-\(UpcomingService.startOfToday(now))", allowStale: !isActive) {
+        let (items, days) = appState.cached("upcoming-\(UpcomingService.startOfToday(now))", allowStale: allowsStale) {
             let items = UpcomingService.upcoming(in: appState.container.mainContext, now: now)
             let days = Dictionary(grouping: items) { $0.date.map { TMDBDate.day(of: $0) } ?? .distantFuture }
                 .sorted { $0.key < $1.key }

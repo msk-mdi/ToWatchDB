@@ -6,6 +6,9 @@ import ToWatchCore
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
+    @Environment(\.isSelectedTab) private var isSelectedTab
+    /// A hidden page or tab shows its last list instead of working it out again after every save.
+    private var allowsStale: Bool { !isActive || !isSelectedTab }
     // Titles aren't queried: a query refetched the whole library after every save, even on hidden pages and
     // when the cached list was reused. `scopedItems` fetches them when the list is recomputed.
     // Sorted by the store (localized standard order), not on every body pass.
@@ -37,7 +40,7 @@ struct LibraryView: View {
         let progress = appState.showProgress()
         let scoped = scopedSortedItems(progress)
         // Cached with the list it counts: typing in the filter field redraws the page on every keystroke.
-        let genres = appState.cached("library-genres-\(scope)-\(String(describing: statusFilter))", allowStale: !isActive) {
+        let genres = appState.cached("library-genres-\(scope)-\(String(describing: statusFilter))", allowStale: allowsStale) {
             genreCounts(scoped)
         }
         let items = filtered(scoped)
@@ -294,7 +297,7 @@ struct LibraryView: View {
     /// `genreSections`, cached with the list while no text filter narrows it.
     private func sections(_ items: [LibraryItem]) -> [(genre: String?, items: [LibraryItem])] {
         guard searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return genreSections(items) }
-        return appState.cached("\(listKey)-sections-\(genreFilter ?? "")", allowStale: !isActive) { genreSections(items) }
+        return appState.cached("\(listKey)-sections-\(genreFilter ?? "")", allowStale: allowsStale) { genreSections(items) }
     }
 
     private func genreSections(_ items: [LibraryItem]) -> [(genre: String?, items: [LibraryItem])] {
@@ -356,7 +359,7 @@ struct LibraryView: View {
     /// Scoped, status-filtered, and sorted items, cached per library version: a show's status and last-watched
     /// date walk its episodes, so they come from the shared progress map. A hidden page keeps its last list.
     private func scopedSortedItems(_ progress: [PersistentIdentifier: ShowProgress]) -> [LibraryItem] {
-        appState.cached(listKey, allowStale: !isActive) { scopedItems(progress) }
+        appState.cached(listKey, allowStale: allowsStale) { scopedItems(progress) }
     }
 
     private var listKey: String { "library-\(scope)-\(sort)-\(String(describing: statusFilter))" }
@@ -367,7 +370,7 @@ struct LibraryView: View {
     private func filtered(_ items: [LibraryItem]) -> [LibraryItem] {
         var items = items
         if let genreFilter {
-            items = appState.cached("\(listKey)-genre-\(genreFilter)", allowStale: !isActive) {
+            items = appState.cached("\(listKey)-genre-\(genreFilter)", allowStale: allowsStale) {
                 items.filter { $0.genres.contains(genreFilter) }
             }
         }

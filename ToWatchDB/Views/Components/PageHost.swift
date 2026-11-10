@@ -4,6 +4,10 @@ extension EnvironmentValues {
     /// False for a page kept alive offscreen by `PageHost`. Such a page must not put its title, toolbar items,
     /// search field, or Title-menu target into the window.
     @Entry var isActivePage = true
+    /// False for a tab of the tab bar (iPhone, iPad's top bar) that isn't the selected one. A `TabView` keeps the
+    /// tabs it has shown alive, so they worked their lists out again after every save, unseen. Unlike
+    /// `isActivePage`, it only lets a page keep its last list: such a tab keeps its title, toolbar, and search field.
+    @Entry var isSelectedTab = true
     /// Called by a page with its own Refresh button (a title's page) as it appears and disappears.
     @Entry var reportsOwnRefreshButton = OwnRefreshReporter()
     /// True where the window shows no title (the Mac top bar), so a page names itself.

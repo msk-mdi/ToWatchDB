@@ -284,27 +284,34 @@ struct RootView: View {
         @Bindable var appState = appState
         return TabView(selection: $appState.selectedTab) {
             Tab("Discover", systemImage: "sparkles.tv", value: AppTab.discover) {
-                NavigationStack { DiscoverView().appDestinations() }
+                NavigationStack { DiscoverView().appDestinations() }.selectedTab(.discover, appState)
             }
             Tab("Up Next", systemImage: "play.circle", value: AppTab.nextToWatch) {
-                NavigationStack { NextToWatchView().appDestinations() }
+                NavigationStack { NextToWatchView().appDestinations() }.selectedTab(.nextToWatch, appState)
             }
             Tab("Upcoming", systemImage: "calendar", value: AppTab.upcoming) {
-                NavigationStack { UpcomingView().appDestinations() }
+                NavigationStack { UpcomingView().appDestinations() }.selectedTab(.upcoming, appState)
             }
             Tab("Library", systemImage: "square.grid.2x2", value: AppTab.all) {
-                NavigationStack { LibraryView(scope: .all, allowsScopeChange: true).appDestinations() }
+                NavigationStack { LibraryView(scope: .all, allowsScopeChange: true).appDestinations() }.selectedTab(.all, appState)
             }
             if AppTab.hasStatsTab {
                 Tab("Stats", systemImage: "chart.bar.xaxis", value: AppTab.stats) {
-                    NavigationStack { StatsView().appDestinations() }
+                    NavigationStack { StatsView().appDestinations() }.selectedTab(.stats, appState)
                 }
             }
             Tab(value: AppTab.search, role: .search) {
-                NavigationStack { SearchView().appDestinations() }
+                NavigationStack { SearchView().appDestinations() }.selectedTab(.search, appState)
             }
         }
         .tabViewStyle(.tabBarOnly)
+    }
+}
+
+private extension View {
+    /// Tells a tab's pages whether theirs is the selected one (`isSelectedTab`).
+    func selectedTab(_ tab: AppTab, _ appState: AppState) -> some View {
+        environment(\.isSelectedTab, appState.selectedTab == tab)
     }
 }
 

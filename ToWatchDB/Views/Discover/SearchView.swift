@@ -6,6 +6,9 @@ import ToWatchCore
 struct SearchView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
+    @Environment(\.isSelectedTab) private var isSelectedTab
+    /// A hidden page or tab shows its last list instead of working it out again after every save.
+    private var allowsStale: Bool { !isActive || !isSelectedTab }
 
     @State private var query = ""
     @State private var kind: MediaSummary.Kind = .movie
@@ -16,7 +19,7 @@ struct SearchView: View {
 
     var body: some View {
         // Rebuilt once per save, not on every keystroke.
-        let ids = appState.libraryIDs(allowStale: !isActive)
+        let ids = appState.libraryIDs(allowStale: allowsStale)
         ScrollView {
             kindPicker
                 #if os(macOS)

@@ -871,7 +871,9 @@ final class AppState {
                 errorMessage = "TMDB turned down the access token, so the library couldn't be refreshed. Check the token in Settings. (\(error.localizedDescription))"
             }
         }
-        await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400, importedMaxAge: force ? 0 : 7 * 86400)
+        // Not forced: every Refresh button asked OMDb for the whole library again (one lookup per title), which
+        // used up a free key's 1,000 lookups a day in one press. Ratings keep their own ages.
+        await library.refreshStaleIMDbRatings()
     }
 }
 

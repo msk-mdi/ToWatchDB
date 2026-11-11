@@ -80,7 +80,13 @@ public final class SealedSecretsFile: Sendable {
         var secrets: [String: String]
         switch read() {
         case let .secrets(stored): secrets = stored
-        case .unusable: secrets = [:]
+        case .unusable:
+            // Kept beside the new file: if "can never be opened" was wrong for once (the enclave failing to load
+            // its key), the secrets it holds aren't gone for good.
+            let kept = url.appendingPathExtension("unusable")
+            try? FileManager.default.removeItem(at: kept)
+            try? FileManager.default.copyItem(at: url, to: kept)
+            secrets = [:]
         case .unavailable: return false
         }
         secrets[account] = value

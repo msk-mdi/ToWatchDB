@@ -6,12 +6,16 @@ import ToWatchCore
 struct NextToWatchView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.isActivePage) private var isActive
+    @Environment(\.isSelectedTab) private var isSelectedTab
+    /// A hidden page or tab shows its last list instead of working it out again after every save.
+    private var allowsStale: Bool { !isActive || !isSelectedTab }
 
     var body: some View {
         // Hidden (kept alive on Mac): show the last queue instead of recomputing after every save.
         // Keyed by day: an episode airing today joins the queue after midnight, not at the next save.
-        let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: !isActive) {
-            Self.queue(appState.all(TVShow.self), progress: appState.showProgress())
+        let queue = appState.cached("next-to-watch-\(Calendar.current.startOfDay(for: .now))", allowStale: allowsStale) {
+            let progress = appState.showProgress()
+            return Self.queue(appState.all(TVShow.self)) { appState.progress(of: $0, in: progress) }
         }
 
         Group {
@@ -49,11 +53,11 @@ struct NextToWatchView: View {
 
     /// Shows you've started come first, most recently watched first, then untouched ones by date added.
     /// Uses the shared per-show progress, so the sort compares precomputed dates.
-    private static func queue(_ shows: [TVShow], progress: [PersistentIdentifier: ShowProgress]) -> [Entry] {
+    private static func queue(_ shows: [TVShow], progress: (TVShow) -> ShowProgress) -> [Entry] {
         shows
             .compactMap { show -> Entry? in
                 guard !show.isAbandoned else { return nil }
-                let progress = progress[show.persistentModelID] ?? show.progressSummary()
+                let progress = progress(show)
                 guard let episode = progress.nextEpisode else { return nil }
                 return Entry(show: show, episode: episode, progress: progress)
             }

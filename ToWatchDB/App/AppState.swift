@@ -314,20 +314,38 @@ final class AppState {
     /// `computeOffMain` for several keys worked out together, from one read of the library: `work` returns a value
     /// for each key, in order. Runs if any of them isn't from the current library version.
     func computeOffMain(_ keys: [String], _ work: @escaping @Sendable (ModelContext) -> [any Sendable]) async {
-        let version = libraryVersion, today = Calendar.current.startOfDay(for: .now)
+        let today = Calendar.current.startOfDay(for: .now)
         if today != offMainCacheDay {
             // Many keys include the day, so older entries are never read again.
             offMainCache = offMainCache.filter { keys.contains($0.key) }
             offMainCacheDay = today
         }
-        guard keys.contains(where: { offMainCache[$0]?.version != version }) else { return }
-        let container = container
-        let values = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
-        // Still kept if the page moved on: they're right for `version`. A newer one that landed first wins.
-        for (key, value) in zip(keys, values) where offMainCache[key].map({ $0.version <= version }) ?? true {
-            offMainCache[key] = (version, value)
+        guard keys.contains(where: { offMainCache[$0]?.version != libraryVersion }) else { return }
+        // One at a time per set of keys: a page asks again after every save, and each call used to start its own
+        // read of the library. During a backup import with Stats showing (a save every tenth of a second), dozens
+        // ran at once. The one running catches up with the saves that land meanwhile. Its own task, so the page's
+        // task being cancelled (by the next save) doesn't cut it short.
+        let id = keys.joined(separator: "\n")
+        if let running = offMainTasks[id] { return await running.value }
+        let task = Task {
+            while true {
+                // A first sync or a backup import saves a slice about every tenth of a second: once it's done.
+                while LibraryService.slicedApplies > 0 { try? await Task.sleep(for: .milliseconds(250)) }
+                let version = libraryVersion, container = container
+                guard keys.contains(where: { offMainCache[$0]?.version != version }) else { break }
+                let values = await Task.detached(priority: .userInitiated) { work(ModelContext(container)) }.value
+                // A newer one that landed first wins.
+                for (key, value) in zip(keys, values) where offMainCache[key].map({ $0.version <= version }) ?? true {
+                    offMainCache[key] = (version, value)
+                }
+            }
+            offMainTasks[id] = nil
         }
+        offMainTasks[id] = task
+        await task.value
     }
+
+    @ObservationIgnored private var offMainTasks: [String: Task<Void, Never>] = [:]
 
     /// Every model of a type, for `cached` closures. Pages used to `@Query` these, which refetched whole tables
     /// after every save even when the cached value was reused (and on hidden pages kept alive on Mac).
@@ -469,18 +487,49 @@ final class AppState {
         return showProgress()
     }
 
+    /// Whether a full map is being built in the background, so the one `showProgress()` returns may lack shows
+    /// (a first sync or a large import just added them) or be from yesterday.
+    var isShowProgressBehind: Bool { progressRebuild != nil }
+
+    /// A show's progress from `showProgress()`'s map. For a show the map lacks while a full map is being built, a
+    /// stand-in with nothing watched, not the show's own walk of its episodes: after a first sync the map lacks
+    /// every show, and the first list opened walked them all on the main thread (about 3.4 s for 300 shows).
+    /// Lists are worked out again when the built map lands.
+    func progress(of show: TVShow, in map: [PersistentIdentifier: ShowProgress]) -> ShowProgress {
+        map[show.persistentModelID] ?? (isShowProgressBehind ? show.pendingProgress : show.progressSummary())
+    }
+
     private func rebuildShowProgressLater() {
         guard progressRebuild == nil else { return }
         progressRebuild = Task {
-            await rebuildShowProgress()
+            let outcome = await rebuildShowProgress()
             progressRebuild = nil
+            switch outcome {
+            case .landed:
+                break
+            case .failed:
+                // The store couldn't be read: the next page builds the map itself, as before there was one.
+                progressCache = nil
+                fallthrough
+            case .outrun:
+                // Pages drew stand-ins for the shows the map lacks: they draw again, and ask for a build again.
+                derivedCache.removeAll()
+                progressGeneration += 1
+            }
         }
+    }
+
+    private enum ProgressRebuild {
+        case landed
+        /// Saves kept landing during every build.
+        case outrun
+        case failed
     }
 
     /// Works every show's progress out in a context of its own and swaps it in. A save landing meanwhile would
     /// leave the map behind it (a change noted during the build can't be told from one the build saw), so then
     /// it's built again, a few times at most; the next page redraw asks again after that.
-    private func rebuildShowProgress() async {
+    private func rebuildShowProgress() async -> ProgressRebuild {
         for _ in 1...3 {
             // A first sync or a backup import saves a slice about every tenth of a second, and each save would
             // abandon the build: built once it's done instead, the last map serving meanwhile.
@@ -489,17 +538,22 @@ final class AppState {
             let index = await Task.detached(priority: .userInitiated) {
                 try? TVShow.progressSnapshotIndex(in: ModelContext(container))
             }.value
-            guard let index else { return }
+            guard let index else { return .failed }
             guard version == libraryVersion else { continue }
             // A page built the map itself meanwhile (before the warm-up landed): it's the same map.
-            if let cache = progressCache, cache.day == day, !progressRebuildNeeded { return }
-            guard let progress = try? ShowProgress.resolve(index.progress, in: container.mainContext) else { return }
+            if let cache = progressCache, cache.day == day, !progressRebuildNeeded { return .landed }
+            guard let progress = try? ShowProgress.resolve(index.progress, in: container.mainContext) else { return .failed }
             progressCache = (day, progress, index.showOf)
             progressChanges = []
             progressRebuildNeeded = false
+            // Lists worked out from the map it replaces (Up Next, a library grid's filter and order) are cached
+            // under the library version, which a new map doesn't change: after midnight they kept yesterday's
+            // until the next save, so an episode airing today was missing from Up Next.
+            derivedCache.removeAll()
             progressGeneration += 1
-            return
+            return .landed
         }
+        return .outrun
     }
 
     /// `showProgress` as of `day`, with the show each season and episode it read belongs to; and the shows,
@@ -542,6 +596,7 @@ final class AppState {
         // A deleted model can't be read to find its show.
         progressChanges.removeAll { deletedIDs.contains($0) }
         progressChanges += shows
+        if progressRebuildNeeded { rebuildShowProgressLater() }
     }
 
     private func noteProgressChanges(_ changed: [PersistentIdentifier]) {
@@ -552,6 +607,8 @@ final class AppState {
         if progressChanges.count > 2000 {
             progressRebuildNeeded = true
             progressChanges = []
+            // Now, not when a page next asks: that page then drew from a map without the new shows.
+            rebuildShowProgressLater()
         }
     }
 
@@ -832,7 +889,9 @@ final class AppState {
                 errorMessage = "TMDB turned down the access token, so the library couldn't be refreshed. Check the token in Settings. (\(error.localizedDescription))"
             }
         }
-        await library.refreshStaleIMDbRatings(maxAge: force ? 0 : 3 * 86400, importedMaxAge: force ? 0 : 7 * 86400)
+        // Not forced: every Refresh button asked OMDb for the whole library again (one lookup per title), which
+        // used up a free key's 1,000 lookups a day in one press. Ratings keep their own ages.
+        await library.refreshStaleIMDbRatings()
     }
 }
 

@@ -55,6 +55,9 @@ public struct IMDbClient: Sendable {
         var ratings: [String: IMDbRating?] = [:]
         var lastError: (any Error)?
         var answered = false
+        /// Lookups in a row that got no answer. OMDb not answering at all (while TMDB does) had every remaining
+        /// title wait out its 10-second timeout, four at a time: most of an hour for a large library.
+        var unanswered = 0
         let lookUp: @Sendable (String) async -> (String, Result<IMDbRating?, any Error>) = { id in
             do { return (id, .success(try await fetch(id))) } catch { return (id, .failure(error)) }
         }
@@ -70,14 +73,23 @@ public struct IMDbClient: Sendable {
                 case let .success(rating):
                     ratings.updateValue(rating, forKey: id)
                     answered = true
+                    unanswered = 0
                 case .failure(is CancellationError):
                     throw CancellationError()
+                case let .failure(error as URLError) where error.code == .cancelled:
+                    // A cancelled request throws this, not `CancellationError`.
+                    throw CancellationError()
+                case let .failure(error as URLError):
+                    lastError = error
+                    unanswered += 1
+                    if unanswered >= Self.unansweredLimit { pending = [] }
                 case let .failure(error as Rejected):
                     // Every other lookup would be turned down too.
                     lastError = error
                     pending = []
                 case let .failure(error):
                     lastError = error
+                    unanswered = 0
                 }
                 if let next = pending.popFirst() {
                     group.addTask { await lookUp(next) }
@@ -87,6 +99,9 @@ public struct IMDbClient: Sendable {
         if !answered, let lastError { throw lastError }
         return ratings
     }
+
+    /// Two rounds of timeouts.
+    static var unansweredLimit: Int { concurrency * 2 }
 
     static func isValidID(_ id: String) -> Bool {
         id.count > 2 && id.hasPrefix("tt") && id.dropFirst(2).allSatisfy(\.isASCII) && id.dropFirst(2).allSatisfy(\.isNumber)

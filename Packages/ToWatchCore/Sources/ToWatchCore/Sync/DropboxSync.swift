@@ -32,6 +32,8 @@ public final class DropboxSync {
     @ObservationIgnored private let defaults: UserDefaults
     /// The library as of the last sync, so the next one can tell what changed on each side.
     private let baseURL: URL
+    /// Where the library is copied before a merge deletes a large part of it (`LibraryCopies`).
+    private let copiesURL: URL
 
     public private(set) var isConnected = false
     public private(set) var isSyncing = false
@@ -62,13 +64,15 @@ public final class DropboxSync {
     /// The sign-in couldn't be read when checked (a locked iPhone), so it's checked again before each sync.
     @ObservationIgnored private var isConnectionUnknown = false
 
-    /// `client` is nil when the build has no Dropbox app key. Tests pass their own defaults and base file.
+    /// `client` is nil when the build has no Dropbox app key. Tests pass their own defaults, base file, and
+    /// copies folder.
     public init(client: DropboxClient?, vault: Vault, defaults: UserDefaults = .standard,
-                baseURL: URL = DropboxSync.defaultBaseURL) {
+                baseURL: URL = DropboxSync.defaultBaseURL, copiesURL: URL = LibraryCopies.defaultFolder) {
         self.client = client
         self.vault = vault
         self.defaults = defaults
         self.baseURL = baseURL
+        self.copiesURL = copiesURL
         accountEmail = defaults.string(forKey: "dropboxAccount")
         lastSynced = defaults.object(forKey: "dropboxLastSynced") as? Date
         syncedRev = defaults.string(forKey: "dropboxSyncedRev")
@@ -228,6 +232,8 @@ public final class DropboxSync {
         let session = session
         /// Throws if the user connected or disconnected since this sync started.
         func checkSession() throws { if session != self.session { throw CancellationError() } }
+        /// Whether this sync already copied the library (see below): once, however many times it merges again.
+        var isCopied = false
         // A conflict means another device uploaded between our download and upload: merge again with its file.
         for attempt in 1...3 {
             do {
@@ -270,12 +276,22 @@ public final class DropboxSync {
                         try Task.checkCancellation()
                         if pass > Self.maxPasses { throw LibraryKeptChanging() }
                         // Which titles the merge changes is worked out here too, so applying it writes only those.
-                        let (merged, changes) = try await Self.offMain { [local] in
+                        let (merged, changes, deleted) = try await Self.offMain { [local] in
                             let base = LibrarySync.usableBase(savedBase, local: local)
                             let merged = LibrarySync.merge(decodedBase: base, local: local, decodedRemote: remote)
-                            return (merged, LibrarySync.changes(from: local, to: merged))
+                            return (merged, LibrarySync.changes(from: local, to: merged), LibraryCopies.deletedTitles(from: local, to: merged))
                         }
                         try checkSession()
+                        // The merge deletes what other devices deleted. When that's a large part of the library
+                        // (a device emptied by mistake looks the same), the library is copied first, and the
+                        // sync fails rather than delete it without a copy. Before the version check below, so
+                        // nothing awaits between that check and applying.
+                        if !isCopied, LibraryCopies.isLargeDeletion(deleted, of: local.movies.count + local.shows.count) {
+                            Log.sync.info("The merge deletes \(deleted, privacy: .public) titles here; copying the library first")
+                            try await Self.offMain { [local, copiesURL] in _ = try LibraryCopies.save(local, in: copiesURL) }
+                            isCopied = true
+                            try checkSession()
+                        }
                         let service = library()
                         // A batch (a list import, a refresh) changes models and saves only when it's done, so its
                         // changes aren't in `local` (a snapshot of what's saved) and applying would delete or

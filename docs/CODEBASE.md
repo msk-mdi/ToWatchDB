@@ -140,7 +140,7 @@ About 16,800 lines of Swift in total.
 | Release builds | `Scripts/build-mac.sh`, `Scripts/install-ios.sh` | Mac: ad-hoc signed `dist/ToWatchDB.app`. iOS: free Apple ID team from Secrets, installed on a connected device. No `get-task-allow` in Release. |
 | Dropbox app key | `Config/Secrets.xcconfig` → `DROPBOX_APP_KEY` | Copied into Info.plist as `DropboxAppKey` in every configuration (it isn't a secret). Without it, Settings ▸ Dropbox Sync says sync is unavailable. |
 | Token override | Settings ▸ TMDB | Stored by `TokenStore` through `SecretStore`. It takes priority over the built-in token. |
-| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support (`SealedSecretsFile` in ToWatchCore), AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read (looked for once per launch). Macs without a Secure Enclave keep the Keychain. The decrypted file is kept in memory until the next save. iOS items are readable after the first unlock, so a sync or Siri action on a locked iPhone can use them. `SecretStore.read` throws `Unreadable` when reading failed and returns nil only when nothing is saved: callers must not treat a failed read as "signed out". `load` is the non-throwing form. |
+| Secrets | `SecretStore` (`App/TokenStore.swift`) | iOS: the Keychain. macOS: `Secrets.sealed` in Application Support (`SealedSecretsFile` in ToWatchCore), AES-GCM with a key derived from a Secure Enclave key (ECDH with a fresh ephemeral key per save). Ad-hoc builds change identity on every update, which made Keychain items prompt for the password; the enclave file doesn't. Items saved in the Keychain by older versions move on first read (looked for once per launch). Macs without a Secure Enclave keep the Keychain. The decrypted file is kept in memory until the next save. iOS items are readable after the first unlock, so a sync or Siri action on a locked iPhone can use them. `SecretStore.read` throws `Unreadable` when reading failed and returns nil only when nothing is saved: callers must not treat a failed read as "signed out". `load` is the non-throwing form. A sealed file whose key the enclave refuses (another Mac's file, or the enclave failing for once) reads as empty; the save that replaces it keeps it as `Secrets.sealed.unusable`, and if that file opens at a later read its secrets come back, except the accounts saved or removed since (`changedSinceReplacement`). |
 | Signing | `Config/App.xcconfig` | Ad-hoc by default (`CODE_SIGN_IDENTITY = -`). Set `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY = Apple Development` in Secrets so App Intents run. |
 | Entitlements | `project.yml` | macOS sandbox: network client and user-selected file read/write. Not used on iOS (`CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` is empty). |
 | Alternate icons | `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=iphone*]` | iOS only. macOS swaps the Dock icon at runtime instead. |
@@ -475,6 +475,7 @@ view's detail column, and that a hidden Library page's search field doesn't show
 | `Stats/StatsView.swift` | Period menu, summary tiles, activity chart (Swift Charts), top genres and actors, highlights, year comparison |
 | `Stats/YearInReview.swift` | A 4:5 share card rendered with `ImageRenderer` (posters downloaded first) |
 | `Settings/SettingsView.swift` | Appearance (layout, accent color, app icon), TMDB token, language and region, library refresh, backup, about |
+| `Settings/KeptLibrariesSection.swift` | Kept Libraries: copies made before a sync deleted many titles and stores that couldn't be opened, to merge back or delete. Hidden when there are none |
 | `Transfer/LibraryTransfer.swift` | `LibraryFileRequest` and the save/open panels (§5.10) |
 | `Transfer/ListImportSheet.swift` | Importing a list of titles: counts, "add as" choice, progress, and titles not found |
 
@@ -602,6 +603,16 @@ the local date.
   running), 5 s after the last save (from
   `AppState`'s save observer, so it works with the main window closed), and from Settings or Library ▸ Sync with
   Dropbox. In-memory (sample data) runs never sync.
+- **With a refresh running:** a sync asked for during a refresh waits for it to end (`syncsAfterRefresh`). The
+  refresh runs in a task of its own (`refreshRun`) so the two exits can deal with it. Quitting on Mac
+  (`syncBeforeQuit`) cancels it, which saves what it fetched, then syncs. Going to the background on iOS waits
+  for it, at most 15 s (`finishRefreshInBackground`), then stops it and syncs. Both go through
+  `syncUnsyncedChanges`, which waits for a sync already running and checks again, since a sync asked for
+  meanwhile only queues a pass and returns.
+- **Copy before large deletions:** when a merge deletes a quarter or more of this device's titles (and at least
+  10), the library is saved first in Application Support ▸ `Library Copies` (`LibraryCopies`, the last 3 kept),
+  and the sync fails rather than apply without the copy. Settings ▸ Kept Libraries merges one back
+  (`KeptLibrariesSection`), like importing a backup.
 - **Deleted while open:** a sync can delete the title on screen, so the detail pages check `modelContext == nil`.
 
 ### 5.10b Seerr requests
@@ -758,7 +769,10 @@ To measure page switches, see §9.
   classes in use today. Before editing any `@Model` class, copy each class as it is into `ToWatchSchemaV1` (as
   nested types), point V1's `models` at the copies, add `ToWatchSchemaV2` with the edited classes, and add a
   stage to the plan (`.lightweight` when SwiftData can infer it). Test it on a copy of a real store, never the
-  original. A change made without this fails to open existing libraries, which are then moved aside. An index
+  original. A change made without this fails to open existing libraries, which are then moved aside
+  (`ToWatchDB Unreadable <date>` in Application Support). Settings ▸ Kept Libraries lists them: Restore opens a
+  copy of the store (`SharedLibrary.backup(ofStoreIn:)`) and merges it in, which works once the app has the
+  migration it lacked. An index
   added on its own isn't treated as a change at all: existing stores never get it.
 
 - **Every macOS page must have at least one toolbar item.** With an empty toolbar, macOS collapses it and the

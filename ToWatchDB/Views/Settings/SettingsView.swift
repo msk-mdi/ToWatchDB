@@ -135,6 +135,8 @@ struct SettingsView: View {
 
             dropboxSection
 
+            KeptLibrariesSection()
+
             Section("About") {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "film.stack").font(.largeTitle).foregroundStyle(.tint)
@@ -465,7 +467,7 @@ private enum SeerrSignInMethod: String, CaseIterable, Identifiable {
     }
 }
 
-private extension View {
+extension View {
     /// In an iOS Form, a row with several buttons fires all of them on tap unless they're borderless.
     func rowButtonStyle() -> some View {
         #if os(iOS)
@@ -474,7 +476,9 @@ private extension View {
         self
         #endif
     }
+}
 
+private extension View {
     /// Long lists open on their own screen on iOS, where a menu would run off the screen and the value
     /// would wrap under the label.
     func listPickerStyle() -> some View {

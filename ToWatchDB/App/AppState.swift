@@ -106,6 +106,9 @@ final class AppState {
     @ObservationIgnored private var dropboxDelay: Task<Void, Never>?
     /// Whether a sync was put off until the running refresh ends.
     @ObservationIgnored private var syncsAfterRefresh = false
+    /// The refresh under way, in a task of its own so that quitting or going to the background can wait for it
+    /// or stop it, whoever started it.
+    @ObservationIgnored private var refreshRun: Task<Void, Never>?
     /// When `refreshLibrary` last started.
     @ObservationIgnored private var lastRefresh: Date?
     /// Whether a refresh already said TMDB turned the token down.
@@ -752,14 +755,37 @@ final class AppState {
     /// Whether a save hasn't reached Dropbox yet.
     var hasUnsyncedChanges: Bool { dropbox.isConnected && !isInMemory && !isPlaceholder && libraryVersion != dropbox.syncedVersion }
 
+    /// Whether quitting has something to upload first: unsynced saves, or a refresh whose changes aren't saved yet.
+    var needsSyncBeforeQuit: Bool {
+        hasUnsyncedChanges || (isRefreshing && dropbox.isConnected && !isInMemory && !isPlaceholder)
+    }
+
+    /// Uploads what hasn't reached Dropbox and returns once it has, or once a sync failed, `goesOn` says to stop,
+    /// or the task is cancelled. A sync already running only queues another pass and returns at once, which ended
+    /// the wait (and the background task around it) with the upload still under way: it's waited for, and the
+    /// library checked again.
+    private func syncUnsyncedChanges(while goesOn: () -> Bool = { true }) async {
+        // Not for ever: saves that keep landing leave the library unsynced without an error.
+        for _ in 1...3 {
+            await dropbox.waitForSync()
+            guard hasUnsyncedChanges, !Task.isCancelled, goesOn() else { return }
+            await runDropboxSync()
+            // Still syncing: this call only queued a pass, and the error is an earlier sync's.
+            if dropbox.lastError != nil, !dropbox.isSyncing { return }
+        }
+    }
+
     /// Syncs before the app quits, waiting at most `timeout`: an edit made just before quitting otherwise waited
     /// for the next launch to reach other devices.
     func syncBeforeQuit(timeout: Duration = .seconds(5)) async {
         dropboxDelay?.cancel()
         let sync = Task {
-            // A sync already running would only queue another pass and return at once.
-            await dropbox.waitForSync()
-            if hasUnsyncedChanges, !Task.isCancelled { await runDropboxSync() }
+            // A running refresh is stopped, not waited for (it can take minutes): it saves what it fetched, and
+            // that's uploaded with the rest. Left running, a sync put off until it ended never ran, and what it
+            // had saved reached other devices only after the next launch.
+            refreshRun?.cancel()
+            await refreshRun?.value
+            await syncUnsyncedChanges()
         }
         let deadline = Task {
             try? await Task.sleep(for: timeout)
@@ -780,7 +806,7 @@ final class AppState {
             if libraryVersion != dropbox.syncedVersion || dropbox.lastSynced.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true {
                 syncWithDropbox()
             }
-        case .background where libraryVersion != dropbox.syncedVersion:
+        case .background where libraryVersion != dropbox.syncedVersion || isRefreshing:
             #if os(iOS)
             // Without a background task, iOS suspends the app mid-upload and the edits wait for the next launch.
             dropbox.checkConnectionIfNeeded()
@@ -790,10 +816,10 @@ final class AppState {
                 self?.endBackgroundSync()
             }
             Task {
-                // A sync already running would only queue another pass and return at once, ending the
-                // background task while that sync was still uploading.
-                await dropbox.waitForSync()
-                if hasUnsyncedChanges, backgroundSync != .invalid { await runDropboxSync() }
+                // First the refresh, whose sync was put off until it ends: by then this background task was over,
+                // and iOS suspended the app with that upload under way.
+                await finishRefreshInBackground()
+                await syncUnsyncedChanges { backgroundSync != .invalid }
                 endBackgroundSync()
             }
             #else
@@ -805,6 +831,19 @@ final class AppState {
     }
 
     #if os(iOS)
+    /// Waits for the running refresh, so the sync after it uploads what it changed. iOS gives the app about half
+    /// a minute in the background for both: a refresh still going after `limit` is stopped, which saves what it
+    /// fetched and leaves the rest for the next activation. Not if the app came back to the front meanwhile.
+    private func finishRefreshInBackground(limit: Duration = .seconds(15)) async {
+        guard let refreshRun else { return }
+        let cutoff = Task {
+            try? await Task.sleep(for: limit)
+            if !Task.isCancelled, UIApplication.shared.applicationState == .background { refreshRun.cancel() }
+        }
+        await refreshRun.value
+        cutoff.cancel()
+    }
+
     private func endBackgroundRefresh() {
         guard backgroundRefresh != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundRefresh)
@@ -857,6 +896,13 @@ final class AppState {
         guard client != nil, !isRefreshing, !isPlaceholder else { return }
         isRefreshing = true
         lastRefresh = .now
+        let run = Task { await runRefresh(force: force) }
+        refreshRun = run
+        // Cancelling the caller (iOS ending a background refresh) still stops it.
+        await withTaskCancellationHandler { await run.value } onCancel: { run.cancel() }
+    }
+
+    private func runRefresh(force: Bool) async {
         #if os(iOS)
         // Opening the app and leaving within seconds is the common case: without a background task, iOS suspended
         // the refresh with its downloads in flight, and the titles they were for stayed stale.
@@ -866,6 +912,7 @@ final class AppState {
         #endif
         defer {
             isRefreshing = false
+            refreshRun = nil
             #if os(iOS)
             endBackgroundRefresh()
             #endif
@@ -890,8 +937,9 @@ final class AppState {
             }
         }
         // Not forced: every Refresh button asked OMDb for the whole library again (one lookup per title), which
-        // used up a free key's 1,000 lookups a day in one press. Ratings keep their own ages.
-        await library.refreshStaleIMDbRatings()
+        // used up a free key's 1,000 lookups a day in one press. Ratings keep their own ages. Not once stopped
+        // (quitting, or out of background time): every lookup would fail in turn.
+        if !Task.isCancelled { await library.refreshStaleIMDbRatings() }
     }
 }
 
@@ -989,7 +1037,7 @@ enum SharedLibrary {
             Log.library.fault("The library couldn't be opened and was moved aside: \(error.localizedDescription, privacy: .public)")
             DropboxSync.forgetBase()
             openFailure = "The library couldn't be opened (\(error.localizedDescription)), so an empty one was started."
-                + (folder.map { " The old one was moved to “\($0.path())”." } ?? "")
+                + (folder.map { " The old one was moved to “\($0.path())”, and a version of the app that can open it can restore it from Settings." } ?? "")
                 + " With Dropbox sync on, the library comes back with the next sync."
             if let container = try? ModelContainer(for: schema, migrationPlan: ToWatchMigrationPlan.self,
                                                    configurations: configuration) { return container }
@@ -1001,11 +1049,38 @@ enum SharedLibrary {
         }
     }
 
+    /// What the folders `moveAside` makes are named, before the date.
+    private static let unreadablePrefix = "ToWatchDB Unreadable "
+
+    /// The stores moved aside because they couldn't be opened, with when each was.
+    static func unreadableStores() -> [(folder: URL, date: Date)] {
+        let support = ModelConfiguration("ToWatchDB", cloudKitDatabase: .none).url.deletingLastPathComponent()
+        let folders = (try? FileManager.default.contentsOfDirectory(at: support, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        return folders.filter { $0.lastPathComponent.hasPrefix(unreadablePrefix) }
+            .map { ($0, (try? $0.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast) }
+    }
+
+    /// The library in a store that was moved aside, to merge back into the current one. Throws if this version
+    /// can't open it either, which is why it was moved (a newer version's store, a damaged file): it opens once the
+    /// app has the migration it lacked. Opened from a copy: opening migrates, and a migration that fails halfway
+    /// mustn't be left in the only copy.
+    nonisolated static func backup(ofStoreIn folder: URL) throws -> LibraryBackup {
+        let manager = FileManager.default
+        let copy = URL.temporaryDirectory.appending(path: "restore-\(UUID().uuidString)")
+        try manager.copyItem(at: folder, to: copy)
+        defer { try? manager.removeItem(at: copy) }
+        let name = ModelConfiguration("ToWatchDB", cloudKitDatabase: .none).url.lastPathComponent
+        let configuration = ModelConfiguration(url: copy.appending(path: name), cloudKitDatabase: .none)
+        let container = try ModelContainer(for: ToWatchSchema.current, migrationPlan: ToWatchMigrationPlan.self,
+                                           configurations: configuration)
+        return try LibraryService.makeBackup(in: ModelContext(container))
+    }
+
     /// Moves the store and its journal files into a new folder next to it, returning the folder.
     private static func moveAside(_ store: URL) -> URL? {
         let manager = FileManager.default
         let folder = store.deletingLastPathComponent()
-            .appending(path: "ToWatchDB Unreadable \(Date.now.ISO8601Format().replacing(":", with: "."))")
+            .appending(path: "\(unreadablePrefix)\(Date.now.ISO8601Format().replacing(":", with: "."))")
         guard (try? manager.createDirectory(at: folder, withIntermediateDirectories: true)) != nil else { return nil }
         for suffix in ["", "-shm", "-wal"] {
             let file = URL(filePath: store.path() + suffix)

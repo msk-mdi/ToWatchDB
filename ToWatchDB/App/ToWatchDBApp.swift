@@ -239,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let appState = Self.appState, appState.hasUnsyncedChanges else { return .terminateNow }
+        guard let appState = Self.appState, appState.needsSyncBeforeQuit else { return .terminateNow }
         Task {
             await appState.syncBeforeQuit()
             sender.reply(toApplicationShouldTerminate: true)

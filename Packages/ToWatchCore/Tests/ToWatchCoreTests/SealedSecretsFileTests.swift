@@ -1,4 +1,5 @@
 #if os(macOS)
+import CryptoKit
 import Foundation
 import Testing
 @testable import ToWatchCore
@@ -33,6 +34,42 @@ struct SealedSecretsFileTests {
         #expect(try SealedSecretsFile(url: url).all().isEmpty)
         #expect(SealedSecretsFile(url: url).set("key", for: "omdb-api-key"))
         #expect(try SealedSecretsFile(url: url).all() == ["omdb-api-key": "key"])
+    }
+
+    /// A sealed file whose key the enclave won't load, as one sealed on another Mac (or the enclave failing).
+    private func writeRefusedFile(to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let envelope = ["enclaveKey": Data("another Mac's key".utf8),
+                        "ephemeralPublicKey": P256.KeyAgreement.PrivateKey().publicKey.x963Representation,
+                        "sealed": Data(count: 40)]
+        try JSONEncoder().encode(envelope).write(to: url)
+    }
+
+    @Test func aRefusedFileIsKeptAndItsSecretsComeBackWhenItOpens() throws {
+        let url = secretsURL(), kept = url.appendingPathExtension("unusable")
+        try writeRefusedFile(to: url)
+        let refused = try Data(contentsOf: url)
+        #expect(try SealedSecretsFile(url: url).all().isEmpty)
+        #expect(SealedSecretsFile(url: url).set("new", for: "omdb-api-key"))
+        #expect(SealedSecretsFile(url: url).set(nil, for: "seerr-auth"))
+        #expect(try Data(contentsOf: kept) == refused)
+        // Still refused: nothing comes back, and it stays.
+        #expect(try SealedSecretsFile(url: url).all() == ["omdb-api-key": "new"])
+        #expect(FileManager.default.fileExists(atPath: kept.path))
+
+        // The refusal was the enclave failing for once: the kept file opens now.
+        let other = secretsURL()
+        let old = SealedSecretsFile(url: other)
+        #expect(old.set("dropbox", for: "dropbox-refresh-token"))
+        #expect(old.set("old", for: "omdb-api-key"))
+        #expect(old.set("seerr", for: "seerr-auth"))
+        try FileManager.default.removeItem(at: kept)
+        try FileManager.default.copyItem(at: other, to: kept)
+        // What was saved or removed since keeps its value; the rest is back.
+        #expect(try SealedSecretsFile(url: url).all() == ["omdb-api-key": "new", "dropbox-refresh-token": "dropbox"])
+        #expect(!FileManager.default.fileExists(atPath: kept.path))
+        #expect(SealedSecretsFile(url: url).set("tmdb", for: "tmdb-read-token"))
+        #expect(try SealedSecretsFile(url: url).all().count == 3)
     }
 
     @Test func aFileThatCantBeReadIsNeitherEmptyNorOverwritten() throws {

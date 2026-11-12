@@ -101,6 +101,8 @@ private final class Device {
     let container: ModelContainer
     let sync: DropboxSync
     let token = TokenBox()
+    /// Where this device copies its library before a sync deletes a large part of it.
+    let copies: URL
     private(set) var version = 0
     private var observer: (any NSObjectProtocol)?
 
@@ -117,9 +119,10 @@ private final class Device {
                                       save: { value in token.value.withLock { $0 = value }; return true },
                                       delete: { token.value.withLock { $0 = nil }; return true })
         let folder = URL.temporaryDirectory.appending(path: "dropbox-sync-\(UUID().uuidString)")
+        copies = folder.appending(path: "Copies")
         sync = DropboxSync(client: DropboxClient(appKey: "test", session: URLSession(configuration: configuration)),
                            vault: vault, defaults: UserDefaults(suiteName: UUID().uuidString)!,
-                           baseURL: folder.appending(path: "Base.json"))
+                           baseURL: folder.appending(path: "Base.json"), copiesURL: copies)
         observer = NotificationCenter.default.addObserver(forName: ModelContext.didSave, object: container.mainContext,
                                                           queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?.version += 1 }
@@ -137,6 +140,10 @@ private final class Device {
     }
 
     func movie(_ id: Int) -> Movie? { library.movie(tmdbID: id) }
+
+    var movieIDs: [Int] {
+        ((try? container.mainContext.fetch(FetchDescriptor<Movie>())) ?? []).map(\.tmdbID).sorted()
+    }
 }
 
 private func reset() {
@@ -264,6 +271,46 @@ struct DropboxSyncTests {
         await sync.value
         #expect(fakeDropbox.count("/2/files/upload") == 1)
         #expect(!mac.sync.isConnected && mac.sync.lastError == nil)
+    }
+
+    @Test func theLibraryIsCopiedBeforeASyncDeletesALargePartOfIt() async throws {
+        reset()
+        let mac = try Device(), phone = try Device()
+        for id in 1...12 { mac.addMovie(id, "Movie \(id)") }
+        await mac.runSync()
+        await phone.runSync()
+        #expect(phone.movieIDs.count == 12)
+
+        // One title deleted elsewhere: no copy.
+        mac.library.delete(try #require(mac.movie(12)))
+        await mac.runSync()
+        await phone.runSync()
+        #expect(phone.movieIDs.count == 11)
+        #expect(LibraryCopies.all(in: phone.copies).isEmpty)
+
+        // Nearly all of them: the phone keeps what it had, and it merges back.
+        for id in 1...10 { mac.library.delete(try #require(mac.movie(id))) }
+        await mac.runSync()
+        await phone.runSync()
+        #expect(phone.sync.lastError == nil)
+        #expect(phone.movieIDs == [11])
+        let copy = try #require(LibraryCopies.all(in: phone.copies).first)
+        #expect(LibraryCopies.all(in: phone.copies).count == 1)
+        try phone.library.importBackup(LibraryCopies.load(copy))
+        #expect(phone.movieIDs.count == 11)
+    }
+
+    @Test func onlyTheLastLibraryCopiesAreKept() throws {
+        let mac = try Device()
+        for day in 1...5 {
+            mac.addMovie(day, "Movie \(day)")
+            try LibraryCopies.save(mac.library.makeBackup(), in: mac.copies, now: Date(timeIntervalSince1970: Double(day) * 86400))
+        }
+        let copies = LibraryCopies.all(in: mac.copies)
+        #expect(try copies.map { try LibraryCopies.load($0).movies.count } == [5, 4, 3])
+        #expect(!LibraryCopies.isLargeDeletion(9, of: 10))
+        #expect(!LibraryCopies.isLargeDeletion(20, of: 100))
+        #expect(LibraryCopies.isLargeDeletion(25, of: 100))
     }
 
     @Test func aFirstSyncLargerThanASliceAppliesWhole() async throws {

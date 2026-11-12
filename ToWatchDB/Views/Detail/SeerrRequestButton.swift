@@ -176,6 +176,11 @@ struct SeerrRequestButton: View {
             isRequesting = false
             guard status?.isInProgress == true, isActive else { return }
             try? await Task.sleep(for: .seconds(30))
+            #if os(macOS)
+            // Not while the app is behind others: a title page left open with a request in progress asked the
+            // server every 30 seconds for as long as the app ran. It asks again when the app comes back.
+            while !NSApp.isActive, !Task.isCancelled { try? await Task.sleep(for: .seconds(5)) }
+            #endif
         }
     }
 

@@ -10,14 +10,13 @@ struct CollectionMenus: View {
     let title: LibraryTitle
     let spaces: [Space]
     let tags: [MediaTag]
+    /// The spaces and tags the title is in, from its parent too (a grid reads `CollectionMemberships` once for all
+    /// its cards): macOS draws these menus for every poster, reading each title's own spaces and tags loaded two
+    /// relationships per poster, and reading the shared map here tied every menu to every save.
+    let inSpaces: Set<PersistentIdentifier>
+    let inTags: Set<PersistentIdentifier>
 
     var body: some View {
-        // Memberships read from the few spaces and tags, once per save for every menu, and the library service made
-        // only when a toggle runs: macOS draws these for every poster in a grid, and reading each title's own
-        // spaces and tags loaded two relationships per poster.
-        let memberships = appState.cached("collection-memberships") { CollectionMemberships(spaces: spaces, tags: tags) }
-        let inSpaces = memberships.spaces[title.persistentModelID] ?? []
-        let inTags = memberships.tags[title.persistentModelID] ?? []
         Menu("Spaces", systemImage: "square.stack") {
             ForEach(spaces) { space in
                 Toggle(isOn: Binding(get: { inSpaces.contains(space.persistentModelID) },
@@ -40,9 +39,12 @@ struct CollectionMenus: View {
 }
 
 /// The spaces and tags each title is in, keyed by title. Every caller passes every space and tag.
-private struct CollectionMemberships {
-    var spaces: [PersistentIdentifier: Set<PersistentIdentifier>] = [:]
-    var tags: [PersistentIdentifier: Set<PersistentIdentifier>] = [:]
+struct CollectionMemberships {
+    private var spaces: [PersistentIdentifier: Set<PersistentIdentifier>] = [:]
+    private var tags: [PersistentIdentifier: Set<PersistentIdentifier>] = [:]
+
+    func spaces(of title: LibraryTitle) -> Set<PersistentIdentifier> { spaces[title.persistentModelID] ?? [] }
+    func tags(of title: LibraryTitle) -> Set<PersistentIdentifier> { tags[title.persistentModelID] ?? [] }
 
     init(spaces: [Space], tags: [MediaTag]) {
         for space in spaces where space.isLive {
@@ -65,6 +67,13 @@ private extension LibraryTitle {
         case let .show(show): show.persistentModelID
         }
     }
+
+    var isLive: Bool {
+        switch self {
+        case let .movie(movie): movie.isLive
+        case let .show(show): show.isLive
+        }
+    }
 }
 
 /// Spaces and tags section on a detail page.
@@ -75,14 +84,18 @@ struct CollectionsSection: View {
     let title: LibraryTitle
 
     var body: some View {
-        let spaces = title.spaces.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        let tags = title.tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        // Its queries redraw it on their own, before the page above notices a sync deleted the title: a deleted
+        // model can't be read.
+        let isLive = title.isLive
+        let spaces = isLive ? title.spaces.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : []
+        let tags = isLive ? title.tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : []
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Spaces & Tags").font(.title3.bold())
                 Spacer()
                 Menu {
-                    CollectionMenus(title: title, spaces: allSpaces, tags: allTags)
+                    CollectionMenus(title: title, spaces: allSpaces, tags: allTags,
+                                    inSpaces: Set(spaces.map(\.persistentModelID)), inTags: Set(tags.map(\.persistentModelID)))
                 } label: {
                     Label("Organize", systemImage: "square.stack.3d.up")
                 }

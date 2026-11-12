@@ -153,8 +153,23 @@ public struct SeerrClient: Sendable {
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: RedirectPolicy(), delegateQueue: nil)
     }()
+
+    /// Follows a redirect only for a read, and only to the same host. URLSession repeats a redirected POST as a
+    /// GET: behind a proxy that redirects (http to https, say), a request answered with the list of requests and
+    /// looked sent when it wasn't. And the API key or session cookie went along to whatever host the redirect named.
+    /// A refused redirect comes back as the 3xx answer, which is an error here.
+    private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? {
+            let method = task.originalRequest?.httpMethod ?? "GET"
+            guard method == "GET" || method == "HEAD",
+                  let from = task.originalRequest?.url?.host(), let to = request.url?.host(),
+                  from.caseInsensitiveCompare(to) == .orderedSame else { return nil }
+            return request
+        }
+    }
 
     /// Signs in with an account and returns a client that acts as it. The password is only sent to the server.
     public static func signIn(server: String, with login: SeerrLogin,

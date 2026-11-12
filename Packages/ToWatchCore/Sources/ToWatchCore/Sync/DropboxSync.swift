@@ -449,7 +449,12 @@ public final class DropboxSync {
     private func saveBase(_ data: Data, rev: String?, session: Int) async throws {
         let written = try await Self.offMain { [baseURL] in
             try? FileManager.default.createDirectory(at: baseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            return (try? data.write(to: baseURL, options: .atomic)) != nil
+            if (try? data.write(to: baseURL, options: .atomic)) != nil { return true }
+            // Not the last sync's base left in its place (a full disk): the next sync would merge against a library
+            // older than the file it just took in, and undo other devices' newer edits. Without one it merges as a
+            // first sync, which deletes nothing.
+            try? FileManager.default.removeItem(at: baseURL)
+            return false
         }
         guard session == self.session else {
             // Disconnecting removed the base before this write landed; it belongs to the old sign-in.

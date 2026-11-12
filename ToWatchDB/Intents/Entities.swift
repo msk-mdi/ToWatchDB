@@ -35,7 +35,10 @@ struct MovieQuery: EntityStringQuery {
     func entities(matching string: String) async throws -> [MovieEntity] {
         try await MainActor.run {
             // Matched in the store instead of loading every movie.
-            let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.title.localizedStandardContains(string) })
+            // Shortcuts asks while the user types, and one letter matched most of the library.
+            var descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.title.localizedStandardContains(string) },
+                                                    sortBy: [SortDescriptor(\.title)])
+            descriptor.fetchLimit = 50
             let context = try SharedLibrary.unlockedContainer.mainContext
             return ((try? context.fetch(descriptor)) ?? []).map(MovieEntity.init)
         }
@@ -85,13 +88,21 @@ struct ShowQuery: EntityStringQuery {
     func entities(for identifiers: [Int]) async throws -> [ShowEntity] {
         try await MainActor.run {
             let library = try SharedLibrary.service
-            return identifiers.compactMap { library.show(tmdbID: $0).map { ShowEntity($0) } }
+            // From the progress map when it's built, like `entities(matching:)`: each show walked its episodes.
+            let progress = AppState.shared?.showProgressIfReady()
+            return identifiers.compactMap { id in
+                library.show(tmdbID: id).map { show in
+                    progress.map { ShowEntity(show, next: $0[show.persistentModelID]?.nextEpisode) } ?? ShowEntity(show)
+                }
+            }
         }
     }
 
     func entities(matching string: String) async throws -> [ShowEntity] {
         try await MainActor.run {
-            let descriptor = FetchDescriptor<TVShow>(predicate: #Predicate { $0.name.localizedStandardContains(string) })
+            var descriptor = FetchDescriptor<TVShow>(predicate: #Predicate { $0.name.localizedStandardContains(string) },
+                                                     sortBy: [SortDescriptor(\.name)])
+            descriptor.fetchLimit = 50
             let context = try SharedLibrary.unlockedContainer.mainContext
             let shows = (try? context.fetch(descriptor)) ?? []
             // The next episode from the app's progress map, or none (the year instead): Shortcuts asks while the user

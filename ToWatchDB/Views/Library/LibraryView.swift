@@ -93,6 +93,9 @@ struct LibraryView: View {
             if !items.isEmpty {
                 // Fetched once here for every card's context menu, instead of two queries per card.
                 let menuSpaces = spaces, menuTags = tags
+                let memberships = appState.cached("collection-memberships", allowStale: allowsStale) {
+                    CollectionMemberships(spaces: spaces, tags: tags)
+                }
                 PosterGrid {
                     if sort == .genre {
                         // A section per genre; each title appears once, under its main genre.
@@ -100,7 +103,9 @@ struct LibraryView: View {
                             Section {
                                 ForEach(section.items) { item in
                                     LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
-                                                      spaces: menuSpaces, tags: menuTags)
+                                                      spaces: menuSpaces, tags: menuTags,
+                                                      inSpaces: memberships.spaces(of: item.libraryTitle),
+                                                      inTags: memberships.tags(of: item.libraryTitle))
                                 }
                             } header: {
                                 GenreHeader(title: section.genre ?? "No Genre", count: section.items.count)
@@ -109,7 +114,9 @@ struct LibraryView: View {
                     } else {
                         ForEach(items) { item in
                             LibraryPosterCard(item: item, progress: showProgress(for: item, in: progress),
-                                              spaces: menuSpaces, tags: menuTags)
+                                              spaces: menuSpaces, tags: menuTags,
+                                              inSpaces: memberships.spaces(of: item.libraryTitle),
+                                              inTags: memberships.tags(of: item.libraryTitle))
                         }
                     }
                 }
@@ -480,6 +487,9 @@ struct LibraryPosterCard: View {
     let progress: ShowProgress?
     let spaces: [Space]
     let tags: [MediaTag]
+    /// The spaces and tags the title is in, for the menu's checkmarks.
+    let inSpaces: Set<PersistentIdentifier>
+    let inTags: Set<PersistentIdentifier>
     @State private var confirmDelete = false
 
     var body: some View {
@@ -562,7 +572,7 @@ struct LibraryPosterCard: View {
             }
         }
         Divider()
-        CollectionMenus(title: item.libraryTitle, spaces: spaces, tags: tags)
+        CollectionMenus(title: item.libraryTitle, spaces: spaces, tags: tags, inSpaces: inSpaces, inTags: inTags)
         OpenInNewWindowButton(reference: item.reference)
         Button("Remove from Library…", systemImage: "trash", role: .destructive) { confirmDelete = true }
     }

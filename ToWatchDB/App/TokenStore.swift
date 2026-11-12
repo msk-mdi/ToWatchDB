@@ -87,7 +87,13 @@ enum SecretStore {
         // launch: an account that isn't set was looked up in the Keychain on every read.
         guard checkedKeychain.withLock({ $0.insert(account).inserted }),
               let value = try? Keychain.read(account) else { return nil }
-        if EnclaveSecrets.set(value, for: account) { Keychain.delete(account) }
+        if EnclaveSecrets.set(value, for: account) {
+            Keychain.delete(account)
+        } else {
+            // Not moved: looked for again at the next read. Marked as checked, the next read found nothing and
+            // took the account for signed out (Dropbox then disconnected and deleted the item).
+            _ = checkedKeychain.withLock { $0.remove(account) }
+        }
         return value
         #else
         try Keychain.read(account)

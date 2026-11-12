@@ -235,9 +235,12 @@ public struct LibraryService {
     /// this is two rounds of timeouts.
     static let unansweredLimit = 8
 
-    /// Whether a download failed without an answer from TMDB: a network error or a cancelled task.
+    /// Whether a download failed without an answer from TMDB about the title: a network error, a cancelled task,
+    /// or TMDB still rate limiting (429) or failing (5xx), which says nothing about the title either. Counted as
+    /// answered, those waited an hour for the next refresh instead of the next activation.
     static func isUnreachable<T>(_ result: Result<T, any Error>) -> Bool {
         guard case let .failure(error) = result else { return false }
+        if case let TMDBError.http(status, _) = error { return status == 429 || status >= 500 }
         return error is URLError || error is CancellationError
     }
 

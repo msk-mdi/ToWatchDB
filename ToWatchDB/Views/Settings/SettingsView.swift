@@ -100,13 +100,7 @@ struct SettingsView: View {
             seerrSection
 
             Section("Library") {
-                // Counted in the store instead of loading every title; recounted after each save.
-                let counts = appState.cached("library-counts") {
-                    ((try? context.fetchCount(FetchDescriptor<Movie>())) ?? 0,
-                     (try? context.fetchCount(FetchDescriptor<TVShow>())) ?? 0)
-                }
-                LabeledContent("Movies", value: counts.0.formatted())
-                LabeledContent("TV Shows", value: counts.1.formatted())
+                LibraryCounts()
                 HStack {
                     Button("Refresh All Titles") { Task { await appState.refreshLibrary(force: true) } }
                         .disabled(appState.isRefreshing || appState.client == nil)
@@ -680,3 +674,20 @@ private struct SettingsWindowSetup: View {
     var body: some View { EmptyView() }
 }
 #endif
+
+/// How many movies and shows the library holds. Its own view: read in the form, the counts tied all of Settings
+/// (the country list, the icon grid) to every save, and an import started from here saves many times.
+private struct LibraryCounts: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.modelContext) private var context
+
+    var body: some View {
+        // Counted in the store instead of loading every title; recounted after each save.
+        let counts = appState.cached("library-counts") {
+            ((try? context.fetchCount(FetchDescriptor<Movie>())) ?? 0,
+             (try? context.fetchCount(FetchDescriptor<TVShow>())) ?? 0)
+        }
+        LabeledContent("Movies", value: counts.0.formatted())
+        LabeledContent("TV Shows", value: counts.1.formatted())
+    }
+}

@@ -609,7 +609,8 @@ the local date.
 - **Core (`SeerrClient.swift`):** signs in to a Seerr, Overseerr, or Jellyseerr server with a Jellyfin or Emby
   account, a Seerr account (both keep a session cookie), or the server's API key. `title(_:tmdbID:)` reads a
   title's availability, per-season state, and open requests; `request` and `deleteRequest` change them. Cookies
-  stay out of the shared cookie storage. `normalizedURL` cleans a typed address: without a scheme it uses
+  stay out of the shared cookie storage. Its session follows a redirect only for a read and only to the same host
+  (`RedirectPolicy`): a redirected POST is repeated as a GET, which made a request look sent. `normalizedURL` cleans a typed address: without a scheme it uses
   `http://` for home-network addresses (an IP, a `.local` or single-label name, which App Transport Security
   allows over http) and `https://` for anything else. When App Transport Security still refuses plain http (say,
   `http://oracle.lan`), `SeerrError.insecureConnection` suggests the one-word name or the IP instead.
@@ -617,7 +618,7 @@ the local date.
 - **`SeerrRequestButton`** on each title page shows Request on Seerr (a season picker for shows), Requested on
   Seerr, or Watch Now, with a Delete Request button per request. While a request is in progress it checks the
   status every 30 seconds, but only on the visible page. After a request or deletion its buttons stay disabled
-  until the new status loads. A check that gets no answer at all (a `URLError`, like a home server away from home)
+  until the new status loads. On Mac the check also waits while the app is behind others. A check that gets no answer at all (a `URLError`, like a home server away from home)
   makes every page skip its check for 5 minutes (`AppState.isSeerrUnreachable`); Test Connection and signing in
   clear it. The season sheet shows the status it was opened with, so a failed check can't
   empty it.

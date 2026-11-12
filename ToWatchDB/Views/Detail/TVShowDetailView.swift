@@ -244,7 +244,9 @@ private struct EpisodeList: View {
             (try? LibraryService.episodesWithNotes(in: appState.container.mainContext)) ?? []
         }
         LazyVStack(spacing: 0) {
-            ForEach(episodes) { episode in
+            // This list redraws after every save, on its own: before the page notices a sync deleted the show, its
+            // episodes are deleted too, and a deleted model can't be read.
+            ForEach(episodes.filter(\.isLive)) { episode in
                 EpisodeRow(episode: episode, hasNotes: noted.contains(episode.persistentModelID),
                            onNotes: { onNotes(episode) })
                 Divider()
